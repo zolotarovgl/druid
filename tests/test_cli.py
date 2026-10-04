@@ -371,7 +371,9 @@ def _submit_two_align(cli):
 
 
 def _row(output, jid="12345"):
-    return next(l.split() for l in output.splitlines() if jid in l.split())
+    """Summary row tokens without the trailing progress bar."""
+    toks = next(l.split() for l in output.splitlines() if jid in l.split())
+    return toks[:-1] if set(toks[-1]) <= set("█×▓░") else toks
 
 
 def test_jobs_counts_from_sacct(cli, monkeypatch):
@@ -502,3 +504,18 @@ def test_jobs_unknown_jobid(cli):
     _submit_two_align(cli)
     r = cli(["jobs", "999"])
     assert r.exit_code == 1 and "999" in r.output
+
+
+def test_jobs_summary_has_fraction_bar(cli, monkeypatch):
+    _submit_two_align(cli)
+    monkeypatch.setenv("FAKE_SACCT", "12345_0|FAILED\\n12345_1|RUNNING\\n")
+    line = next(l for l in cli(["jobs"]).output.splitlines() if "12345" in l.split())
+    bar = line.split()[-1]
+    assert bar == "×" * 10 + "▓" * 10                 # failed 1 of 2, running 1 of 2 (width 20)
+
+
+def test_jobs_summary_bar_done_and_pending(cli, monkeypatch):
+    _submit_two_align(cli)
+    monkeypatch.setenv("FAKE_SACCT", "12345_0|COMPLETED\\n")     # task 1 not reported -> pending
+    bar = next(l for l in cli(["jobs"]).output.splitlines() if "12345" in l.split()).split()[-1]
+    assert bar == "█" * 10 + "░" * 10
