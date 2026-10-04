@@ -466,3 +466,39 @@ def test_run_config_always_written(cli):
     run = _dry_run_dir("align")
     assert (run / "config.yaml").exists()
     assert "export PHYLOCLI_CONFIG=" in (run / "array_0.sbatch").read_text()
+
+
+def _task_rows(output):
+    return {l.split()[1]: l.split() for l in output.splitlines()
+            if l.split() and l.split()[0].isdigit() and "·" not in l}
+
+
+def test_jobs_jobid_lists_tasks_with_hgs(cli, monkeypatch):
+    _submit_two_align(cli)        # task 0 = tfs.A.HG11, task 1 = tfs.C_x.HG1
+    monkeypatch.setenv("FAKE_SACCT", "12345_0|COMPLETED\\n12345_1|RUNNING\\n")
+    r = cli(["jobs", "12345"])
+    assert r.exit_code == 0, r.output
+    rows = _task_rows(r.output)
+    assert rows["tfs.A.HG11"][:3] == ["0", "tfs.A.HG11", "COMPLETED"]
+    assert rows["tfs.C_x.HG1"][:3] == ["1", "tfs.C_x.HG1", "RUNNING"]
+    assert "align_12345_1.err" in r.output
+
+
+def test_jobs_jobid_filters(cli, monkeypatch):
+    _submit_two_align(cli)
+    monkeypatch.setenv("FAKE_SACCT", "12345_0|COMPLETED\\n12345_1|TIMEOUT\\n")
+    assert list(_task_rows(cli(["jobs", "12345", "--failed"]).output)) == ["tfs.C_x.HG1"]
+    assert list(_task_rows(cli(["jobs", "12345", "--running"]).output)) == []
+
+
+def test_jobs_jobid_pending_when_not_in_sacct(cli, monkeypatch):
+    _submit_two_align(cli)
+    monkeypatch.setenv("FAKE_SACCT", "")
+    rows = _task_rows(cli(["jobs", "12345"]).output)
+    assert rows["tfs.A.HG11"][2] == "PENDING" and rows["tfs.C_x.HG1"][2] == "PENDING"
+
+
+def test_jobs_unknown_jobid(cli):
+    _submit_two_align(cli)
+    r = cli(["jobs", "999"])
+    assert r.exit_code == 1 and "999" in r.output

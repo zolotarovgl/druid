@@ -59,6 +59,7 @@ phylocli/phylo submit tree tfs.FAR_FHY3.HG1 tfs.Runt_Runx.HG1
 phylocli/phylo submit align --ids ids.new.txt
 phylocli/phylo jobs                               # pending/running/done/failed per submission
 phylocli/phylo jobs --failed                      # failed HGs + state + .err log
+phylocli/phylo jobs 29318676                      # one array: task | HG | state | log (--failed, --running)
 ```
 
 ## `status HG`: job history (added 02/10/2026)

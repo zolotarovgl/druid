@@ -553,14 +553,20 @@ def _submissions(stage: str | None, last: int) -> list[tuple[Path, str, str, Pat
 
 
 @app.command()
-def jobs(stage: str = typer.Option(None, "--stage", help="only submissions of this stage"),
+def jobs(job_id: str = typer.Argument(None, help="array job id: list its tasks with their HG ids"),
+         stage: str = typer.Option(None, "--stage", help="only submissions of this stage"),
          last: int = typer.Option(10, "--last", min=1, help="newest N submissions"),
          failed: bool = typer.Option(False, "--failed",
-                                     help="list failed HGs with their state and .err log")):
-    """Submitted arrays with pending / running / done / failed task counts (via sacct)."""
+                                     help="list failed HGs with their state and .err log"),
+         running: bool = typer.Option(False, "--running", help="with JOB_ID: only running tasks")):
+    """Submitted arrays with pending / running / done / failed task counts (via sacct).
+    With JOB_ID: one row per array task — task index, HG id, state, log."""
     from rich.console import Console
     from rich.table import Table
 
+    if job_id is not None:
+        _job_tasks(job_id, failed, running)
+        return
     subs = _submissions(stage, last)
     if not subs:
         typer.echo("no submissions in " + str(_runs_dir()))
@@ -594,11 +600,43 @@ def jobs(stage: str = typer.Option(None, "--stage", help="only submissions of th
     con.print(t)
 
 
+STATE_COLOUR = {"pending": "yellow", "running": "cyan", "done": "green", "failed": "red"}
+
+
+def _job_tasks(job_id: str, failed: bool, running: bool):
+    """One row per task of one array job: SLURM shows a single name for the whole array, so
+    the HG of task i is read from line i+1 of the ids file the array was submitted with."""
+    from rich.console import Console
+    from rich.table import Table
+
+    sub = next((s for s in _submissions(None, 10 ** 6) if s[2] == job_id), None)
+    if sub is None:
+        _fail(f"job {job_id} is not a phylocli submission in {_runs_dir()}", 1)
+    run, st, jid, ids_file = sub
+    hgs = core.read_ids(ids_file) if ids_file.is_file() else []
+    states = _task_states([jid])
+    con = Console(highlight=False)
+    if states is None:
+        con.print("[yellow]sacct not on PATH: task states unknown[/]")
+    t = Table(box=None, header_style="bold")
+    for col in ("task", "HG", "state", "log"):
+        t.add_column(col)
+    for i, hg in enumerate(hgs):
+        state = (states or {}).get(jid, {}).get(i, "PENDING" if states is not None else "?")
+        cat = _category(state) if states is not None else None
+        if (failed and cat != "failed") or (running and cat != "running"):
+            continue
+        shown = f"[{STATE_COLOUR[cat]}]{state}[/]" if cat else state
+        t.add_row(str(i), hg, shown, f"{st}_{jid}_{i}.err")
+    con.print(f"[bold]{jid}[/] · {st} · {len(hgs)} HGs · logs in {run / 'logs'}", soft_wrap=True)
+    con.print(t)
+
+
 @app.command("queue", hidden=True)
 def queue(stage: str = typer.Option(None, "--stage"), last: int = typer.Option(10, "--last"),
           failed: bool = typer.Option(False, "--failed")):
     """Old name of `jobs`."""
-    jobs(stage=stage, last=last, failed=failed)
+    jobs(job_id=None, stage=stage, last=last, failed=failed, running=False)
 
 
 @app.command("_run", hidden=True)
