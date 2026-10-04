@@ -1,0 +1,468 @@
+import os
+import stat
+import tempfile
+
+import pytest
+from typer.testing import CliRunner
+
+from phylocli import phylo as cli_mod
+
+_state = {}
+
+
+def calls_txt():
+    return _state["bin"] / "calls.txt"
+
+
+def runs_dir():
+    return _state["runs"]
+
+
+def dry_dir():
+    return _state["dry"]
+
+
+@pytest.fixture
+def cli(results_tree, tmp_path, monkeypatch):
+    cfg, root = results_tree
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "sbatch").write_text(f'#!/bin/sh\necho "$@" >> {bindir}/calls.txt\necho 12345\n')
+    (bindir / "squeue").write_text('#!/bin/sh\nprintf "%s" "${FAKE_SQUEUE:-}"\n')
+    (bindir / "sacct").write_text('#!/bin/sh\nprintf "%b" "${FAKE_SACCT:-}"\n')
+    for t in "mafft clipkit iqtree2 generax mpirun".split():
+        (bindir / t).write_text("#!/bin/sh\nexit 0\n")
+    (bindir / "python").write_text(
+        '#!/bin/sh\n[ "$PYTHONNOUSERSITE" = 1 ] || { echo "PYTHONNOUSERSITE unset" >&2; exit 3; }\n'
+        'if [ -n "$FAKE_PY_FAIL" ]; then echo "ModuleNotFoundError: No module named ete3" >&2; exit 1; fi\n'
+        'echo "$@" >> ' + str(bindir) + '/pycalls.txt\nexit 0\n')
+    for p in bindir.iterdir():
+        p.chmod(p.stat().st_mode | stat.S_IXUSR)
+    runs = tmp_path / "runs"
+    tmpd = tmp_path / "tmp"
+    tmpd.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(tmpd))
+    _state.update({"bin": bindir, "runs": runs, "dry": tmpd / "phylocli-dryrun"})
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("PHYLOCLI_CONFIG", str(root / "config.yaml"))
+    monkeypatch.setenv("PHYLOCLI_RUNS", str(runs))
+    monkeypatch.setenv("FAKE_SQUEUE", "")
+    runner = CliRunner()
+    return lambda args: runner.invoke(cli_mod.app, args)
+
+
+def test_submit_refuses_existing_output(cli):
+    r = cli(["submit", "align", "tfs.A.HG1", "tfs.A.HG11"])
+    assert r.exit_code == 2 and "output_exists" in r.output and "tfs.A.HG1" in r.output
+    assert not calls_txt().exists()
+    assert not runs_dir().exists() or not list(runs_dir().glob("*"))
+
+
+def test_submit_missing_dry_run(cli):
+    r = cli(["submit", "align", "--missing", "--dry-run"])
+    assert r.exit_code == 0 and "tfs.A.HG11" in r.output and "tfs.C_x.HG1" in r.output
+    assert "dry run" in r.output and "nothing submitted (dry run)" in r.output
+    row = next(l.split() for l in r.output.splitlines() if l.split()[:2] == ["0", "2"])
+    assert row[2:] == ["4", "4.0", "GB", "4h", "normal", "–"]      # cpus, memory, time, qos, signal
+    assert "array 0: tfs.A.HG11, tfs.C_x.HG1" in r.output
+    assert not calls_txt().exists()
+    run = next(dry_dir().glob("*_align"))
+    assert (run / "ids_0.txt").read_text().split() == ["tfs.A.HG11", "tfs.C_x.HG1"]
+    assert (run / "array_0.sbatch").exists()
+
+
+def test_submit_real_writes_jobs_tsv(cli):
+    r = cli(["submit", "align", "tfs.A.HG11"])
+    assert r.exit_code == 0 and "--parsable" in calls_txt().read_text()
+    run = next(runs_dir().glob("*_align"))
+    assert (run / "jobs.tsv").read_text().startswith("12345\t")
+    assert (run / "ids_0.txt").read_text().split() == ["tfs.A.HG11"]
+
+
+def test_submit_all_refuses_already_queued(cli, monkeypatch):
+    cli(["submit", "align", "tfs.A.HG11"])
+    monkeypatch.setenv("FAKE_SQUEUE", "12345 phylo-align\n")
+    r = cli(["submit", "align", "tfs.A.HG11", "--all"])
+    assert r.exit_code == 2 and "queued" in r.output
+
+
+def test_missing_lists_ids(cli):
+    r = cli(["missing", "align"])
+    assert r.output.split() == ["tfs.A.HG11", "tfs.C_x.HG1"]
+
+
+def test_selection_is_exclusive(cli):
+    assert cli(["submit", "align", "--missing", "tfs.A.HG11"]).exit_code != 0
+    assert cli(["submit", "align"]).exit_code != 0
+
+
+def test_sbatch_script_content(cli, results_tree):
+    cfg, _ = results_tree
+    (cfg.outdir / "align/tfs.A.HG11.aln.fasta").write_text(">a\nAA\n")
+    r = cli(["submit", "tree", "tfs.A.HG11", "--dry-run"])
+    assert r.exit_code == 0, r.output
+    s = next(dry_dir().glob("*_tree")).joinpath("array_0.sbatch").read_text()
+    assert "#SBATCH --signal=B:USR2@180" in s and "#SBATCH --mem=800M" in s and "#SBATCH --time=1140" in s  # resources.tsv row
+    assert "#SBATCH --job-name=phylo-tree" in s and "--array=0-0%50" in s
+    assert "kill -USR2 $PID" in s and "_run tree" in s
+
+
+def test_missing_tool_is_error(cli, monkeypatch, tmp_path):
+    (_state["bin"] / "mafft").unlink()
+    monkeypatch.setenv("PATH", str(_state["bin"]))
+    r = cli(["submit", "align", "tfs.A.HG11", "--dry-run"])
+    assert r.exit_code != 0 and "mafft" in r.output and "conda activate phylo" in r.output
+
+
+def test_squeue_absent_only_ok_for_dry_run(cli, monkeypatch):
+    (_state["bin"] / "squeue").unlink()
+    monkeypatch.setenv("PATH", str(_state["bin"]) + os.pathsep + "/usr/nonexistent")
+    # python3 must stay findable for nothing here: align needs only mafft/clipkit
+    r = cli(["submit", "align", "tfs.A.HG11"])
+    assert r.exit_code != 0 and "squeue" in r.output
+    assert not calls_txt().exists()
+    assert cli(["submit", "align", "tfs.A.HG11", "--dry-run"]).exit_code == 0
+
+
+def test_status_prints_bars_not_table(cli):
+    r = cli(["status"])
+    assert r.exit_code == 0 and "HGs done" in r.output
+    assert "TOTAL" not in r.output and "category" not in r.output
+    assert any(l.split()[:1] == ["align"] for l in r.output.splitlines())
+
+
+def _total(output, stage="align"):
+    line = next(l for l in output.splitlines() if l.split()[:1] == [stage])
+    return int(line.split()[4])
+
+
+def test_status_fam_filters_by_whole_id_parts(cli):
+    assert _total(cli(["status"]).output) == 3
+    assert _total(cli(["status", "--fam", "tfs"]).output) == 3
+    assert _total(cli(["status", "--fam", "tfs.A"]).output) == 2      # HG1, HG11
+    assert _total(cli(["status", "-f", "tfs.C_x"]).output) == 1
+
+
+def test_status_fam_no_partial_part_match(cli):
+    r = cli(["status", "--fam", "tfs.C"])                              # must not match tfs.C_x
+    assert r.exit_code == 1 and "no HGs match" in r.output
+
+
+def test_missing_fam(cli, results_tree):
+    _align_hg11(results_tree)
+    assert cli(["missing", "align", "--all", "--fam", "tfs.C_x"]).output.split() == ["tfs.C_x.HG1"]
+    assert _total(cli(["missing", "--fam", "tfs.A"]).output, "tree") == 2
+
+
+def test_run_hidden_command(cli, results_tree, monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(cli_mod, "run_one",
+                        lambda cfg, stage, hg, work: seen.update(a=(stage, hg, work)) or 65)
+    r = cli(["_run", "align", "tfs.A.HG11", "--run-dir", str(tmp_path / "rd")])
+    assert r.exit_code == 65 and seen["a"] == ("align", "tfs.A.HG11", tmp_path / "rd" / "work")
+
+
+def test_preflight_python_import_fails(cli, monkeypatch):
+    monkeypatch.setenv("FAKE_PY_FAIL", "1")
+    r = cli(["submit", "align", "tfs.A.HG11", "--dry-run"])
+    assert r.exit_code != 0 and "ete3" in r.output and "python" in r.output
+    assert "conda activate phylo" in r.output
+    assert not runs_dir().exists() or not list(runs_dir().glob("*"))
+    assert not calls_txt().exists()
+
+
+def test_preflight_python_import_ok_sets_nousersite(cli):
+    r = cli(["submit", "align", "tfs.A.HG11", "--dry-run"])
+    assert r.exit_code == 0, r.output
+    assert "import ete3, Bio, yaml" in (_state["bin"] / "pycalls.txt").read_text()
+
+
+def test_preflight_skips_python_for_gxsup(cli, monkeypatch):
+    monkeypatch.setenv("FAKE_PY_FAIL", "1")
+    cli_mod._preflight("gxsup")  # must not exit
+
+
+def test_chunks_of_1000():
+    ids = [f"hg{i}" for i in range(2500)]
+    ch = cli_mod._chunks(ids)
+    assert [len(c) for c in ch] == [1000, 1000, 500]
+    assert [x for c in ch for x in c] == ids
+    assert cli_mod._chunks(ids[:1000]) == [ids[:1000]] and cli_mod._chunks([]) == []
+
+
+def _align_hg11(results_tree):
+    cfg, _ = results_tree
+    (cfg.outdir / "align" / "tfs.A.HG11.aln.fasta").write_text(">a\nMK\n>b\nMK\n")
+
+
+def test_missing_default_is_ready_all_lists_everything(cli, results_tree):
+    _align_hg11(results_tree)
+    assert cli(["missing", "tree"]).output.split() == ["tfs.A.HG11"]
+    assert cli(["missing", "tree", "--all"]).output.split() == ["tfs.A.HG11", "tfs.C_x.HG1"]
+
+
+def test_submit_missing_skips_unready_by_default(cli, results_tree):
+    _align_hg11(results_tree)
+    r = cli(["submit", "tree", "--missing", "--dry-run"])
+    assert r.exit_code == 0, r.output
+    assert "skipped 1 HGs without inputs" in r.output
+    run = next(dry_dir().glob("*_tree"))
+    assert (run / "ids_0.txt").read_text().split() == ["tfs.A.HG11"]
+
+
+def test_submit_all_is_strict(cli, results_tree):
+    _align_hg11(results_tree)
+    r = cli(["submit", "tree", "--missing", "--all", "--dry-run"])
+    assert r.exit_code == 2 and "input_missing" in r.output
+
+
+def test_submit_nothing_ready(cli):
+    r = cli(["submit", "tree", "--missing", "--dry-run"])
+    assert r.exit_code == 0 and "nothing to submit" in r.output
+    assert not runs_dir().exists() or not list(runs_dir().glob("*"))
+
+
+def test_submit_skips_queued_by_default(cli, results_tree, monkeypatch):
+    _align_hg11(results_tree)
+    assert cli(["submit", "tree", "tfs.A.HG11"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SQUEUE", "12345 phylo-tree\n")
+    r = cli(["submit", "tree", "--missing"])
+    assert r.exit_code == 0 and "skipped 1 HGs already queued" in r.output
+    assert "nothing to submit" in r.output
+
+
+def test_existing_output_still_refused_by_default(cli):
+    r = cli(["submit", "align", "tfs.A.HG1"])
+    assert r.exit_code == 2 and "output_exists" in r.output
+
+
+def test_missing_without_stage_prints_summary(cli, results_tree):
+    _align_hg11(results_tree)
+    r = cli(["missing"])
+    assert r.exit_code == 0, r.output
+    rows = {l.split()[0]: l.split()[1:5] for l in r.output.splitlines()[1:] if l.strip()}
+    # 3 expected HGs; align: HG1 done, HG11 has align (fixture) -> done too; C_x ready (clusters exist)
+    assert rows["align"] == ["2", "1", "0", "3"]
+    # tree: HG1 done; HG11 ready (alignment); C_x blocked (no alignment)
+    assert rows["tree"] == ["1", "1", "1", "3"]
+    assert "\x1b[" not in r.output          # no colour codes when not a terminal
+    assert all(len(l) > 40 for l in r.output.splitlines()[1:] if l.strip())   # bar present
+
+
+def test_ready_set_matches_inputs_ready(results_tree):
+    from phylocli import core
+    cfg, _ = results_tree
+    _align_hg11(results_tree)
+    hgs = sorted(core.expected(cfg))
+    for st in core.STAGES:
+        if core.applicable(cfg, st):
+            assert core.ready_set(cfg, st, hgs) == {h for h in hgs if core.inputs_ready(cfg, st, h)}
+
+
+def _bar_of(output, stage):
+    line = next(l for l in output.splitlines() if l.split() and l.split()[0] == stage)
+    return line[line.index(line.split()[4]) + len(line.split()[4]) + 2:]
+
+
+def test_status_appends_stage_summary(cli, results_tree):
+    _align_hg11(results_tree)
+    r = cli(["status"])
+    assert r.exit_code == 0 and "HGs done" in r.output
+    bar = _bar_of(r.output, "tree")                  # tree: done 1, ready 1, blocked 1
+    assert bar == "█" * 10 + "▓" * 10 + "░" * 10
+
+
+def test_missing_summary_blank_done_green_ready(cli, results_tree):
+    _align_hg11(results_tree)
+    bar = _bar_of(cli(["missing"]).output, "tree")
+    assert bar == " " * 10 + "█" * 10 + "░" * 10
+
+
+def test_submit_missing_fam(cli, results_tree):
+    r = cli(["submit", "align", "--missing", "-f", "tfs.C_x", "--dry-run"])
+    assert r.exit_code == 0, r.output
+    run = next(dry_dir().glob("*_align"))
+    assert (run / "ids_0.txt").read_text().split() == ["tfs.C_x.HG1"]
+
+
+def test_submit_fam_no_match(cli):
+    r = cli(["submit", "align", "--missing", "--fam", "tfs.C", "--dry-run"])
+    assert r.exit_code == 1 and "no HGs match" in r.output
+
+
+def test_missing_per_fam_counts(cli, results_tree):
+    _align_hg11(results_tree)
+    # tree: tfs.A has HG1 (done) + HG11 (ready); tfs.C_x has HG1 (blocked: no alignment)
+    out = [l for l in cli(["missing", "tree", "--per-fam"]).output.split("\n") if l.strip()]
+    assert out[0].split() == ["family", "ready/total"]
+    assert dict(l.split() for l in out[1:]) == {"tfs.A": "1/2"}   # ready only; C_x omitted
+    out = [l for l in cli(["missing", "tree", "--per-fam", "--all"]).output.split("\n") if l.strip()]
+    assert out[0].split() == ["family", "missing/total"]
+    assert dict(l.split() for l in out[1:]) == {"tfs.A": "1/2", "tfs.C_x": "1/1"}
+
+
+def test_dry_run_short_flag(cli):
+    r = cli(["submit", "align", "--missing", "-n"])
+    assert r.exit_code == 0, r.output
+    assert not calls_txt().exists()                       # sbatch never called
+    assert next(dry_dir().glob("*_align"))
+
+
+def test_per_fam_sorted_by_count(cli, results_tree):
+    cfg, _ = results_tree
+    for i in (1, 2, 3):
+        (cfg.outdir / "clusters" / f"tfs.Z.HG{i}.fasta").write_text(">a\nAA\n>b\nAA\n")
+    out = [l.split() for l in cli(["missing", "align", "--per-fam"]).output.split("\n")[1:] if l.strip()]
+    # tfs.Z 3/3, tfs.A 1/2 (HG11), tfs.C_x 1/1  -> by count desc, then total desc
+    assert [r[0] for r in out] == ["tfs.Z", "tfs.A", "tfs.C_x"]
+
+
+def _hg11_aligned_tree_script(cli, results_tree, *extra):
+    cfg, _ = results_tree
+    (cfg.outdir / "align/tfs.A.HG11.aln.fasta").write_text(">a\nAA\n")
+    r = cli(["submit", "tree", "tfs.A.HG11", "-n", *extra])
+    assert r.exit_code == 0, r.output
+    return r.output, next(dry_dir().glob("*_tree")).joinpath("array_0.sbatch").read_text()
+
+
+def test_resource_overrides(cli, results_tree):
+    out, s = _hg11_aligned_tree_script(cli, results_tree, "--mem", "16G", "--time", "2h", "--cpus", "8")
+    assert "#SBATCH --mem=16384M" in s and "#SBATCH --time=120" in s and "#SBATCH --cpus-per-task=8" in s
+
+
+def test_partial_override_keeps_table_values(cli, results_tree):
+    out, s = _hg11_aligned_tree_script(cli, results_tree, "--time", "1d")
+    assert "#SBATCH --time=1440" in s and "#SBATCH --mem=800M" in s     # mem still from resources.tsv
+
+
+def test_notifies_resources_tsv_rows(cli, results_tree):
+    out, _ = _hg11_aligned_tree_script(cli, results_tree)
+    assert "resources.tsv: row found for 1 of 1 HGs" in out
+
+
+def test_notifies_zero_rows(cli):
+    r = cli(["submit", "align", "tfs.C_x.HG1", "-n"])
+    assert r.exit_code == 0 and "resources.tsv: row found for 0 of 1 HGs" in r.output
+
+
+def test_bad_override_is_error(cli):
+    r = cli(["submit", "align", "tfs.C_x.HG1", "-n", "--mem", "16X"])
+    assert r.exit_code != 0 and "bad memory value" in r.output
+    assert not runs_dir().exists() or not list(runs_dir().glob("*"))
+
+
+def test_unknown_id_reported_not_skipped(cli):
+    r = cli(["submit", "align", "tfs.C_x.HG1.", "-n"])        # typo: trailing dot
+    assert r.exit_code == 2
+    assert "unknown" in r.output and "tfs.C_x.HG1." in r.output
+    assert "without inputs" not in r.output
+
+
+def test_dry_run_leaves_runs_dir_empty(cli):
+    r = cli(["submit", "align", "--missing", "-n"])
+    assert r.exit_code == 0, r.output
+    assert not runs_dir().exists() or not list(runs_dir().glob("*"))
+    assert len(list(dry_dir().glob("*_align"))) == 1
+
+
+def _submit_two_align(cli):
+    r = cli(["submit", "align", "--missing"])          # one array, 2 HGs: HG11 (task 0), C_x (task 1)
+    assert r.exit_code == 0, r.output
+
+
+def _row(output, jid="12345"):
+    return next(l.split() for l in output.splitlines() if jid in l.split())
+
+
+def test_jobs_counts_from_sacct(cli, monkeypatch):
+    _submit_two_align(cli)
+    monkeypatch.setenv("FAKE_SACCT", "12345_0|FAILED\\n12345_1|RUNNING\\n")
+    r = cli(["jobs"])
+    assert r.exit_code == 0, r.output
+    row = _row(r.output)
+    assert row[-5:] == ["2", "0", "1", "0", "1"]        # HGs, pending, running, done, failed
+
+
+def test_jobs_pending_range_and_unseen_tasks(cli, monkeypatch):
+    _submit_two_align(cli)
+    monkeypatch.setenv("FAKE_SACCT", "12345_[0-1%50]|PENDING\\n")
+    assert _row(cli(["jobs"]).output)[-5:] == ["2", "2", "0", "0", "0"]
+    monkeypatch.setenv("FAKE_SACCT", "")               # not in sacct yet -> pending
+    assert _row(cli(["jobs"]).output)[-5:] == ["2", "2", "0", "0", "0"]
+
+
+def test_jobs_completed_and_cancelled(cli, monkeypatch):
+    _submit_two_align(cli)
+    monkeypatch.setenv("FAKE_SACCT", "12345_0|COMPLETED\\n12345_1|CANCELLED by 1000\\n")
+    assert _row(cli(["jobs"]).output)[-5:] == ["2", "0", "0", "1", "1"]
+
+
+def test_jobs_failed_lists_hgs_and_logs(cli, monkeypatch):
+    _submit_two_align(cli)
+    monkeypatch.setenv("FAKE_SACCT", "12345_0|COMPLETED\\n12345_1|OUT_OF_MEMORY\\n")
+    r = cli(["jobs", "--failed"])
+    assert r.exit_code == 0, r.output
+    line = next(l for l in r.output.splitlines() if "tfs.C_x.HG1" in l)
+    assert "OUT_OF_MEMORY" in line and "align_12345_1.err" in line
+    assert "tfs.A.HG11" not in r.output
+
+
+def test_queue_is_hidden_alias(cli, monkeypatch):
+    _submit_two_align(cli)
+    monkeypatch.setenv("FAKE_SACCT", "12345_0|COMPLETED\\n12345_1|COMPLETED\\n")
+    assert _row(cli(["queue"]).output)[-5:] == ["2", "0", "0", "2", "0"]
+    assert "queue" not in cli(["--help"]).output
+
+
+def test_jobs_without_sacct_shows_unknown(cli):
+    _submit_two_align(cli)
+    (_state["bin"] / "sacct").unlink()
+    r = cli(["jobs"])
+    assert r.exit_code == 0 and "sacct not on PATH" in r.output
+    assert _row(r.output)[-5:] == ["2", "?", "?", "?", "?"]
+
+
+def _dry_run_dir(stage):
+    return next(dry_dir().glob(f"*_{stage}"))
+
+
+def test_set_param_written_to_run_config(cli, results_tree):
+    import yaml
+    _, root = results_tree
+    before = (root / "config.yaml").read_text()
+    r = cli(["submit", "align", "tfs.C_x.HG1", "-n", "--set", "MAFFT_OPT=--auto", "--set", "MAX_SPR=2"])
+    assert r.exit_code == 0, r.output
+    run = _dry_run_dir("align")
+    params = yaml.safe_load((run / "config.yaml").read_text())["params"]
+    assert params["MAFFT_OPT"] == "--auto" and params["MAX_SPR"] == 2
+    assert f'export PHYLOCLI_CONFIG="{run}/config.yaml"' in (run / "array_0.sbatch").read_text()
+    assert "MAX_SPR=2" in r.output
+    assert (root / "config.yaml").read_text() == before        # global config untouched
+
+
+def test_set_bool_coerced_and_used_at_submit(cli):
+    r = cli(["submit", "generax", "tfs.A.HG11", "-n", "--set", "run_generax=false"])
+    assert r.exit_code == 2 and "not_applicable" in r.output
+
+
+def test_set_unknown_key_is_error(cli):
+    r = cli(["submit", "align", "tfs.C_x.HG1", "-n", "--set", "MAXSPR=2"])
+    assert r.exit_code == 2 and "MAXSPR" in r.output
+    assert not dry_dir().exists() or not list(dry_dir().glob("*"))
+
+
+def test_set_malformed_is_error(cli):
+    r = cli(["submit", "align", "tfs.C_x.HG1", "-n", "--set", "MAX_SPR"])
+    assert r.exit_code == 2 and "KEY=VALUE" in r.output
+
+
+def test_set_bad_type_is_error(cli):
+    r = cli(["submit", "align", "tfs.C_x.HG1", "-n", "--set", "MAX_SPR=two"])
+    assert r.exit_code == 2 and "MAX_SPR" in r.output
+
+
+def test_run_config_always_written(cli):
+    assert cli(["submit", "align", "tfs.C_x.HG1", "-n"]).exit_code == 0
+    run = _dry_run_dir("align")
+    assert (run / "config.yaml").exists()
+    assert "export PHYLOCLI_CONFIG=" in (run / "array_0.sbatch").read_text()

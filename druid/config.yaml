@@ -1,0 +1,19 @@
+# Parameters the step2 stages read. Values = v3 nextflow.config params + the `precise`
+# profile + the last successful step2 run (24/09/2026: -profile slurm,precise --run_generax).
+outdir: results
+# nextflow_dir: .   # optional: where .nextflow/ (run history, read by `status HG`) lives; default = project root
+partition: genoa64
+qos: normal
+params:
+  MAFFT_OPT: "--maxiterate 1000 --localpair"
+  TREE_METHOD: iqtree2
+  IQTREE2_MODEL: TEST
+  SUBS_MODEL: LG
+  SPECIES_TREE: data/species_tree.binary.newick
+  MAX_SPR: 3
+  NCPU_GENERAX: 2
+  REFNAMES: data/Mmus_gene_names.csv
+  REFSPECIES: Mmus
+  run_generax: true
+  gxsup: true
+  resources_tsv: resources.tsv
