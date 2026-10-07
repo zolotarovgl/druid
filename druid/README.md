@@ -40,7 +40,9 @@ HG ids, `--ids FILE`, or `--missing`. `--fam` takes a category (`tfs`) or a fami
 (`tfs.T-box`), matched on whole dot-separated id parts (`tfs.T-box` does not match `tfs.T-box2`).
 
 ```
-phylocli/phylo status                                   # per stage: done / ready / blocked bars; "N/M HGs done"
+phylocli/phylo status                                   # per stage: done / running / ready / blocked bars; "N/M HGs done"
+# running = pending or running in SLURM now (squeue): phylocli array tasks AND Nextflow jobs (nf-<PROCESS>_(<HG>));
+# running HGs are not counted as ready, `missing STAGE` leaves them out and `submit` skips them (07/10/2026)
 phylocli/phylo status -f tfs.T-box                      # same, one family only
 phylocli/phylo status dig.CathepsinC1.HG1               # one HG: state per stage + latest job (requested vs used)
 phylocli/phylo status dig.CathepsinC1.HG1 --history     # one HG: every attempt, oldest first, with .err log paths

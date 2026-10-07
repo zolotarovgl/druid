@@ -97,7 +97,9 @@ def _missing(cfg: core.Config, stage: str, ids: Path | None, ready: bool = False
     done = core.report_status.done_by_stage(str(cfg.outdir), exp)
     out = sorted(exp - done[stage])
     if ready:
-        ok = core.ready_set(cfg, stage, out)
+        live = _live(core.expected(cfg)) or {}
+        busy = live.get(stage, set())
+        ok = core.ready_set(cfg, stage, [hg for hg in out if hg not in busy])
         out = [hg for hg in out if hg in ok]
     return out
 
@@ -105,51 +107,60 @@ def _missing(cfg: core.Config, stage: str, ids: Path | None, ready: bool = False
 BAR_WIDTH = 30
 
 
-# Bar segments (done, ready, blocked) as (char, colour). `status` shows progress;
+# Bar segments (done, running, ready, blocked) as (char, colour). `status` shows progress;
 # `missing` blanks the done part so only the outstanding work is drawn.
 BAR_STYLES = {
-    "status":  (("█", "green"), ("▓", "yellow"), ("░", "bright_black")),
-    "missing": ((" ", None),    ("█", "green"),  ("░", "bright_black")),
+    "status":  (("█", "green"), ("▒", "cyan"), ("▓", "yellow"), ("░", "bright_black")),
+    "missing": ((" ", None),    ("▒", "cyan"), ("█", "green"),  ("░", "bright_black")),
 }
+BAR_NAMES = ("done", "running", "ready", "blocked")
 
 
-def _bar(done: int, ready: int, blocked: int, mode: str = "status") -> str:
-    """Fixed-width bar split into done / ready to run / blocked (no inputs)."""
-    total = done + ready + blocked
+def _bar(done: int, running: int, ready: int, blocked: int, mode: str = "status") -> str:
+    """Fixed-width bar split into done / running (in SLURM now) / ready to run / blocked;
+    largest-remainder rounding so the segments always add up to BAR_WIDTH."""
+    counts = (done, running, ready, blocked)
+    total = sum(counts)
     if total == 0:
         return ""
-    n_done = round(BAR_WIDTH * done / total)
-    n_ready = min(round(BAR_WIDTH * ready / total), BAR_WIDTH - n_done)
-    n_blocked = BAR_WIDTH - n_done - n_ready
-    return "".join(typer.style(ch * n, fg=fg) for (ch, fg), n
-                   in zip(BAR_STYLES[mode], (n_done, n_ready, n_blocked)))
+    exact = [BAR_WIDTH * c / total for c in counts]
+    n = [int(x) for x in exact]
+    for i in sorted(range(4), key=lambda i: exact[i] - n[i], reverse=True)[:BAR_WIDTH - sum(n)]:
+        n[i] += 1
+    return "".join(typer.style(ch * k, fg=fg) for (ch, fg), k in zip(BAR_STYLES[mode], n))
 
 
 def _summary(cfg: core.Config, ids: Path | None, mode: str = "status",
              fam: str | None = None) -> tuple[set[str], dict]:
     exp = _selected(cfg, ids, fam)
     done = core.report_status.done_by_stage(str(cfg.outdir), exp)
+    live = _live(core.expected(cfg))
+    if live is None:
+        typer.echo("squeue not on PATH: running jobs not detected")
+        live = {}
     legend = [typer.style(f"{ch} {name}", fg=fg) for (ch, fg), name
-              in zip(BAR_STYLES[mode], ("done", "ready", "blocked")) if ch.strip()]
-    typer.echo(f"{'stage':<12} {'done':>6} {'ready':>6} {'blocked':>8} {'total':>6}  "
+              in zip(BAR_STYLES[mode], BAR_NAMES) if ch.strip()]
+    typer.echo(f"{'stage':<12} {'done':>6} {'running':>7} {'ready':>6} {'blocked':>8} {'total':>6}  "
                + " ".join(legend))
     for st in core.STAGES:
         if not core.applicable(cfg, st):
             typer.echo(f"{st:<12} {'n/a':>6}")
             continue
         todo = exp - done[st]
-        n_ready = len(core.ready_set(cfg, st, todo))
+        running = todo & live.get(st, set())
+        n_ready = len(core.ready_set(cfg, st, todo - running))
         n_done = len(done[st])
-        n_blocked = len(todo) - n_ready
-        typer.echo(f"{st:<12} {n_done:>6} {n_ready:>6} {n_blocked:>8} {len(exp):>6}  "
-                   + _bar(n_done, n_ready, n_blocked, mode))
+        n_blocked = len(todo) - len(running) - n_ready
+        typer.echo(f"{st:<12} {n_done:>6} {len(running):>7} {n_ready:>6} {n_blocked:>8} {len(exp):>6}  "
+                   + _bar(n_done, len(running), n_ready, n_blocked, mode))
     return exp, done
 
 
-def _squeue(fmt: str) -> list[str] | None:
+def _squeue(fmt: str, array_tasks: bool = False) -> list[str] | None:
     if shutil.which("squeue") is None:
         return None
-    r = subprocess.run(["squeue", "--me", "-h", "-o", fmt], capture_output=True, text=True)
+    r = subprocess.run(["squeue", "--me", "-h"] + (["-r"] if array_tasks else []) + ["-o", fmt],
+                       capture_output=True, text=True)
     if r.returncode != 0:
         _fail(f"squeue failed: {r.stderr.strip()}", 1)
     return r.stdout.splitlines()
@@ -165,21 +176,57 @@ def _jobs_map() -> dict[str, Path]:
     return out
 
 
-def live_hgs(stage: str, allow_no_squeue: bool = False) -> set[str]:
-    lines = _squeue("%F %j")
+def _nf_job(name: str) -> tuple[str, str] | None:
+    """(process, tag) from a Nextflow SLURM job name like nf-PHY_(tfs.T-box.HG1). Process
+    names contain underscores (PVM_PREV, GR_watcher), so match the known names, longest first."""
+    from phylocli import history
+    body = name[len("nf-"):]
+    for proc in sorted(history.PROC_STAGE, key=len, reverse=True):
+        if body.startswith(proc + "_"):
+            return proc, body[len(proc) + 1:].strip("()")
+    return None
+
+
+def _live(expected: set) -> dict[str, set[str]] | None:
+    """stage -> ids pending or running in SLURM right now: tasks of phylocli arrays (`squeue -r`
+    lists each array task; task i = line i+1 of its ids file) and Nextflow jobs (named
+    nf-<PROCESS>_(<tag>)). None when squeue is not on PATH."""
+    from phylocli import history
+    lines = _squeue("%i|%.300j", array_tasks=True)
     if lines is None:
+        return None
+    jobs = _jobs_map()
+    cache: dict[Path, list[str]] = {}
+    out: dict[str, set[str]] = collections.defaultdict(set)
+    for line in lines:
+        if "|" not in line:
+            continue
+        jid, name = (x.strip() for x in line.split("|", 1))
+        if name.startswith("phylo-"):
+            master, _, idx = jid.partition("_")
+            f = jobs.get(master)
+            if f is None or not f.is_file():
+                continue
+            ids = cache.setdefault(f, core.read_ids(f))
+            idxs = ([int(idx)] if idx.isdigit()
+                    else _expand_indices(idx.strip("[]")) if idx else range(len(ids)))
+            out[name[len("phylo-"):]].update(ids[i] for i in idxs if i < len(ids))
+        elif name.startswith("nf-"):
+            nf = _nf_job(name)
+            if nf:
+                hg = history._resolve_tag(nf[1], expected)
+                if hg:
+                    out[history.PROC_STAGE[nf[0]]].add(hg)
+    return dict(out)
+
+
+def live_hgs(stage: str, allow_no_squeue: bool = False, expected: set | None = None) -> set[str]:
+    live = _live(expected if expected is not None else set())
+    if live is None:
         if allow_no_squeue:
             return set()
         _fail("squeue not on PATH: cannot check for already queued HGs (only --dry-run may skip this)", 1)
-    jobs = _jobs_map()
-    live: set[str] = set()
-    for line in lines:
-        parts = line.split()
-        if len(parts) == 2 and parts[1] == f"phylo-{stage}" and parts[0] in jobs:
-            f = jobs[parts[0]]
-            if f.is_file():
-                live |= set(core.read_ids(f))
-    return live
+    return live.get(stage, set())
 
 
 def _requested(a: history.Attempt) -> str:
@@ -220,6 +267,7 @@ def _hg_status(cfg: core.Config, hg: str, show_history: bool):
         con.print(t)
         return
     done = core.report_status.done_by_stage(str(cfg.outdir), exp)
+    live = _live(core.expected(cfg)) or {}
     latest = history.latest_by_stage(atts)
     for col in ("stage", "state", "source", "run", "status (reason)", "requested", "used"):
         t.add_column(col)
@@ -228,6 +276,8 @@ def _hg_status(cfg: core.Config, hg: str, show_history: bool):
             state = "n/a"
         elif hg in done[st]:
             state = "[green]done[/]"
+        elif hg in live.get(st, set()):
+            state = "[cyan]running[/]"
         elif hg in core.ready_set(cfg, st, [hg]):
             state = "[yellow]ready[/]"
         else:
@@ -436,7 +486,7 @@ def submit(stage: str = typer.Argument(...),
         typer.echo(f"unknown ({len(unknown)}): {_show(unknown)}", err=True)
         typer.echo("nothing submitted", err=True)
         raise typer.Exit(2)
-    queued = live_hgs(stage, allow_no_squeue=dry_run)
+    queued = live_hgs(stage, allow_no_squeue=dry_run, expected=core.expected(cfg))
     notes: list[str] = list(set_notes)   # printed plainly on submit, inside the panel on a dry run
     if not all_:
         unready = [hg for hg in selected if not core.inputs_ready(cfg, stage, hg)]

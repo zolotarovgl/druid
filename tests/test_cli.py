@@ -81,7 +81,7 @@ def test_submit_real_writes_jobs_tsv(cli):
 
 def test_submit_all_refuses_already_queued(cli, monkeypatch):
     cli(["submit", "align", "tfs.A.HG11"])
-    monkeypatch.setenv("FAKE_SQUEUE", "12345 phylo-align\n")
+    monkeypatch.setenv("FAKE_SQUEUE", "12345_0|phylo-align\n")
     r = cli(["submit", "align", "tfs.A.HG11", "--all"])
     assert r.exit_code == 2 and "queued" in r.output
 
@@ -133,7 +133,7 @@ def test_status_prints_bars_not_table(cli):
 
 def _total(output, stage="align"):
     line = next(l for l in output.splitlines() if l.split()[:1] == [stage])
-    return int(line.split()[4])
+    return int(line.split()[5])              # stage done running ready blocked TOTAL
 
 
 def test_status_fam_filters_by_whole_id_parts(cli):
@@ -225,7 +225,7 @@ def test_submit_nothing_ready(cli):
 def test_submit_skips_queued_by_default(cli, results_tree, monkeypatch):
     _align_hg11(results_tree)
     assert cli(["submit", "tree", "tfs.A.HG11"]).exit_code == 0
-    monkeypatch.setenv("FAKE_SQUEUE", "12345 phylo-tree\n")
+    monkeypatch.setenv("FAKE_SQUEUE", "12345_0|phylo-tree\n")
     r = cli(["submit", "tree", "--missing"])
     assert r.exit_code == 0 and "skipped 1 HGs already queued" in r.output
     assert "nothing to submit" in r.output
@@ -240,11 +240,11 @@ def test_missing_without_stage_prints_summary(cli, results_tree):
     _align_hg11(results_tree)
     r = cli(["missing"])
     assert r.exit_code == 0, r.output
-    rows = {l.split()[0]: l.split()[1:5] for l in r.output.splitlines()[1:] if l.strip()}
+    rows = {l.split()[0]: l.split()[1:6] for l in r.output.splitlines()[1:] if l.strip()}
     # 3 expected HGs; align: HG1 done, HG11 has align (fixture) -> done too; C_x ready (clusters exist)
-    assert rows["align"] == ["2", "1", "0", "3"]
+    assert rows["align"] == ["2", "0", "1", "0", "3"]          # done running ready blocked total
     # tree: HG1 done; HG11 ready (alignment); C_x blocked (no alignment)
-    assert rows["tree"] == ["1", "1", "1", "3"]
+    assert rows["tree"] == ["1", "0", "1", "1", "3"]
     assert "\x1b[" not in r.output          # no colour codes when not a terminal
     assert all(len(l) > 40 for l in r.output.splitlines()[1:] if l.strip())   # bar present
 
@@ -260,8 +260,11 @@ def test_ready_set_matches_inputs_ready(results_tree):
 
 
 def _bar_of(output, stage):
-    line = next(l for l in output.splitlines() if l.split() and l.split()[0] == stage)
-    return line[line.index(line.split()[4]) + len(line.split()[4]) + 2:]
+    lines = output.splitlines()
+    hdr = next(l for l in lines if l.split()[:1] == ["stage"])
+    col = hdr.index("total") + len("total") + 2          # bars start under the legend
+    line = next(l for l in lines if l.split() and l.split()[0] == stage)
+    return line[col:].rstrip()
 
 
 def test_status_appends_stage_summary(cli, results_tree):
@@ -519,3 +522,43 @@ def test_jobs_summary_bar_done_and_pending(cli, monkeypatch):
     monkeypatch.setenv("FAKE_SACCT", "12345_0|COMPLETED\\n")     # task 1 not reported -> pending
     bar = next(l for l in cli(["jobs"]).output.splitlines() if "12345" in l.split()).split()[-1]
     assert bar == "█" * 10 + "░" * 10
+
+
+def _summary_rows(output):
+    return {l.split()[0]: l.split()[1:6] for l in output.splitlines()
+            if l.split() and l.split()[0] in ("align", "tree", "possvm_prev", "generax", "gxsup", "possvm")}
+
+
+def test_running_phylocli_array_task_counted(cli, monkeypatch):
+    _submit_two_align(cli)                      # task 0 = tfs.A.HG11, task 1 = tfs.C_x.HG1
+    monkeypatch.setenv("FAKE_SQUEUE", "12345_1|phylo-align\n")
+    rows = _summary_rows(cli(["missing"]).output)
+    assert rows["align"] == ["1", "1", "1", "0", "3"]      # HG1 done, C_x running, HG11 ready
+
+
+def test_running_nextflow_job_counted(cli, results_tree, monkeypatch):
+    _align_hg11(results_tree)
+    monkeypatch.setenv("FAKE_SQUEUE", "999|nf-PHY_(tfs.A.HG11)\n")
+    rows = _summary_rows(cli(["status"]).output)
+    assert rows["tree"] == ["1", "1", "0", "1", "3"]       # HG1 done, HG11 running (Nextflow), C_x blocked
+    r = cli(["submit", "tree", "--missing", "-n"])
+    assert "skipped 1 HGs already queued" in r.output and "nothing to submit" in r.output
+
+
+def test_running_bar_segment(cli, results_tree, monkeypatch):
+    _align_hg11(results_tree)
+    monkeypatch.setenv("FAKE_SQUEUE", "999|nf-PHY_(tfs.A.HG11)\n")
+    assert _bar_of(cli(["status"]).output, "tree") == "█" * 10 + "▒" * 10 + "░" * 10
+
+
+def test_status_hg_shows_running(cli, results_tree, monkeypatch):
+    _align_hg11(results_tree)
+    monkeypatch.setenv("FAKE_SQUEUE", "999|nf-PHY_(tfs.A.HG11)\n")
+    line = next(l for l in cli(["status", "tfs.A.HG11"]).output.splitlines() if l.split()[:1] == ["tree"])
+    assert line.split()[1] == "running"
+
+
+def test_summary_without_squeue(cli):
+    (_state["bin"] / "squeue").unlink()
+    r = cli(["missing"])
+    assert r.exit_code == 0 and "squeue not on PATH" in r.output
