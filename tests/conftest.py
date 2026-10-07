@@ -37,6 +37,8 @@ def results_tree(tmp_path):
     cfg_file = root / "config.yaml"
     base = yaml.safe_load((ROOT / "phylocli/config.yaml").read_text())
     base["outdir"] = str(out)
+    # Never read the real project's .nextflow/ run history (slow, and not a fixture).
+    base["nextflow_dir"] = str(root)
     base["params"].update(resources_tsv=str(root / "resources.tsv"),
                           REFNAMES=str(root / "refnames.csv"),
                           SPECIES_TREE=str(root / "species.newick"))
