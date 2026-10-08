@@ -6,6 +6,7 @@ from __future__ import annotations
 import collections
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from phylocli import core, history
@@ -141,3 +142,33 @@ def submissions(stage: str | None, last: int) -> list[tuple[Path, str, str, Path
                 rows.append((f.parent, st, jid.strip(), ids_path(f.parent, ids.strip())))
     runs = list(dict.fromkeys(r[0] for r in rows))[:last]
     return [r for r in rows if r[0] in runs]
+
+
+@dataclass
+class StageRow:
+    stage: str
+    applicable: bool
+    done: int = 0
+    running: int = 0
+    ready: int = 0
+    blocked: int = 0
+    total: int = 0
+
+
+def stage_rows(cfg: core.Config, exp: set[str]):
+    """(rows, live_known, done-by-stage) — exactly the counts `phylo status` draws."""
+    done = core.report_status.done_by_stage(str(cfg.outdir), exp)
+    lv = live(core.expected(cfg))
+    known = lv is not None
+    lv = lv or {}
+    rows = []
+    for st in core.STAGES:
+        if not core.applicable(cfg, st):
+            rows.append(StageRow(st, False))
+            continue
+        todo = exp - done[st]
+        running = todo & lv.get(st, set())
+        n_ready = len(core.ready_set(cfg, st, todo - running))
+        rows.append(StageRow(st, True, len(done[st]), len(running), n_ready,
+                             len(todo) - len(running) - n_ready, len(exp)))
+    return rows, known, done

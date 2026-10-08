@@ -1,12 +1,13 @@
 """phylocli/model.py: the print-free data layer shared by the CLI and the TUI."""
 from __future__ import annotations
 
+import dataclasses
 import os
 import stat
 
 import pytest
 
-from phylocli import model
+from phylocli import core, model
 from phylocli.tests.test_cli import _state, cli  # noqa: F401  (fixture)
 
 
@@ -47,3 +48,38 @@ def test_submissions_newest_first(cli):
     assert cli(["submit", "align", "tfs.A.HG11"]).exit_code == 0
     subs = model.submissions(None, 10)
     assert [(s[1], s[2]) for s in subs] == [("align", "12345")]
+
+
+def _cfg():
+    return core.load_config(os.environ["PHYLOCLI_CONFIG"])
+
+
+def test_stage_rows_counts(cli):
+    cfg = _cfg()
+    rows, known, done = model.stage_rows(cfg, core.expected(cfg))
+    by = {r.stage: r for r in rows}
+    assert known is True
+    assert (by["align"].done, by["align"].ready, by["align"].total) == (1, 2, 3)
+    assert by["align"].done + by["align"].running + by["align"].ready + by["align"].blocked == 3
+    assert "tfs.A.HG1" in done["align"]
+
+
+def test_stage_rows_running_from_squeue(cli, monkeypatch):
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SQUEUE", "12345_0|phylo-align\n")
+    rows, _k, _d = model.stage_rows(_cfg(), core.expected(_cfg()))
+    a = next(r for r in rows if r.stage == "align")
+    assert (a.running, a.ready) == (1, 1)
+
+
+def test_stage_rows_not_applicable(cli):
+    cfg = _cfg()
+    cfg = dataclasses.replace(cfg, params={**cfg.params, "gxsup": False})
+    rows, _k, _d = model.stage_rows(cfg, core.expected(cfg))
+    assert next(r for r in rows if r.stage == "gxsup").applicable is False
+
+
+def test_stage_rows_without_squeue(cli):
+    (_state["bin"] / "squeue").unlink()
+    rows, known, _d = model.stage_rows(_cfg(), core.expected(_cfg()))
+    assert known is False and all(r.running == 0 for r in rows)

@@ -153,26 +153,19 @@ def _bar(done: int, running: int, ready: int, blocked: int, mode: str = "status"
 def _summary(cfg: core.Config, ids: Path | None, mode: str = "status",
              fam: str | None = None) -> tuple[set[str], dict]:
     exp = _selected(cfg, ids, fam)
-    done = core.report_status.done_by_stage(str(cfg.outdir), exp)
-    live = _live(core.expected(cfg))
-    if live is None:
+    rows, known, done = _guard(model.stage_rows)(cfg, exp)
+    if not known:
         typer.echo("squeue not on PATH: running jobs not detected")
-        live = {}
     legend = [typer.style(f"{ch} {name}", fg=fg) for (ch, fg), name
               in zip(BAR_STYLES[mode], BAR_NAMES) if ch.strip()]
     typer.echo(f"{'stage':<12} {'done':>6} {'running':>7} {'ready':>6} {'blocked':>8} {'total':>6}  "
                + " ".join(legend))
-    for st in core.STAGES:
-        if not core.applicable(cfg, st):
-            typer.echo(f"{st:<12} {'n/a':>6}")
+    for r in rows:
+        if not r.applicable:
+            typer.echo(f"{r.stage:<12} {'n/a':>6}")
             continue
-        todo = exp - done[st]
-        running = todo & live.get(st, set())
-        n_ready = len(core.ready_set(cfg, st, todo - running))
-        n_done = len(done[st])
-        n_blocked = len(todo) - len(running) - n_ready
-        typer.echo(f"{st:<12} {n_done:>6} {len(running):>7} {n_ready:>6} {n_blocked:>8} {len(exp):>6}  "
-                   + _bar(n_done, len(running), n_ready, n_blocked, mode))
+        typer.echo(f"{r.stage:<12} {r.done:>6} {r.running:>7} {r.ready:>6} {r.blocked:>8} {r.total:>6}  "
+                   + _bar(r.done, r.running, r.ready, r.blocked, mode))
     return exp, done
 
 
