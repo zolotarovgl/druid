@@ -5,14 +5,17 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import os
 import re
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from phylocli import core, history
-from phylocli.common import FAILED_STATES, RUNNING_STATES, expand_indices, ids_path, runs_dir
+from phylocli.common import FAILED_STATES, RUNNING_STATES, ROOT, expand_indices, ids_path, runs_dir
 
 SLURM_TIMEOUT = 60  # seconds; a stuck slurmctld must not hang the CLI or freeze the TUI
 
@@ -311,3 +314,181 @@ def bump(att, res: core.Res) -> core.Res:
     if _is_timeout(att):
         return dataclasses.replace(base, time_min=base.time_min * 2)
     return base
+
+
+TOOLS = {"align": ["mafft", "clipkit"], "tree": ["iqtree2"], "generax": ["generax", "mpirun"],
+         "gxsup": ["iqtree2"], "possvm": [], "possvm_prev": []}
+MAX_ARRAY = 1000  # SLURM MaxArraySize default 1001 -> indices 0..1000
+SBATCH = """#!/usr/bin/env bash
+#SBATCH --job-name=phylo-{stage}
+#SBATCH --partition={partition}
+#SBATCH --qos={qos}
+#SBATCH --cpus-per-task={cpus}
+#SBATCH --mem={mem_mb}M
+#SBATCH --time={time_min}
+#SBATCH --array=0-{n_minus_1}%{max_running}
+#SBATCH --output={run_dir}/logs/{stage}_%A_%a.out
+#SBATCH --error={run_dir}/logs/{stage}_%A_%a.err
+{signal_line}
+set -uo pipefail
+HG=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "{ids_file}")
+echo "phylo {stage} ${{HG}} (array ${{SLURM_ARRAY_JOB_ID}}_${{SLURM_ARRAY_TASK_ID}})"
+export PHYLOCLI_CONFIG="{run_dir}/config.yaml"
+python3 "{root}/phylocli/phylo.py" _run {stage} "$HG" --run-dir "{run_dir}" &
+PID=$!
+trap 'kill -USR2 $PID 2>/dev/null' USR2
+trap 'kill -TERM $PID 2>/dev/null' TERM
+wait $PID; RC=$?
+while kill -0 $PID 2>/dev/null; do wait $PID; RC=$?; done
+exit $RC
+"""
+
+
+def chunks(ids: list[str], n: int = MAX_ARRAY) -> list[list[str]]:
+    return [ids[i:i + n] for i in range(0, len(ids), n)]
+
+
+def new_run_dir(stage: str, dry_run: bool = False) -> Path:
+    # A dry run writes its scripts under the system temp dir, so runs/ only holds real
+    # submissions (queue and the already-queued check read runs/*/jobs.tsv).
+    root = Path(tempfile.gettempdir()) / "phylocli-dryrun" if dry_run else runs_dir()
+    base = root / f"{datetime.now():%Y%m%d-%H%M%S}_{stage}"
+    d, k = base, 1
+    while True:
+        try:
+            d.mkdir(parents=True)
+            break
+        except FileExistsError:
+            k += 1
+            d = base.with_name(f"{base.name}-{k}")
+    (d / "logs").mkdir()
+    return d
+
+
+def preflight(stage: str) -> str | None:
+    lost = [t for t in TOOLS[stage] if shutil.which(t) is None]
+    hint = ("       run 'conda activate phylo' and 'module load OpenMPI' before submitting;\n"
+            "       see workflow/environment.yaml.")
+    py_err = None
+    if stage != "gxsup":  # same `python` + PYTHONNOUSERSITE=1 as the stage scripts
+        py = shutil.which("python")
+        if py is None:
+            py_err = "python: not on PATH"
+        else:
+            r = subprocess.run([py, "-c", "import ete3, Bio, yaml"], capture_output=True, text=True,
+                               env={**os.environ, "PYTHONNOUSERSITE": "1"})
+            if r.returncode != 0:
+                py_err = (f"{py} (PYTHONNOUSERSITE=1) cannot import ete3, Bio, yaml:\n"
+                          f"       {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else 'exit ' + str(r.returncode)}")
+    if not (lost or py_err):
+        return None
+    msg = "ERROR:"
+    if lost:
+        msg += f" not on PATH: {' '.join(lost)}"
+    if py_err:
+        msg += f"\n       {py_err}"
+    return msg + "\n" + hint
+
+
+SHOW = 20
+
+
+def show(ids: list[str]) -> str:
+    s = " ".join(ids[:SHOW])
+    return s + (f" ... and {len(ids) - SHOW} more" if len(ids) > SHOW else "")
+
+
+@dataclass
+class Selection:
+    selected: list
+    notes: list
+    queued: set
+
+
+def select(cfg: core.Config, stage: str, hgs: list[str], all_: bool = False,
+           dry_run: bool = False) -> Selection:
+    """The submit command's selection rules: unknown ids are an error; by default HGs
+    without inputs or already queued are skipped with a note."""
+    exp = core.expected(cfg)
+    unknown = sorted(set(hgs) - exp)
+    if unknown:
+        raise ModelError(f"unknown ({len(unknown)}): {show(unknown)}\nnothing submitted", 2)
+    queued = live_hgs(stage, allow_no_squeue=dry_run, expected=exp)
+    notes: list[str] = []
+    selected = list(hgs)
+    if not all_:
+        unready = [hg for hg in selected if not core.inputs_ready(cfg, stage, hg)]
+        busy = [hg for hg in selected if hg in queued and hg not in unready]
+        if unready:
+            notes.append(f"skipped {len(unready)} HGs without inputs")
+        if busy:
+            notes.append(f"skipped {len(busy)} HGs already queued")
+        drop = set(unready) | set(busy)
+        selected = [hg for hg in selected if hg not in drop]
+    return Selection(selected, notes, queued)
+
+
+@dataclass
+class Plan:
+    stage: str
+    groups: list
+    notes: list
+    errors: dict
+
+
+def plan(cfg: core.Config, stage: str, sel: Selection, override: dict | None = None,
+         per_hg: dict | None = None, over_flags=()) -> Plan:
+    errs = core.validate(cfg, stage, sel.selected, sel.queued)
+    bad = {k: v for k, v in errs.items() if v}
+    notes = list(sel.notes)
+    if bad:
+        return Plan(stage, [], notes, bad)
+    n_rows = core.resources_rows(cfg, sel.selected)
+    over_flags = list(over_flags)
+    notes.append(f"resources.tsv: row found for {n_rows} of {len(sel.selected)} HGs"
+                 + (" (others: step2 defaults)" if n_rows < len(sel.selected) else "")
+                 + (f"; overridden by {' '.join(over_flags)}" if over_flags else ""))
+    groups = core.group(cfg, stage, sel.selected, override, per_hg)
+    pieces = [(res, c) for res, g in groups.items() for c in chunks(g)]
+    return Plan(stage, pieces, notes, {})
+
+
+@dataclass
+class Written:
+    run_dir: Path
+    arrays: list
+
+
+def write_run(cfg: core.Config, raw: dict, p: Plan, dry_run: bool, max_running: int = 50,
+              partition: str | None = None, qos: str | None = None) -> Written:
+    import yaml
+    run_dir = new_run_dir(p.stage, dry_run)
+    (run_dir / "config.yaml").write_text(yaml.safe_dump(raw, sort_keys=False))
+    arrays = []
+    for k, (res, ids_) in enumerate(p.groups):
+        ids_file = run_dir / f"ids_{k}.txt"
+        ids_file.write_text("\n".join(ids_) + "\n")
+        script = run_dir / f"array_{k}.sbatch"
+        script.write_text(SBATCH.format(
+            stage=p.stage, partition=partition or cfg.partition, qos=qos or res.qos,
+            cpus=res.cpus, mem_mb=res.mem_mb, time_min=res.time_min,
+            n_minus_1=len(ids_) - 1, max_running=max_running, run_dir=run_dir,
+            signal_line=f"#SBATCH --signal={res.signal}" if res.signal else "",
+            ids_file=ids_file, root=ROOT))
+        arrays.append((res, ids_, ids_file, script))
+    return Written(run_dir, arrays)
+
+
+def sbatch_all(w: Written) -> tuple[list[str], str | None]:
+    submitted: list[str] = []
+    for i, (res, ids_, ids_file, script) in enumerate(w.arrays):
+        r = subprocess.run(["sbatch", "--parsable", str(script)], capture_output=True, text=True)
+        jid = r.stdout.strip().split(";")[0]
+        if r.returncode != 0 or not jid:
+            return submitted, (f"sbatch failed for {script}: {r.stderr.strip()}\n"
+                               f"submitted job ids: {' '.join(submitted) or 'none'}\n"
+                               "not submitted: " + " ".join(str(a[3]) for a in w.arrays[i:]))
+        with open(w.run_dir / "jobs.tsv", "a") as fh:
+            fh.write(f"{jid}\t{ids_file}\n")
+        submitted.append(jid)
+    return submitted, None

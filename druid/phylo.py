@@ -4,11 +4,7 @@ from __future__ import annotations
 
 import collections
 import os
-import shutil
-import subprocess
 import sys
-import tempfile
-from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,34 +35,10 @@ app = typer.Typer(add_completion=False, no_args_is_help=True,
                   context_settings={"help_option_names": ["-h", "--help"]},
                   help="Report step2 progress and submit per-stage SLURM job arrays.")
 
-TOOLS = {"align": ["mafft", "clipkit"], "tree": ["iqtree2"], "generax": ["generax", "mpirun"],
-         "gxsup": ["iqtree2"], "possvm": [], "possvm_prev": []}
-MAX_ARRAY = 1000  # SLURM MaxArraySize default 1001 -> indices 0..1000
-SHOW = 20
-
-SBATCH = """#!/usr/bin/env bash
-#SBATCH --job-name=phylo-{stage}
-#SBATCH --partition={partition}
-#SBATCH --qos={qos}
-#SBATCH --cpus-per-task={cpus}
-#SBATCH --mem={mem_mb}M
-#SBATCH --time={time_min}
-#SBATCH --array=0-{n_minus_1}%{max_running}
-#SBATCH --output={run_dir}/logs/{stage}_%A_%a.out
-#SBATCH --error={run_dir}/logs/{stage}_%A_%a.err
-{signal_line}
-set -uo pipefail
-HG=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "{ids_file}")
-echo "phylo {stage} ${{HG}} (array ${{SLURM_ARRAY_JOB_ID}}_${{SLURM_ARRAY_TASK_ID}})"
-export PHYLOCLI_CONFIG="{run_dir}/config.yaml"
-python3 "{root}/phylocli/phylo.py" _run {stage} "$HG" --run-dir "{run_dir}" &
-PID=$!
-trap 'kill -USR2 $PID 2>/dev/null' USR2
-trap 'kill -TERM $PID 2>/dev/null' TERM
-wait $PID; RC=$?
-while kill -0 $PID 2>/dev/null; do wait $PID; RC=$?; done
-exit $RC
-"""
+TOOLS, MAX_ARRAY, SBATCH, SHOW = model.TOOLS, model.MAX_ARRAY, model.SBATCH, model.SHOW
+_chunks = model.chunks
+_new_run_dir = model.new_run_dir
+_show = model.show
 
 
 def _cfg() -> core.Config:
@@ -90,11 +62,6 @@ def _check_stage(stage: str) -> str:
     if stage not in core.STAGES:
         raise typer.BadParameter(f"stage must be one of {', '.join(core.STAGES)}")
     return stage
-
-
-def _show(ids: list[str]) -> str:
-    s = " ".join(ids[:SHOW])
-    return s + (f" ... and {len(ids) - SHOW} more" if len(ids) > SHOW else "")
 
 
 FAM_HELP = "restrict to a category (tfs) or a family (tfs.T-box), matched on whole id parts"
@@ -290,27 +257,9 @@ def missing(stage: str = typer.Argument(None, help="stage; omit for a per-stage 
 
 
 def _preflight(stage: str):
-    lost = [t for t in TOOLS[stage] if shutil.which(t) is None]
-    hint = ("       run 'conda activate phylo' and 'module load OpenMPI' before submitting;\n"
-            "       see workflow/environment.yaml.")
-    py_err = None
-    if stage != "gxsup":  # same `python` + PYTHONNOUSERSITE=1 as the stage scripts
-        py = shutil.which("python")
-        if py is None:
-            py_err = "python: not on PATH"
-        else:
-            r = subprocess.run([py, "-c", "import ete3, Bio, yaml"], capture_output=True, text=True,
-                               env={**os.environ, "PYTHONNOUSERSITE": "1"})
-            if r.returncode != 0:
-                py_err = (f"{py} (PYTHONNOUSERSITE=1) cannot import ete3, Bio, yaml:\n"
-                          f"       {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else 'exit ' + str(r.returncode)}")
-    if lost or py_err:
-        msg = "ERROR:"
-        if lost:
-            msg += f" not on PATH: {' '.join(lost)}"
-        if py_err:
-            msg += f"\n       {py_err}"
-        _fail(msg + "\n" + hint, 78)
+    msg = model.preflight(stage)
+    if msg:
+        _fail(msg, 78)
 
 
 def _print_dry_run(stage: str, run_dir: Path, plan: list, qos: str | None, notes: list[str]):
@@ -343,27 +292,6 @@ def _print_dry_run(stage: str, run_dir: Path, plan: list, qos: str | None, notes
                   soft_wrap=True)
     con.print(f"[yellow]nothing submitted (dry run)[/] · scripts in {shown}/array_*.sbatch",
               soft_wrap=True)
-
-
-def _chunks(ids: list[str], n: int = MAX_ARRAY) -> list[list[str]]:
-    return [ids[i:i + n] for i in range(0, len(ids), n)]
-
-
-def _new_run_dir(stage: str, dry_run: bool = False) -> Path:
-    # A dry run writes its scripts under the system temp dir, so runs/ only holds real
-    # submissions (queue and the already-queued check read runs/*/jobs.tsv).
-    root = Path(tempfile.gettempdir()) / "phylocli-dryrun" if dry_run else _runs_dir()
-    base = root / f"{datetime.now():%Y%m%d-%H%M%S}_{stage}"
-    d, k = base, 1
-    while True:
-        try:
-            d.mkdir(parents=True)
-            break
-        except FileExistsError:
-            k += 1
-            d = base.with_name(f"{base.name}-{k}")
-    (d / "logs").mkdir()
-    return d
 
 
 @app.command()
@@ -419,77 +347,42 @@ def submit(stage: str = typer.Argument(...),
         selected = [hg for hg in selected if hg in keep]
         if not selected:
             _fail(f"no HGs match --fam {fam}", 1)
-    # Ids that are not expected HGs (typos like a trailing ".") are always an error, before the
-    # default mode would otherwise skip them silently as "without inputs".
-    unknown = sorted(set(selected) - core.expected(cfg))
-    if unknown:
-        typer.echo(f"unknown ({len(unknown)}): {_show(unknown)}", err=True)
-        typer.echo("nothing submitted", err=True)
-        raise typer.Exit(2)
-    queued = live_hgs(stage, allow_no_squeue=dry_run, expected=core.expected(cfg))
-    notes: list[str] = list(set_notes)   # printed plainly on submit, inside the panel on a dry run
-    if not all_:
-        unready = [hg for hg in selected if not core.inputs_ready(cfg, stage, hg)]
-        busy = [hg for hg in selected if hg in queued and hg not in unready]
-        if unready:
-            notes.append(f"skipped {len(unready)} HGs without inputs")
-        if busy:
-            notes.append(f"skipped {len(busy)} HGs already queued")
-        drop = set(unready) | set(busy)
-        selected = [hg for hg in selected if hg not in drop]
-    if not selected:
-        for note in notes:
+    try:
+        sel = model.select(cfg, stage, selected, all_=all_, dry_run=dry_run)
+    except model.ModelError as e:
+        if e.code == 2:                     # unknown ids: same two stderr lines as before
+            for line in str(e).splitlines():
+                typer.echo(line, err=True)
+            raise typer.Exit(2)
+        _fail(str(e), e.code)
+    sel.notes[:0] = set_notes               # printed plainly on submit, inside the panel on a dry run
+    if not sel.selected:
+        for note in sel.notes:
             typer.echo(note)
         typer.echo("nothing to submit")
         raise typer.Exit(0)
     _preflight(stage)
-    errs = core.validate(cfg, stage, selected, queued)
-    bad = {k: v for k, v in errs.items() if v}
-    if bad:
-        for k, v in bad.items():
+    over = [f"{k}={v}" for k, v in (("--mem", mem), ("--time", time), ("--cpus", cpus)) if v]
+    p = model.plan(cfg, stage, sel, override, over_flags=over)
+    if p.errors:
+        for k, v in p.errors.items():
             typer.echo(f"{k} ({len(v)}): {_show(v)}", err=True)
         typer.echo("nothing submitted", err=True)
         raise typer.Exit(2)
-    n_rows = core.resources_rows(cfg, selected)
-    over = [f"{k}={v}" for k, v in (("--mem", mem), ("--time", time), ("--cpus", cpus)) if v]
-    notes.append(f"resources.tsv: row found for {n_rows} of {len(selected)} HGs"
-                 + (" (others: step2 defaults)" if n_rows < len(selected) else "")
-                 + (f"; overridden by {' '.join(over)}" if over else ""))
-    groups = core.group(cfg, stage, selected, override)
-    run_dir = _new_run_dir(stage, dry_run)
-    (run_dir / "config.yaml").write_text(yaml.safe_dump(raw, sort_keys=False))
-    plan = []
-    pieces = [(res, c) for res, g in groups.items() for c in _chunks(g)]
-    for k, (res, ids_) in enumerate(pieces):
-        ids_file = run_dir / f"ids_{k}.txt"
-        ids_file.write_text("\n".join(ids_) + "\n")
-        script = run_dir / f"array_{k}.sbatch"
-        script.write_text(SBATCH.format(
-            stage=stage, partition=partition or cfg.partition, qos=qos or res.qos,
-            cpus=res.cpus, mem_mb=res.mem_mb, time_min=res.time_min,
-            n_minus_1=len(ids_) - 1, max_running=max_running, run_dir=run_dir,
-            signal_line=f"#SBATCH --signal={res.signal}" if res.signal else "",
-            ids_file=ids_file, root=ROOT))
-        plan.append((res, ids_, ids_file, script))
+    w = model.write_run(cfg, raw, p, dry_run, max_running, partition, qos)
     if dry_run:
-        _print_dry_run(stage, run_dir, plan, qos, notes)
+        _print_dry_run(stage, w.run_dir, w.arrays, qos, p.notes)
         return
-    for note in notes:
+    for note in p.notes:
         typer.echo(note)
-    typer.echo(f"run dir: {run_dir}")
-    submitted = []
-    for i, (res, ids_, ids_file, script) in enumerate(plan):
-        r = subprocess.run(["sbatch", "--parsable", str(script)], capture_output=True, text=True)
-        jid = r.stdout.strip().split(";")[0]
-        if r.returncode != 0 or not jid:
-            typer.echo(f"sbatch failed for {script}: {r.stderr.strip()}", err=True)
-            typer.echo(f"submitted job ids: {' '.join(submitted) or 'none'}", err=True)
-            typer.echo("not submitted: " + " ".join(str(p[3]) for p in plan[i:]), err=True)
-            raise typer.Exit(1)
-        with open(run_dir / "jobs.tsv", "a") as fh:
-            fh.write(f"{jid}\t{ids_file}\n")
-        submitted.append(jid)
+    typer.echo(f"run dir: {w.run_dir}")
+    jids, err = model.sbatch_all(w)
+    for jid, (res, ids_, _f, _s) in zip(jids, w.arrays):
         typer.echo(f"submitted {jid}: {len(ids_)} HGs ({res.cpus} cpus, {res.mem_mb}M, {res.time_min} min)")
+    if err:
+        for line in err.splitlines():
+            typer.echo(line, err=True)
+        raise typer.Exit(1)
 
 
 # SLURM job states (common.py) -> the four columns of `jobs`.

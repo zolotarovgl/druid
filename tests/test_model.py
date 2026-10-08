@@ -157,3 +157,49 @@ def test_group_per_hg_splits_arrays(cli):
     g = core.group(_cfg(), "align", ["tfs.A.HG11", "tfs.C_x.HG1"],
                    per_hg={"tfs.C_x.HG1": {"mem_mb": 8192}})
     assert sorted(r.mem_mb for r in g) == [4096, 8192]
+
+
+import yaml  # noqa: E402
+
+
+def _raw():
+    return yaml.safe_load(open(os.environ["PHYLOCLI_CONFIG"]).read())
+
+
+def test_select_skips_unready_and_queued(cli, monkeypatch):
+    assert cli(["submit", "align", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SQUEUE", "12345_0|phylo-align\n")
+    sel = model.select(_cfg(), "align", ["tfs.A.HG11", "tfs.C_x.HG1"])
+    assert sel.selected == ["tfs.A.HG11"] and "skipped 1 HGs already queued" in sel.notes
+
+
+def test_select_unknown_is_error(cli):
+    with pytest.raises(model.ModelError) as e:
+        model.select(_cfg(), "align", ["tfs.Z.HG9"])
+    assert e.value.code == 2 and "unknown (1): tfs.Z.HG9" in str(e.value)
+
+
+def test_plan_not_applicable(cli):
+    cfg = dataclasses.replace(_cfg(), params={**_cfg().params, "gxsup": False})
+    sel = model.Selection(["tfs.A.HG11"], [], set())
+    assert model.plan(cfg, "gxsup", sel).errors["not_applicable"] == ["tfs.A.HG11"]
+
+
+def test_write_and_sbatch_with_per_hg(cli):
+    cfg = _cfg()
+    sel = model.select(cfg, "align", ["tfs.A.HG11", "tfs.C_x.HG1"])
+    p = model.plan(cfg, "align", sel, per_hg={"tfs.C_x.HG1": {"mem_mb": 8192}})
+    assert not any(p.errors.values()) and len(p.groups) == 2
+    w = model.write_run(cfg, _raw(), p, dry_run=False)
+    jids, err = model.sbatch_all(w)
+    assert err is None and jids == ["12345", "12345"]
+    scripts = sorted(s.read_text() for _r, _i, _f, s in w.arrays)
+    assert any("--mem=8192M" in s for s in scripts) and any("--mem=4096M" in s for s in scripts)
+    assert (w.run_dir / "jobs.tsv").read_text().count("12345") == 2
+
+
+def test_preflight_message(cli, monkeypatch):
+    monkeypatch.setenv("FAKE_PY_FAIL", "1")
+    msg = model.preflight("align")
+    assert msg and "ete3" in msg and "conda activate phylo" in msg
+    assert model.preflight("gxsup") is None
