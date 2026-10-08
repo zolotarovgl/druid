@@ -454,6 +454,16 @@ def jobs(job_id: str = typer.Argument(None, help="array job id: list its tasks w
     con.print(t)
 
 
+@app.command()
+def tui(refresh: int = typer.Option(30, "--refresh", min=5, help="seconds between refreshes")):
+    """Interactive view: stages, HGs, arrays; select failed HGs and resubmit them."""
+    try:
+        from phylocli import tui as tui_mod
+    except ModuleNotFoundError as e:
+        if (e.name or "").startswith("textual"):
+            _fail("textual not installed: pip install textual", 1)
+        raise
+    tui_mod.PhyloApp(_cfg(), refresh_s=refresh).run()
 
 
 def _job_tasks(job_id: str, failed: bool, running: bool):
