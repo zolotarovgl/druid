@@ -311,9 +311,10 @@ def validate(cfg: Config, stage: str, hgs: list[str], queued: set[str]) -> dict[
 
 
 def group(cfg: Config, stage: str, hgs: list[str],
-          override: dict | None = None) -> dict[Res, list[str]]:
+          override: dict | None = None, per_hg: dict | None = None) -> dict[Res, list[str]]:
     """Group HGs by resources. `override` (keys cpus / mem_mb / time_min) replaces the
-    per-HG value from resources.tsv or the step2 default for every HG."""
+    per-HG value from resources.tsv or the step2 default for every HG; `per_hg`
+    ({hg: {mem_mb: .., time_min: .., cpus: ..}}) then applies to single HGs."""
     table = load_resources_tsv(Path(cfg.params["resources_tsv"]))
     over = {k: v for k, v in (override or {}).items() if v is not None}
     out: dict[Res, list[str]] = {}
@@ -321,6 +322,9 @@ def group(cfg: Config, stage: str, hgs: list[str],
         res = resources(cfg, stage, hg, table)
         if over:
             res = dataclasses.replace(res, **over)
+        mine = {k: v for k, v in (per_hg or {}).get(hg, {}).items() if v is not None}
+        if mine:
+            res = dataclasses.replace(res, **mine)
         out.setdefault(res, []).append(hg)
     return out
 

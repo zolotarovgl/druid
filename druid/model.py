@@ -4,6 +4,8 @@ into the same message + exit code it always printed."""
 from __future__ import annotations
 
 import collections
+import dataclasses
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -264,3 +266,48 @@ def array_rows(stage: str | None = None, last: int = 10):
         c["pending"] += max(n - sum(c.values()), 0)        # tasks sacct has not reported yet
         rows.append(ArrayRow(run, st, jid, n, c))
     return rows, known
+
+
+def parse_duration_min(s: str) -> int | None:
+    """Minutes from fmt_time / Nextflow trace strings: 30m, 4h, 1h30m, 1d, 2d 3h."""
+    parts = re.findall(r"(\d+(?:\.\d+)?)\s*(d|h|m)(?![a-z])", str(s), re.I)
+    if not parts:
+        return None
+    mult = {"d": 1440, "h": 60, "m": 1}
+    return int(round(sum(float(v) * mult[u.lower()] for v, u in parts)))
+
+
+def _is_oom(att) -> bool:
+    return att.status == "OUT_OF_MEMORY" or att.exit == "137"
+
+
+def _is_timeout(att) -> bool:
+    return att.status == "TIMEOUT" or att.exit == "140"
+
+
+def bump_reason(att) -> str:
+    if att is None:
+        return ""
+    if _is_oom(att):
+        return "OOM"
+    if _is_timeout(att):
+        return "time"
+    return history.reason(att.status, att.exit)
+
+
+def bump(att, res: core.Res) -> core.Res:
+    """Resources for a resubmit: start from max(last request, current default); OOM doubles
+    memory, a time limit doubles time, anything else resubmits unchanged."""
+    if att is None:
+        return res
+    try:
+        mem = core.parse_mem_mb(att.mem)
+    except ValueError:
+        mem = res.mem_mb
+    t = parse_duration_min(att.time) or res.time_min
+    base = dataclasses.replace(res, mem_mb=max(mem, res.mem_mb), time_min=max(t, res.time_min))
+    if _is_oom(att):
+        return dataclasses.replace(base, mem_mb=base.mem_mb * 2)
+    if _is_timeout(att):
+        return dataclasses.replace(base, time_min=base.time_min * 2)
+    return base

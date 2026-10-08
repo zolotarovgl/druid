@@ -120,3 +120,40 @@ def test_array_rows(cli, monkeypatch):
     assert known and len(rows) == 1
     r = rows[0]
     assert (r.stage, r.job, r.n, r.counts["done"], r.counts["running"]) == ("align", "12345", 2, 1, 1)
+
+
+from phylocli import history
+
+
+def _att(status, exit_="-", mem="2.0 GB", time="30m"):
+    return history.Attempt("tfs.A.HG11", "gxsup", "phylocli", "r", "2026-10-08 22:00:00", 1,
+                           status, exit_, "2", mem, time, "-", "-", "x.err")
+
+
+RES = core.Res(2, 2048, 30, "normal", None)
+
+
+def test_parse_duration():
+    assert [model.parse_duration_min(s) for s in ("30m", "4h", "1h30m", "1d", "2d 3h", "?")] == \
+        [30, 240, 90, 1440, 3060, None]
+
+
+def test_bump_oom_doubles_mem():
+    assert model.bump(_att("OUT_OF_MEMORY"), RES) == core.Res(2, 4096, 30, "normal", None)
+    assert model.bump(_att("FAILED", "137"), RES).mem_mb == 4096
+
+
+def test_bump_timeout_doubles_time():
+    assert model.bump(_att("TIMEOUT"), RES) == core.Res(2, 2048, 60, "normal", None)
+
+
+def test_bump_other_keeps_last_request():
+    r = model.bump(_att("FAILED", "1", mem="4.0 GB", time="1h30m"), RES)
+    assert (r.mem_mb, r.time_min) == (4096, 90)          # previous, larger request is kept
+    assert model.bump(None, RES) == RES
+
+
+def test_group_per_hg_splits_arrays(cli):
+    g = core.group(_cfg(), "align", ["tfs.A.HG11", "tfs.C_x.HG1"],
+                   per_hg={"tfs.C_x.HG1": {"mem_mb": 8192}})
+    assert sorted(r.mem_mb for r in g) == [4096, 8192]
