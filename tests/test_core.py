@@ -12,6 +12,12 @@ def test_expected_excludes_single_seq(results_tree):
     assert core.expected(cfg) == {"tfs.A.HG1", "tfs.A.HG11", "tfs.C_x.HG1"}
 
 
+def test_expected_min_seqs(results_tree):
+    cfg, _ = results_tree
+    cfg = dataclasses.replace(cfg, params={**cfg.params, "min_seqs": 5})
+    assert core.expected(cfg) == {"tfs.C_x.HG1"}  # the 3-seq HGs drop out
+
+
 def test_ids_file_blank_lines_and_unknown(results_tree, tmp_path):
     cfg, _ = results_tree
     f = tmp_path / "ids.txt"; f.write_text("tfs.A.HG1  \n\n tfs.NOPE.HG9\n")

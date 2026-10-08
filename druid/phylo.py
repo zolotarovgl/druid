@@ -24,6 +24,7 @@ from phylocli.common import (FAILED_STATES, RUNNING_STATES, expand_indices as _e
 from phylocli.runner import run_one  # noqa: E402,F401  (module-level name: tests patch it)
 
 app = typer.Typer(add_completion=False, no_args_is_help=True,
+                  context_settings={"help_option_names": ["-h", "--help"]},
                   help="Report step2 progress and submit per-stage SLURM job arrays.")
 
 TOOLS = {"align": ["mafft", "clipkit"], "tree": ["iqtree2"], "generax": ["generax", "mpirun"],

@@ -41,6 +41,7 @@ def results_tree(tmp_path):
     base["nextflow_dir"] = str(root)
     base["params"].update(resources_tsv=str(root / "resources.tsv"),
                           REFNAMES=str(root / "refnames.csv"),
-                          SPECIES_TREE=str(root / "species.newick"))
+                          SPECIES_TREE=str(root / "species.newick"),
+                          min_seqs=2)  # fixture HGs have 3 seqs
     cfg_file.write_text(yaml.safe_dump(base))
     return core.load_config(cfg_file), root

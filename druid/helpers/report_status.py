@@ -76,15 +76,16 @@ def count_seqs(path, stop=2):
     return n
 
 
-def expected_hgs(outdir, ids_file=None):
-    """Expected HG ids: the stripped non-blank lines of ids_file, else clusters/*.fasta with >= 2 seqs."""
+def expected_hgs(outdir, ids_file=None, min_seqs=2):
+    """Expected HG ids: the stripped non-blank lines of ids_file, else clusters/*.fasta with
+    >= min_seqs seqs (phylocli passes params.min_seqs, = step2.nf's filter)."""
     if ids_file:
         with open(ids_file) as fh:
             return {l.strip() for l in fh if l.strip()}
     cdir = os.path.join(outdir, "clusters")
     return {f[:-6] for f in nonempty_files(cdir)
             if f.endswith(".fasta") and ".HG" in f
-            and count_seqs(os.path.join(cdir, f)) >= 2}
+            and count_seqs(os.path.join(cdir, f), stop=min_seqs) >= min_seqs}
 
 
 def done_by_stage(outdir, expected):

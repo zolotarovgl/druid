@@ -17,3 +17,4 @@ params:
   run_generax: true
   gxsup: true
   resources_tsv: resources.tsv
+  min_seqs: 5          # skip HGs with fewer seqs (= nextflow.config params.min_seqs; IQ-TREE needs >= 4 to bootstrap)
