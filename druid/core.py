@@ -159,7 +159,8 @@ def _val(table: dict, hg: str, *cols: str) -> str | None:
     return None
 
 
-def resources(cfg: Config, stage: str, hg: str, table: dict) -> Res:
+def resources(cfg: Config, stage: str, hg: str, table: dict, n_seqs: "int | None" = None) -> Res:
+    """`n_seqs` (sequences in the HG's FASTA) lets a caller that already knows it skip the file read."""
     qos = cfg.qos
     signal = None
     cpus = 1
@@ -174,7 +175,7 @@ def resources(cfg: Config, stage: str, hg: str, table: dict) -> Res:
         mem = parse_mem_mb(v) if v else 300
         v = _val(table, hg, "phy_time")
         time = parse_time_min(v) if v else 30
-        if nseq(cfg, hg) > 500:
+        if (nseq(cfg, hg) if n_seqs is None else n_seqs) > 500:
             qos = "long"
     elif stage in ("possvm_prev", "possvm"):
         v = _val(table, hg, "pvm_mem")

@@ -484,8 +484,10 @@ def write_run(cfg: core.Config, raw: dict, p: Plan, dry_run: bool, max_running: 
     return Written(run_dir, arrays)
 
 
-def sbatch_all(w: Written) -> tuple[list[str], str | None]:
-    submitted: list[str] = []
+def sbatch_all(w: Written, submitted: list[str] | None = None) -> tuple[list[str], str | None]:
+    """`submitted`, if given, is filled in place as arrays are queued, so a caller that sees an
+    exception mid-way still knows which job ids exist."""
+    submitted = [] if submitted is None else submitted
     for i, (res, ids_, ids_file, script) in enumerate(w.arrays):
         try:
             r = _slurm(["sbatch", "--parsable", str(script)])

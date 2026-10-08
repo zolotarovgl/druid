@@ -463,7 +463,7 @@ def tui(refresh: int = typer.Option(30, "--refresh", min=5, help="seconds betwee
         if (e.name or "").startswith("textual"):
             _fail("textual not installed: pip install textual", 1)
         raise
-    tui_mod.PhyloApp(_cfg(), refresh_s=refresh).run()
+    tui_mod.PhyloApp(_cfg(), refresh_s=refresh, raw=tui_mod.load_raw()).run()
 
 
 def _job_tasks(job_id: str, failed: bool, running: bool):

@@ -296,3 +296,224 @@ def test_second_enter_while_busy_is_ignored(cli, monkeypatch):
             await _settle(app, pilot)
             assert len(n) == 1 and "dry run" in scr._shown
     _run(go())
+
+
+# ---- final-review fix wave -----------------------------------------------------------------
+
+def _slow_build(scr, monkeypatch, secs=0.5):
+    orig = scr._build
+
+    def slow(*a, **k):
+        time.sleep(secs)
+        return orig(*a, **k)
+    monkeypatch.setattr(scr, "_build", slow)
+
+
+async def _open_dialog(app, pilot):
+    app.load_now()
+    await pilot.pause()
+    await pilot.press("a", "r")
+    await pilot.pause()
+    assert isinstance(app.screen, tui.ResubmitScreen)
+    return app.screen
+
+
+def test_edit_during_dry_run_is_not_submitted(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+    n0 = len(_calls())
+
+    async def go():
+        async with app.run_test() as pilot:
+            scr = await _open_dialog(app, pilot)
+            _slow_build(scr, monkeypatch)
+            await pilot.press("enter")
+            scr.query_one("#mem-0").value = "64G"           # edited while the dry run is in flight
+            await _settle(app, pilot)
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert scr.submitted == [] and "values changed" in scr._shown
+            assert len(_calls()) == n0
+    _run(go())
+
+
+def test_no_duplicate_submit_from_same_dialog(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+
+    async def go():
+        async with app.run_test() as pilot:
+            scr = await _open_dialog(app, pilot)
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            n0 = len(_calls())
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert scr.submitted == ["12345"] and len(_calls()) == n0 + 1
+            await pilot.press("enter", "y")
+            await _settle(app, pilot)
+            assert len(_calls()) == n0 + 1 and scr.submitted == ["12345"]
+            assert "already submitted" in scr._shown and "12345" in scr._shown
+    _run(go())
+
+
+def test_load_error_does_not_kill_app(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+    from phylocli import history
+
+    def boom(*a, **k):
+        raise OSError("Stale file handle")
+    monkeypatch.setattr(history, "attempts", boom)
+
+    async def go():
+        async with app.run_test() as pilot:
+            await _settle(app, pilot)
+            assert app.is_running
+            assert any("Stale file handle" in n.message for n in app._notifications)
+    _run(go())
+
+
+def test_write_run_error_shown_in_dialog(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+    from phylocli import model
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(model, "write_run", boom)
+
+    async def go():
+        async with app.run_test() as pilot:
+            scr = await _open_dialog(app, pilot)
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert app.is_running and isinstance(app.screen, tui.ResubmitScreen)
+            assert "disk full" in scr._shown and not scr._busy
+    _run(go())
+
+
+def test_error_after_sbatch_keeps_submitted_ids(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+    from phylocli import model
+
+    def half(w, submitted=None):
+        submitted.append("777")
+        raise OSError("jobs.tsv not writable")
+    monkeypatch.setattr(model, "sbatch_all", half)
+
+    async def go():
+        async with app.run_test() as pilot:
+            scr = await _open_dialog(app, pilot)
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert scr.submitted == ["777"]
+            assert "777" in scr._shown and "jobs.tsv not writable" in scr._shown
+    _run(go())
+
+
+def test_escape_during_submit_waits_for_result(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+
+    async def go():
+        async with app.run_test() as pilot:
+            scr = await _open_dialog(app, pilot)
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            _slow_build(scr, monkeypatch)
+            await pilot.press("y", "escape")
+            assert isinstance(app.screen, tui.ResubmitScreen)       # not dismissed mid-flight
+            await _settle(app, pilot)
+            assert isinstance(app.screen, tui.ResubmitScreen)
+            assert scr.submitted == ["12345"] and "12345" in scr._shown
+    _run(go())
+
+
+def test_no_fasta_reads_after_load(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+
+    async def go():
+        async with app.run_test() as pilot:
+            await _settle(app, pilot)
+            app.load_now()
+            await pilot.pause()
+            calls = []
+            monkeypatch.setattr(core, "nseq", lambda cfg, hg: calls.append(hg) or 0)
+            await pilot.press("f", "f", "f", "f", "down", "up", "space", "a", "f")
+            await pilot.press("r")
+            await pilot.pause()
+            assert isinstance(app.screen, tui.ResubmitScreen)
+            assert calls == []
+            assert app.nseq["tfs.C_x.HG1"] == 600                    # filled by the load
+    _run(go())
+
+
+def test_resource_groups_with_nseq_reads_no_fasta(cli, monkeypatch):
+    _failed_app(cli, monkeypatch)
+    from phylocli import model
+    rows = [r for r in model.hg_rows(_cfg(), "tree") if r.hg == "tfs.C_x.HG1"]
+    calls = []
+    monkeypatch.setattr(core, "nseq", lambda cfg, hg: calls.append(hg) or 0)
+    groups = tui.resource_groups(_cfg(), "tree", rows, {"tfs.C_x.HG1": 600})
+    assert calls == [] and groups[0][1].qos == "long"
+
+
+def test_superseded_refresh_is_not_applied(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+
+    async def go():
+        async with app.run_test() as pilot:
+            await _settle(app, pilot)
+            real, applied, n = app._collect, [], []
+
+            def collect():
+                n.append(1)
+                if len(n) == 1:
+                    time.sleep(0.6)                                   # the first one is slow
+                return real()
+            monkeypatch.setattr(app, "_collect", collect)
+            orig_apply = app._apply
+            monkeypatch.setattr(app, "_apply", lambda snap: applied.append(1) or orig_apply(snap))
+            app.load_bg()
+            await asyncio.sleep(0.2)
+            app.load_bg()                                             # cancels the first
+            await asyncio.sleep(1.0)                                  # past the slow one's end
+            await pilot.pause()
+            assert len(n) == 2 and applied == [1]
+    _run(go())
+
+
+def test_finished_hg_leaves_selection_on_refresh(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+
+    async def go():
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await pilot.press("a")
+            assert app.selected == {"tfs.C_x.HG1"}
+            out = core.load_config(os.environ["PHYLOCLI_CONFIG"]).outdir
+            (out / "align" / "tfs.C_x.HG1.aln.fasta").write_text(">a\nAA\n")
+            app.load_now()
+            await pilot.pause()
+            assert app.selected == set()
+    _run(go())
+
+
+def test_submit_result_shows_notes_and_uses_given_raw(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+    raw = tui.load_raw()
+    raw["marker_key"] = "from-the-command"
+    app = tui.PhyloApp(_cfg(), refresh_s=3600, raw=raw)
+
+    async def go():
+        async with app.run_test() as pilot:
+            scr = await _open_dialog(app, pilot)
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert "12345" in scr._shown and "resources.tsv: row found" in scr._shown
+    _run(go())
+    run = sorted((_state["runs"]).glob("*_align*"))[-1]
+    assert "marker_key: from-the-command" in (run / "config.yaml").read_text()

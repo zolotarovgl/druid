@@ -6,15 +6,23 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
+from rich.markup import escape
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
+from textual.worker import get_current_worker
 
 from phylocli import core, history, model
 from phylocli.common import fmt_mem, fmt_time
+
+
+def load_raw() -> dict:
+    """The raw config.yaml (same path logic as `phylo submit`); written into each run dir."""
+    p = Path(os.environ.get("PHYLOCLI_CONFIG") or core.ROOT / "phylocli/config.yaml")
+    return yaml.safe_load(p.read_text())
 
 FILTERS = ("failed", "ready", "running", "blocked", "done")
 STATE_STYLE = {"done": "green", "running": "cyan", "ready": "yellow", "failed": "red",
@@ -38,9 +46,10 @@ class PhyloApp(App):
         Binding("q", "quit", "quit"),
     ]
 
-    def __init__(self, cfg: core.Config, refresh_s: int = 30):
+    def __init__(self, cfg: core.Config, refresh_s: int = 30, raw: "dict | None" = None):
         super().__init__()
         self.cfg = cfg
+        self.raw = raw if raw is not None else load_raw()
         self.refresh_s = refresh_s
         self.stage = core.STAGES[0]
         self.filter = FILTERS[0]
@@ -71,6 +80,9 @@ class PhyloApp(App):
     # ---- data -------------------------------------------------------------------------------
     def _collect(self) -> dict:
         exp = core.expected(self.cfg)
+        for hg in exp:                       # FASTAs are read here, off the UI thread, once
+            if not self.nseq.get(hg):
+                self.nseq[hg] = core.nseq(self.cfg, hg)
         stages, known, _done = model.stage_rows(self.cfg, exp)
         atts = history.attempts(self.cfg)
         # every applicable stage from ONE attempts read, ONE done scan, ONE squeue call, so
@@ -89,16 +101,24 @@ class PhyloApp(App):
 
     @work(thread=True, exclusive=True)
     def load_bg(self) -> None:
+        worker = get_current_worker()
         try:
             snap = self._collect()
-        except model.ModelError as e:
-            self.call_from_thread(self.notify, str(e), severity="error")
+        except Exception as e:               # keep the old snapshot; never let a worker kill the app
+            if not worker.is_cancelled:
+                self.call_from_thread(self.notify, str(e), severity="error", markup=False)
+            return
+        if worker.is_cancelled:              # superseded by a newer refresh
             return
         self.call_from_thread(self._apply, snap)
 
     def _apply(self, snap: dict) -> None:
         self.atts, self.by_stage = snap["atts"], snap["by_stage"]
         self.rows = self.by_stage.get(self.stage, [])
+        # a selected HG that has finished or been queued must not stay selected invisibly:
+        # validate() would refuse the whole resubmit over it.  (Blocked HGs stay: they are
+        # visible under their filter and test_refresh_keeps_stage_selection_and_cursor pins it.)
+        self.selected &= {r.hg for r in self.rows if r.state not in ("done", "running")}
         banner = []
         if not snap["known"]:
             banner.append("squeue not on PATH: running jobs not detected")
@@ -138,7 +158,7 @@ class PhyloApp(App):
         keep = keep if keep is not None else self._cursor_hg()
         t.clear()
         for r in self.visible():
-            n = self.nseq.setdefault(r.hg, core.nseq(self.cfg, r.hg))
+            n = self.nseq.get(r.hg, 0)
             a = r.last
             t.add_row("●" if r.hg in self.selected else " ", r.hg, str(n),
                       f"[{STATE_STYLE[r.state]}]{r.state}[/]",
@@ -163,7 +183,7 @@ class PhyloApp(App):
             box.update("")
             return
         latest = history.latest_by_stage([a for a in self.atts if a.hg == hg])
-        lines = [f"[b]{hg}[/]  {self.nseq.setdefault(hg, core.nseq(self.cfg, hg))} seqs", ""]
+        lines = [f"[b]{hg}[/]  {self.nseq.get(hg, 0)} seqs", ""]
         for st in core.STAGES:
             rs = next((r for r in self.by_stage.get(st, []) if r.hg == hg), None)
             s_ = rs.state if rs else "n/a"
@@ -220,8 +240,8 @@ class PhyloApp(App):
         if not rows:
             self.notify("nothing selected (space / a)", severity="warning")
             return
-        groups = resource_groups(self.cfg, self.stage, rows)
-        self.push_screen(ResubmitScreen(self.cfg, self.stage, groups),
+        groups = resource_groups(self.cfg, self.stage, rows, self.nseq)
+        self.push_screen(ResubmitScreen(self.cfg, self.stage, groups, self.raw),
                          lambda _jids: (self.selected.clear(), self.load_bg()))
 
     def action_log(self) -> None:
@@ -233,12 +253,14 @@ class PhyloApp(App):
         self.push_screen(LogScreen(a.log))
 
 
-def resource_groups(cfg: core.Config, stage: str, rows: list) -> list:
-    """[(reason, bumped Res, hgs)] for the selected rows, one entry per distinct pair."""
+def resource_groups(cfg: core.Config, stage: str, rows: list, nseq: "dict | None" = None) -> list:
+    """[(reason, bumped Res, hgs)] for the selected rows, one entry per distinct pair.
+    `nseq` ({hg: n sequences}) spares `core.resources` the FASTA read (UI thread)."""
     table = core.load_resources_tsv(Path(cfg.params["resources_tsv"]))
     out: dict = {}
     for r in sorted(rows, key=lambda r: r.hg):
-        res = model.bump(r.last, core.resources(cfg, stage, r.hg, table))
+        n = nseq.get(r.hg, 0) if nseq is not None else None
+        res = model.bump(r.last, core.resources(cfg, stage, r.hg, table, n))
         out.setdefault((model.bump_reason(r.last), res), []).append(r.hg)
     return [(why, res, hgs) for (why, res), hgs in out.items()]
 
@@ -261,13 +283,17 @@ class ResubmitScreen(ModalScreen):
     Input { width: 14; }
     """
 
-    def __init__(self, cfg: core.Config, stage: str, groups: list):
+    def __init__(self, cfg: core.Config, stage: str, groups: list, raw: "dict | None" = None):
         super().__init__()
         self.cfg, self.stage, self.groups = cfg, stage, groups
+        self.raw = raw if raw is not None else load_raw()
         self.submitted: list[str] = []
         self._dry_ok = False
+        self._dry_per: "dict | None" = None     # the values the last dry run was computed from
         self._busy = False
         self._shown = ""
+        self._result = ""
+        self._refocus = None
 
     def compose(self) -> ComposeResult:
         with _Box(id="box"):
@@ -288,6 +314,8 @@ class ResubmitScreen(ModalScreen):
         self.action_dry_run()
 
     def on_input_changed(self, event: Input.Changed) -> None:
+        if self._busy:                         # the worker's values are already fixed
+            return
         if self._dry_ok:                       # values moved since the dry run
             self._dry_ok = False
             self._out("[yellow]values changed: enter to re-run the dry run[/]")
@@ -331,27 +359,54 @@ class ResubmitScreen(ModalScreen):
         except Exception:
             pass
 
+    def _lock(self, locked: bool) -> None:
+        try:
+            for inp in self.query(Input):
+                inp.disabled = locked
+        except Exception:                  # screen already dismissed
+            pass
+
+    def _already_submitted(self) -> bool:
+        if not self.submitted:
+            return False
+        self._out(self._result + "\n[yellow]already submitted · esc to close[/]")
+        return True
+
     def _start(self, work, dry_run: bool) -> None:
-        if self._busy:
+        if self._busy or self._already_submitted():
             return
         try:
             per = self._per_hg()                               # reads the Inputs: UI thread
         except (ValueError, model.ModelError) as e:
-            self._out(f"[red]{e}[/]")
+            self._out(f"[red]{escape(str(e))}[/]")
             self._dry_ok = False
             return
         self._busy = True
+        self._refocus = self.focused if isinstance(self.focused, Input) else None
+        self._lock(True)
         self._out("[cyan]working…[/]")
         work(per)
 
-    def _finish(self, text: str, dry_ok: bool = False, jids: "list | None" = None) -> None:
+    def _finish(self, text: str, dry_ok: bool = False, jids: "list | None" = None,
+                per: "dict | None" = None) -> None:
         self._busy = False
         self._dry_ok = dry_ok
-        if jids is not None:
+        self._dry_per = per if dry_ok else None
+        if jids:
             self.submitted = jids
+            self._result = text
+        self._lock(False)
+        if self._refocus is not None:
+            try:
+                self._refocus.focus()
+            except Exception:
+                pass
+            self._refocus = None
         self._out(text)
 
     def action_dry_run(self) -> None:
+        if self._busy or self._already_submitted():
+            return
         self._dry_ok = False
         self._start(self._dry_worker, dry_run=True)
 
@@ -359,46 +414,65 @@ class ResubmitScreen(ModalScreen):
     def _dry_worker(self, per: dict) -> None:
         try:
             p, err = self._build(True, per)
-        except (ValueError, model.ModelError) as e:
-            self._post(self._finish, f"[red]{e}[/]")
+            if p is None:
+                self._post(self._finish, f"[red]{escape(err)}[/]")
+                return
+            lines = ["[cyan]dry run[/] — nothing submitted yet; y to submit"] + [escape(n) for n in p.notes]
+            for k, (res, ids_) in enumerate(p.groups):
+                lines.append(f"array {k}: {len(ids_)} HGs · {res.cpus} cpus · {fmt_mem(res.mem_mb)}"
+                             f" · {fmt_time(res.time_min)} · {res.qos}")
+        except Exception as e:             # never let a worker kill the app
+            self._post(self._finish, f"[red]{escape(str(e))}[/]")
             return
-        if p is None:
-            self._post(self._finish, f"[red]{err}[/]")
-            return
-        lines = ["[cyan]dry run[/] — nothing submitted yet; y to submit"] + p.notes
-        for k, (res, ids_) in enumerate(p.groups):
-            lines.append(f"array {k}: {len(ids_)} HGs · {res.cpus} cpus · {fmt_mem(res.mem_mb)}"
-                         f" · {fmt_time(res.time_min)} · {res.qos}")
-        self._post(self._finish, "\n".join(lines), True)
+        self._post(self._finish, "\n".join(lines), True, None, per)
 
     def action_submit(self) -> None:
-        if self._busy:
+        if self._busy or self._already_submitted():
             return
         if not self._dry_ok:
             if not self._shown:                    # keep an error the dry run already shows
                 self._out("[yellow]run the dry run first (enter)[/]")
             return
+        try:
+            per = self._per_hg()
+        except (ValueError, model.ModelError) as e:
+            self._out(f"[red]{escape(str(e))}[/]")
+            self._dry_ok = False
+            return
+        if per != self._dry_per:                   # edited since (or during) the dry run
+            self._dry_ok = False
+            self._out("[yellow]values changed since the dry run — press enter again[/]")
+            return
         self._start(self._submit_worker, dry_run=False)
 
     @work(thread=True, exclusive=True, group="resubmit")
     def _submit_worker(self, per: dict) -> None:
+        jids: list = []                            # filled by sbatch_all as arrays are queued
+        notes: list = []
+        w = None
         try:
-            p, err = self._build(False, per)                  # recomputed: state may have moved
+            p, err = self._build(False, per)       # recomputed: state may have moved
             if p is None:
-                self._post(self._finish, f"[red]{err}[/]")
+                self._post(self._finish, f"[red]{escape(err)}[/]")
                 return
-            with open(os.environ.get("PHYLOCLI_CONFIG") or core.ROOT / "phylocli/config.yaml") as fh:
-                raw = yaml.safe_load(fh.read())
-            w = model.write_run(self.cfg, raw, p, dry_run=False)
-            jids, err = model.sbatch_all(w)
-        except (ValueError, model.ModelError) as e:
-            self._post(self._finish, f"[red]{e}[/]")
+            notes = [escape(n) for n in p.notes]
+            w = model.write_run(self.cfg, self.raw, p, dry_run=False)
+            _ids, err = model.sbatch_all(w, jids)
+        except Exception as e:             # never let a worker kill the app
+            text = "\n".join(notes + ([f"[green]submitted {' '.join(jids)}[/]"
+                                        f"{' · run dir ' + str(w.run_dir) if w else ''}"] if jids else [])
+                              + [f"[red]{escape(str(e))}[/]"])
+            self._post(self._finish, text, False, jids)
             return
-        self._post(self._finish,
-                   (f"[green]submitted {' '.join(jids)}[/] · run dir {w.run_dir}" if jids else "")
-                   + (f"\n[red]{err}[/]" if err else ""), False, jids)
+        lines = notes + ([f"[green]submitted {' '.join(jids)}[/] · run dir {w.run_dir}"] if jids else [])
+        if err:
+            lines.append(f"[red]{escape(err)}[/]")
+        self._post(self._finish, "\n".join(lines), False, jids)
 
     def action_cancel(self) -> None:
+        if self._busy:                             # dismissing now would drop the result
+            self.notify("still working — wait", severity="warning")
+            return
         self.dismiss(self.submitted)
 
 
