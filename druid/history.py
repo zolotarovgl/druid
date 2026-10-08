@@ -25,6 +25,8 @@ PROC_STAGE = {"ALN": "align", "PHY": "tree", "PVM_PREV": "possvm_prev",
 NF_FIELDS = "process,tag,status,exit,attempt,cpus,memory,time,peak_rss,realtime,workdir,submit"
 NF_VER = "25.04.2"
 NF_WARNING = "nextflow not on PATH: Nextflow history skipped"
+SACCT_TIMEOUT = 60       # seconds; the TUI calls this every refresh, a stuck slurmdbd must not hang it
+NEXTFLOW_TIMEOUT = 120   # seconds for one `nextflow log`
 
 
 @dataclass(frozen=True)
@@ -117,7 +119,10 @@ def _call_nextflow(nextflow_dir: Path, run: str) -> str:
     try:
         r = subprocess.run(["nextflow", "-log", tmp, "log", run, "-f", NF_FIELDS],
                            cwd=str(nextflow_dir), capture_output=True, text=True,
-                           env={**os.environ, "NXF_VER": os.environ.get("NXF_VER", NF_VER)})
+                           env={**os.environ, "NXF_VER": os.environ.get("NXF_VER", NF_VER)},
+                           timeout=NEXTFLOW_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"nextflow log timed out after {NEXTFLOW_TIMEOUT} s") from None
     finally:
         try:
             os.unlink(tmp)
@@ -231,8 +236,12 @@ def _sacct(job_ids: list[str]) -> dict | None:
         return {}
     if shutil.which("sacct") is None:
         return None
-    r = subprocess.run(["sacct", "-n", "-P", "-j", ",".join(job_ids), "-o",
-                        "JobID,State,MaxRSS,Elapsed,ExitCode"], capture_output=True, text=True)
+    try:
+        r = subprocess.run(["sacct", "-n", "-P", "-j", ",".join(job_ids), "-o",
+                            "JobID,State,MaxRSS,Elapsed,ExitCode"], capture_output=True, text=True,
+                           timeout=SACCT_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return None
     if r.returncode != 0:
         return None
     out: dict = {}

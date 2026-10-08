@@ -250,3 +250,30 @@ def test_status_without_hg_unchanged(hist):
     cli, _cfg, calls, _t = hist
     r = cli(["status"])
     assert r.exit_code == 0 and "HGs done" in r.output and not calls.exists()
+
+
+def test_sacct_timeout_gives_unknown(hist, monkeypatch):
+    import time
+    _cli, cfg, _c, _t = hist
+    p = _state["bin"] / "sacct"
+    p.write_text("#!/bin/sh\nexec sleep 5\n")
+    p.chmod(p.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setattr(history, "SACCT_TIMEOUT", 1)
+    t0 = time.time()
+    a = _by(history.attempts(cfg, HG), source="phylocli", stage="generax")[0]
+    assert (a.status, a.peak_rss, a.realtime) == ("unknown", "-", "-")
+    assert time.time() - t0 < 4
+
+
+def test_nextflow_log_timeout_skips_run(hist, monkeypatch):
+    import time
+    _cli, cfg, _c, tmp = hist
+    nxf = tmp / "nfbin" / "nextflow"
+    nxf.write_text("#!/bin/sh\nexec sleep 5\n")
+    monkeypatch.setattr(history, "NEXTFLOW_TIMEOUT", 1)
+    t0 = time.time()
+    warned = []
+    atts = history.attempts(cfg, HG, warn=warned.append)
+    assert time.time() - t0 < 8
+    assert not _by(atts, source="nextflow")
+    assert any("timed out" in w for w in warned)

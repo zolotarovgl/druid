@@ -491,9 +491,14 @@ def sbatch_all(w: Written) -> tuple[list[str], str | None]:
             r = _slurm(["sbatch", "--parsable", str(script)])
             jid, rc, why = r.stdout.strip().split(";")[0], r.returncode, r.stderr.strip()
         except ModelError as e:                      # timed out
-            jid, rc, why = "", 1, str(e)
+            jid, rc, why = "", 1, (f"{e} for {script}: the array may have been queued"
+                                   " — check 'squeue --me' before resubmitting")
+            timed_out = True
+        else:
+            timed_out = False
         if rc != 0 or not jid:
-            return submitted, (f"sbatch failed for {script}: {why}\n"
+            head = why if timed_out else f"sbatch failed for {script}: {why}"
+            return submitted, (f"{head}\n"
                                f"submitted job ids: {' '.join(submitted) or 'none'}\n"
                                "not submitted: " + " ".join(str(a[3]) for a in w.arrays[i:]))
         with open(w.run_dir / "jobs.tsv", "a") as fh:
