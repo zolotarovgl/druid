@@ -60,6 +60,45 @@ grouping already does by `Res`).
 
 ## Screens and interaction
 
+### Overview — the first screen (amended 09/10/2026, Grygoriy: "I don't want to see the logs at first, I want to see the overview of stages, maybe binned by family")
+
+`phylo tui` opens on an **overview**, not on the HG panels:
+
+```
+phylocli · Phylogenies_v3 · 10:42                      [c]ategory / [f]amily · q
+              align      tree       possvm_prev generax    gxsup      possvm
+ALL   1822    ██████████ █████████▓ █████████░  █████████▒ ████████░░ ████████░░  1757 done
+adh    912    ██████████ ██████████ ██████████  █████████▒ █████████░ █████████░
+tfs    489    ██████████ █████████▓ █████████░  ██████████ ████████░░ ████████░░
+█ done ▒ running ▓ ready/failed ░ blocked      enter: open the HGs of a row
+```
+
+- One row per **category** (first id part: `tfs`, `adh`, …) by default; `f` switches to one row per
+  **family** (`tfs.T-box`, …), `c` back. Rows sorted by HG count, descending; an `ALL` row first.
+- One column per applicable stage: a fixed-width bar of done / running / ready / blocked
+  (same glyphs and largest-remainder rounding as `phylo status`; `n/a` for a non-applicable
+  stage). A footer line shows the exact counts of the highlighted row per stage.
+- **ready includes failed** at this level ("▓ ready/failed"): the overview reads only output
+  files + `squeue`, never the attempt history, so it cannot tell them apart — that keeps a refresh
+  to the cost of `phylo status` (~2 s on v3).
+- The `ALL` row's numbers equal `phylo status` exactly (one code path: `model`).
+- Refresh in the background every 30 s and on `R`; the cursor row is kept across refreshes.
+- **Cell cursor** (amended 09/10/2026, Grygoriy: "select the stage, then move to the second
+  window and select which jobs I want to resubmit"): `↑↓` picks the group, `←→` picks the stage
+  column. `enter` on a stage cell opens the HG view **for that group at that stage**: the stage
+  is preselected in the stages panel, the filter is `failed`, and the cursor is already in the HG
+  list, so the next keys are `space`… / `a`, then `r`. `enter` on the group or HG-count column
+  opens the group at the current stage.
+- Keys: `↑↓←→` move · `enter` open · `c`/`f` grouping · `R` refresh · `q` quit.
+
+### HG view — opened from an overview row with `enter`
+
+The four panels below, **restricted to the HGs of that row** (all HGs for `ALL`). The attempt
+history (`history.attempts`, the slow part: ~3.5 s on v3) is loaded only here, in the background,
+and cached for the session; until it arrives the HG list shows states without the
+failed/ready split and a "loading history…" note. `esc` returns to the overview (cursor kept).
+Everything else — filters, selection, resubmit, log — is unchanged.
+
 Four panels:
 
 - **Stages** (top left): stage, done, running, ready, blocked, total, coloured bar.
@@ -84,7 +123,9 @@ Keys: `↑↓` move · `tab` panel · `space` select HG · `a` select all in the
 ### Refresh
 
 Background worker every 30 s (and on `R`); the UI never blocks on `squeue`/`sacct`.
-Header shows the last refresh time.
+Header shows the last refresh time. Each refresh computes the expected HG set **once** and passes
+it to every consumer (measured 09/10/2026 on v3: `core.expected` 1.2 s, called 3–4× per refresh;
+whole HG-view refresh 7–10 s).
 
 ## Error handling
 
