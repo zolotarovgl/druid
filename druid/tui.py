@@ -72,7 +72,7 @@ class PhyloApp(App):
         self.by = "category"
         self.group: "str | None" = None
         self.ov_rows: list = []
-        self._ov_inputs: tuple = (set(), {}, {}, True)
+        self._ov_inputs: tuple = (set(), {})
         self._banner_text = ""
 
     def compose(self) -> ComposeResult:
@@ -104,14 +104,15 @@ class PhyloApp(App):
         lv = model.live(exp)
         known = lv is not None
         lv = lv or {}
-        ov_rows, _k = model.group_rows(self.cfg, exp, self.by, done_map, lv)
-        snap = dict(ov_rows=ov_rows, ov_inputs=(exp, done_map, lv, known), known=known,
+        states = model.stage_states(self.cfg, exp, done_map, lv)
+        by = self.by
+        ov_rows, _k = model.group_rows(self.cfg, exp, by, states=states)
+        snap = dict(ov_rows=ov_rows, by=by, ov_inputs=(exp, states), known=known,
                     when=datetime.now(), hg=None)
         if self.view == "hgs":               # the slow part: attempt history, only in the HG view
             for hg in exp:                   # FASTAs are read here, off the UI thread, once
                 if not self.nseq.get(hg):
                     self.nseq[hg] = core.nseq(self.cfg, hg)
-            stages, _k2, _d = model.stage_rows(self.cfg, exp)
             atts = history.attempts(self.cfg)
             # every applicable stage from ONE attempts read, ONE done scan, ONE squeue call, so
             # that stage changes and the detail panel need no subprocess on a key press
@@ -119,7 +120,7 @@ class PhyloApp(App):
                              if core.applicable(self.cfg, st) else [])
                         for st in core.STAGES}
             arrays, sacct_known = model.array_rows()
-            snap["hg"] = dict(stages=stages, atts=atts, by_stage=by_stage, arrays=arrays,
+            snap["hg"] = dict(atts=atts, by_stage=by_stage, arrays=arrays,
                               sacct_known=sacct_known)
         return snap
 
@@ -145,7 +146,10 @@ class PhyloApp(App):
 
     def _apply(self, snap: dict) -> None:
         self._ov_inputs = snap["ov_inputs"]
-        self._fill_overview(snap["ov_rows"])
+        if snap["by"] != self.by:            # c/f pressed while this was being collected
+            self._regroup()
+        else:
+            self._fill_overview(snap["ov_rows"])
         hg = snap["hg"]
         banner = []
         if not snap["known"]:
@@ -165,17 +169,7 @@ class PhyloApp(App):
         # visible under their filter and test_refresh_keeps_stage_selection_and_cursor pins it.)
         self.selected &= {r.hg for r in self.rows if r.state not in ("done", "running")}
         snap = hg
-        st = self.query_one("#stages", DataTable)
-        keep_stage = self.stage
-        st.clear()
-        for r in snap["stages"]:
-            if r.applicable:
-                st.add_row(r.stage, str(r.done), str(r.running), str(r.ready), str(r.blocked),
-                           str(r.total), key=r.stage)
-            else:
-                st.add_row(r.stage, "n/a", "", "", "", "", key=r.stage)
-        if keep_stage in core.STAGES:
-            st.move_cursor(row=core.STAGES.index(keep_stage))
+        self._fill_stages()
         ar = self.query_one("#arrays", DataTable)
         keep_row = ar.cursor_row
         ar.clear()
@@ -234,10 +228,32 @@ class PhyloApp(App):
             + "\n█ done ▒ running ▓ ready/failed ░ blocked · enter: open · c/f: category/family")
 
     def _regroup(self) -> None:
-        exp, done, lv, _known = self._ov_inputs
-        rows, _k = model.group_rows(self.cfg, exp, self.by, done, lv)   # no subprocess
+        exp, states = self._ov_inputs
+        rows, _k = model.group_rows(self.cfg, exp, self.by, states=states)   # in-memory only
         self._fill_overview(rows)
-        self.load_bg()
+        if self.view == "hgs":
+            self._fill_stages()
+
+    def _fill_stages(self) -> None:
+        """Stages panel = the counts of the group being viewed (ALL when none), taken from the
+        overview rows so the panel and the group-restricted HG list agree."""
+        row = next((r for r in self.ov_rows if r.group == (self.group or "ALL")), None)
+        if row is None and self.ov_rows:
+            row = self.ov_rows[0]
+        if row is None:
+            return
+        st = self.query_one("#stages", DataTable)
+        keep_stage = self.stage
+        st.clear()
+        for name in core.STAGES:
+            c = row.per_stage.get(name)
+            if c is None:
+                st.add_row(name, "n/a", "", "", "", "", key=name)
+            else:
+                st.add_row(name, str(c[0]), str(c[1]), str(c[2]), str(c[3]), str(row.total),
+                           key=name)
+        if keep_stage in core.STAGES:
+            st.move_cursor(row=core.STAGES.index(keep_stage))
 
     def open_group(self, name: str, stage: "str | None" = None) -> None:
         self.group = None if name == "ALL" else name
@@ -251,16 +267,19 @@ class PhyloApp(App):
                 st.move_cursor(row=core.STAGES.index(stage))
         self.rows = self.by_stage.get(self.stage, [])
         self._show_view()
-        first = not self.by_stage
-        if first:
+        if not self.by_stage:
             self._set_banner("loading history…")
+        self._fill_stages()
         self._fill_hgs(keep="")
-        if first:
-            # a beat before the first (history-reading) load, so the note above is seen and a
-            # quick enter/esc does not start a read nobody waits for
-            self.set_timer(0.5, self.load_bg)
-        else:
-            self.load_bg()
+        self.load_bg()
+
+    def check_action(self, action: str, parameters: tuple) -> "bool | None":
+        """Footer shows only the keys of the current view."""
+        if action in ("by_category",):
+            return self.view == "overview"
+        if action in ("back", "toggle", "select_all", "resubmit", "log"):
+            return self.view == "hgs"
+        return True
 
     def action_back(self) -> None:
         if self.view == "hgs":
@@ -322,7 +341,7 @@ class PhyloApp(App):
             a = latest.get(st)
             extra = (f"  {a.status} ({history.reason(a.status, a.exit)})  req {a.cpus}/{a.mem}/{a.time}"
                      f"  used {a.peak_rss}/{a.realtime}" if a else "")
-            lines.append(f"{st:<12} [{STATE_STYLE.get(s_, 'white')}]{s_}[/]{extra}")
+            lines.append(f"{st:<12} [{STATE_STYLE.get(s_, 'white')}]{s_:<8}[/]{extra}")
         a = latest.get(self.stage)
         if a is not None:
             lines += ["", f"log: {a.log}"]

@@ -534,17 +534,10 @@ class GroupRow:
     per_stage: dict
 
 
-def group_rows(cfg: core.Config, exp: set[str], by: str = "category",
-               done: dict | None = None, lv: dict | None = None):
-    """(rows, squeue_known): per-group done/running/ready/blocked per stage, from output files
-    and squeue only (no attempt history). rows[0] is ALL and equals stage_rows()."""
-    done = core.report_status.done_by_stage(str(cfg.outdir), exp) if done is None else done
-    known = True
-    if lv is None:
-        lv = live(exp)
-        known = lv is not None
-        lv = lv or {}
-    state: dict[str, dict[str, int]] = {}          # stage -> hg -> 0 done 1 running 2 ready 3 blocked
+def stage_states(cfg: core.Config, exp: set[str], done: dict, lv: dict) -> dict:
+    """stage -> hg -> 0 done / 1 running / 2 ready / 3 blocked, for applicable stages only.
+    The expensive part (ready_set lists directories); computed once per refresh."""
+    state: dict[str, dict[str, int]] = {}
     for st in core.STAGES:
         if not core.applicable(cfg, st):
             continue
@@ -554,6 +547,23 @@ def group_rows(cfg: core.Config, exp: set[str], by: str = "category",
         ready = core.ready_set(cfg, st, todo - running)
         state[st] = {hg: (0 if hg in d else 1 if hg in running else 2 if hg in ready else 3)
                      for hg in exp}
+    return state
+
+
+def group_rows(cfg: core.Config, exp: set[str], by: str = "category",
+               done: dict | None = None, lv: dict | None = None, states: dict | None = None):
+    """(rows, squeue_known): per-group done/running/ready/blocked per stage, from output files
+    and squeue only (no attempt history). rows[0] is ALL and equals stage_rows().
+    `states` (from stage_states) makes this pure in-memory counting."""
+    known = True
+    if states is None:
+        done = core.report_status.done_by_stage(str(cfg.outdir), exp) if done is None else done
+        if lv is None:
+            lv = live(exp)
+            known = lv is not None
+            lv = lv or {}
+        states = stage_states(cfg, exp, done, lv)
+    state = states
     groups: dict[str, list[str]] = collections.defaultdict(list)
     for hg in exp:
         groups[group_key(hg, by)].append(hg)

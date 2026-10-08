@@ -574,7 +574,8 @@ def test_open_group_restricts_hgs_and_esc_returns(cli, monkeypatch):
             await pilot.pause()
             await pilot.press("f")
             await pilot.pause()
-            app.query_one("#overview").move_cursor(row=1)          # tfs.A
+            app.query_one("#overview").move_cursor(row=1, column=3)    # tfs.A
+            col0 = 3
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
@@ -594,6 +595,7 @@ def test_open_group_restricts_hgs_and_esc_returns(cli, monkeypatch):
             await pilot.pause()
             assert app.view == "overview"
             assert app.query_one("#overview").cursor_row == 1
+            assert app.query_one("#overview").cursor_column == col0
     _run(go())
 
 
@@ -633,18 +635,93 @@ def test_refresh_in_hg_view_stays_in_group(cli):
             app.load_now()
             await pilot.pause()
             assert app.view == "hgs" and app.group == "tfs"
+            assert {r.hg for r in app.visible()} <= {"tfs.A.HG1", "tfs.A.HG11", "tfs.C_x.HG1"}
+            app.filter = "ready"
+            app._fill_hgs()
+            assert all(tui.model.group_key(r.hg, "category") == "tfs" for r in app.visible())
     _run(go())
 
 
-def test_open_group_before_hg_data_shows_loading(cli):
+def test_open_group_before_hg_data_shows_loading(cli, monkeypatch):
+    import threading
+    from phylocli import history
+    gate = threading.Event()
+    real = history.attempts
+
+    def slow(*a, **k):
+        gate.wait(10)
+        return real(*a, **k)
+
     async def go():
         app = tui.PhyloApp(_cfg(), refresh_s=3600)
         async with app.run_test() as pilot:
             app.load_now()
             await pilot.pause()
+            monkeypatch.setattr(history, "attempts", slow)
             app.by_stage = {}                       # no HG-view snapshot yet
             app.open_group("tfs")
             await pilot.pause()
             assert app.visible() == []
             assert "loading history" in app._banner_text
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "loading history" not in app._banner_text
+            assert app.by_stage
+    _run(go())
+
+
+def test_stages_panel_shows_group_counts(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await pilot.press("f")
+            await pilot.pause()
+            app.open_group("tfs.A")
+            await pilot.pause()
+            app.load_now()
+            await pilot.pause()
+            rows = {r.group: r for r in app.ov_rows}
+            t = app.query_one("#stages")
+            i = core.STAGES.index("align")
+            cells = [str(t.get_cell_at((i, c))) for c in range(1, 6)]
+            c = rows["tfs.A"].per_stage["align"]
+            assert cells == [str(c[0]), str(c[1]), str(c[2]), str(c[3]), str(rows["tfs.A"].total)]
+            assert rows["tfs.A"].total != rows["ALL"].total
+    _run(go())
+
+
+def test_regroup_is_in_memory(cli, monkeypatch):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+
+            def boom(*a, **k):
+                raise AssertionError("ready_set called on regroup")
+            monkeypatch.setattr(core, "ready_set", boom)
+            await pilot.press("f")
+            await pilot.pause()
+            assert [r.group for r in app.ov_rows] == ["ALL", "tfs.A", "tfs.C_x"]
+            await pilot.press("c")
+            await pilot.pause()
+            assert [r.group for r in app.ov_rows] == ["ALL", "tfs"]
+    _run(go())
+
+
+def test_footer_keys_follow_view(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            assert app.check_action("by_category", ()) and not app.check_action("back", ())
+            assert not app.check_action("resubmit", ())
+            app.open_group("tfs")
+            await pilot.pause()
+            assert app.check_action("back", ()) and app.check_action("resubmit", ())
+            assert not app.check_action("by_category", ())
     _run(go())
