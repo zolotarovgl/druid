@@ -1,15 +1,20 @@
 """phylo tui: interactive view of step2 progress (Textual). Imported only by `phylo tui`."""
 from __future__ import annotations
 
+import os
 from datetime import datetime
+from pathlib import Path
 
+import yaml
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Grid
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
+from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 
 from phylocli import core, history, model
+from phylocli.common import fmt_mem, fmt_time
 
 FILTERS = ("failed", "ready", "running", "blocked", "done")
 STATE_STYLE = {"done": "green", "running": "cyan", "ready": "yellow", "failed": "red",
@@ -177,8 +182,172 @@ class PhyloApp(App):
     def action_refresh(self) -> None:
         self.load_bg()
 
-    def action_resubmit(self) -> None:      # Task 7
-        self.notify("resubmit: not implemented yet")
+    def action_resubmit(self) -> None:
+        rows = [r for r in self.rows if r.hg in self.selected]
+        if not rows:
+            self.notify("nothing selected (space / a)", severity="warning")
+            return
+        groups = resource_groups(self.cfg, self.stage, rows)
+        self.push_screen(ResubmitScreen(self.cfg, self.stage, groups),
+                         lambda _jids: (self.selected.clear(), self.load_bg()))
 
-    def action_log(self) -> None:           # Task 7
-        self.notify("log: not implemented yet")
+    def action_log(self) -> None:
+        hg = self._cursor_hg()
+        a = next((r.last for r in self.rows if r.hg == hg), None) if hg else None
+        if a is None:
+            self.notify("no attempt recorded for this HG at this stage", severity="warning")
+            return
+        self.push_screen(LogScreen(a.log))
+
+
+def resource_groups(cfg: core.Config, stage: str, rows: list) -> list:
+    """[(reason, bumped Res, hgs)] for the selected rows, one entry per distinct pair."""
+    table = core.load_resources_tsv(Path(cfg.params["resources_tsv"]))
+    out: dict = {}
+    for r in sorted(rows, key=lambda r: r.hg):
+        res = model.bump(r.last, core.resources(cfg, stage, r.hg, table))
+        out.setdefault((model.bump_reason(r.last), res), []).append(r.hg)
+    return [(why, res, hgs) for (why, res), hgs in out.items()]
+
+
+class _Box(Vertical, can_focus=True):
+    pass
+
+
+class ResubmitScreen(ModalScreen):
+    # Focus: the box (not an Input) is focused on mount, so enter / y / escape are screen
+    # bindings from the start.  Tab moves into the Inputs to edit; there, enter submits the
+    # Input (-> dry run) and escape still reaches the screen.  `y` is a priority binding:
+    # no valid memory/time value contains a y, so it can never be meant as typed text.
+    BINDINGS = [Binding("enter", "dry_run", "dry run"),
+                Binding("y", "submit", "submit", priority=True),
+                Binding("escape", "cancel", "cancel")]
+    CSS = """
+    ResubmitScreen { align: center middle; }
+    #box { width: 90%; height: auto; border: round $warning; background: $surface; padding: 1; }
+    Input { width: 14; }
+    """
+
+    def __init__(self, cfg: core.Config, stage: str, groups: list):
+        super().__init__()
+        self.cfg, self.stage, self.groups = cfg, stage, groups
+        self.submitted: list[str] = []
+        self._dry_ok = False
+        self._shown = ""
+
+    def compose(self) -> ComposeResult:
+        with _Box(id="box"):
+            yield Label(f"[b]resubmit · {self.stage}[/]  enter = dry run · y = submit · esc = cancel")
+            for i, (why, res, hgs) in enumerate(self.groups):
+                with Horizontal():
+                    yield Label(f"{len(hgs)} HGs · {why or 'other'} · mem ")
+                    yield Input(fmt_mem(res.mem_mb).replace(" ", "").replace("GB", "G")
+                                .replace("MB", "M"), id=f"mem-{i}")
+                    yield Label(" time ")
+                    yield Input(fmt_time(res.time_min), id=f"time-{i}")
+            yield Static("", id="out")
+
+    def on_mount(self) -> None:
+        self.query_one("#box").focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.action_dry_run()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if self._dry_ok:                       # values moved since the dry run
+            self._dry_ok = False
+            self._out("[yellow]values changed: enter to re-run the dry run[/]")
+
+    def _per_hg(self) -> dict:
+        per: dict = {}
+        for i, (_why, _res, hgs) in enumerate(self.groups):
+            mem = core.parse_mem_mb(self.query_one(f"#mem-{i}", Input).value)
+            t = model.parse_duration_min(self.query_one(f"#time-{i}", Input).value)
+            if mem <= 0 or not t:
+                raise ValueError(f"bad value in row {i}: memory and time must be > 0")
+            for hg in hgs:
+                per[hg] = {"mem_mb": mem, "time_min": t}
+        return per
+
+    def _build(self, dry_run: bool):
+        per = self._per_hg()                                   # ValueError -> caller
+        hgs = [hg for _w, _r, g in self.groups for hg in g]
+        sel = model.select(self.cfg, self.stage, hgs, dry_run=dry_run)
+        if not sel.selected:
+            return None, "\n".join(sel.notes + ["nothing to submit"])
+        msg = model.preflight(self.stage)
+        if msg:
+            return None, msg
+        p = model.plan(self.cfg, self.stage, sel, per_hg=per)
+        if p.errors:
+            return None, "\n".join(f"{k} ({len(v)}): {model.show(v)}" for k, v in p.errors.items())
+        return p, ""
+
+    def _out(self, text: str) -> None:
+        self._shown = text
+        self.query_one("#out", Static).update(text)
+
+    def action_dry_run(self) -> None:
+        self._dry_ok = False
+        try:
+            p, err = self._build(dry_run=True)
+        except (ValueError, model.ModelError) as e:
+            self._out(f"[red]{e}[/]")
+            return
+        if p is None:
+            self._out(f"[red]{err}[/]")
+            return
+        lines = ["[cyan]dry run[/] — nothing submitted yet; y to submit"] + p.notes
+        for k, (res, ids_) in enumerate(p.groups):
+            lines.append(f"array {k}: {len(ids_)} HGs · {res.cpus} cpus · {fmt_mem(res.mem_mb)}"
+                         f" · {fmt_time(res.time_min)} · {res.qos}")
+        self._out("\n".join(lines))
+        self._dry_ok = True
+
+    def action_submit(self) -> None:
+        if not self._dry_ok:
+            if not self._shown:                    # keep an error the dry run already shows
+                self._out("[yellow]run the dry run first (enter)[/]")
+            return
+        try:
+            p, err = self._build(dry_run=False)               # recomputed: state may have moved
+        except (ValueError, model.ModelError) as e:
+            self._out(f"[red]{e}[/]")
+            return
+        if p is None:
+            self._out(f"[red]{err}[/]")
+            self._dry_ok = False
+            return
+        with open(os.environ.get("PHYLOCLI_CONFIG") or core.ROOT / "phylocli/config.yaml") as fh:
+            raw = yaml.safe_load(fh.read())
+        w = model.write_run(self.cfg, raw, p, dry_run=False)
+        jids, err = model.sbatch_all(w)
+        self.submitted = jids
+        self._dry_ok = False
+        self._out((f"[green]submitted {' '.join(jids)}[/] · run dir {w.run_dir}" if jids else "")
+                  + (f"\n[red]{err}[/]" if err else ""))
+
+    def action_cancel(self) -> None:
+        self.dismiss(self.submitted)
+
+
+class LogScreen(ModalScreen):
+    BINDINGS = [Binding("escape", "close", "close"), Binding("q", "close", "close")]
+    CSS = ("LogScreen { align: center middle; } "
+           "#log { width: 95%; height: 90%; border: round $primary; background: $surface; }")
+
+    def __init__(self, path: str, n: int = 200):
+        super().__init__()
+        parts = []
+        for p in (Path(path), Path(path).with_suffix(".out")):
+            if p.is_file():
+                lines = p.read_text(errors="replace").splitlines()[-n:]
+                parts.append(f"== {p}\n" + "\n".join(lines))
+        self.text = "\n\n".join(parts) or f"no log at {path}"
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="log"):
+            yield Static(self.text, markup=False)
+
+    def action_close(self) -> None:
+        self.dismiss()

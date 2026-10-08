@@ -482,10 +482,13 @@ def write_run(cfg: core.Config, raw: dict, p: Plan, dry_run: bool, max_running: 
 def sbatch_all(w: Written) -> tuple[list[str], str | None]:
     submitted: list[str] = []
     for i, (res, ids_, ids_file, script) in enumerate(w.arrays):
-        r = subprocess.run(["sbatch", "--parsable", str(script)], capture_output=True, text=True)
-        jid = r.stdout.strip().split(";")[0]
-        if r.returncode != 0 or not jid:
-            return submitted, (f"sbatch failed for {script}: {r.stderr.strip()}\n"
+        try:
+            r = _slurm(["sbatch", "--parsable", str(script)])
+            jid, rc, why = r.stdout.strip().split(";")[0], r.returncode, r.stderr.strip()
+        except ModelError as e:                      # timed out
+            jid, rc, why = "", 1, str(e)
+        if rc != 0 or not jid:
+            return submitted, (f"sbatch failed for {script}: {why}\n"
                                f"submitted job ids: {' '.join(submitted) or 'none'}\n"
                                "not submitted: " + " ".join(str(a[3]) for a in w.arrays[i:]))
         with open(w.run_dir / "jobs.tsv", "a") as fh:

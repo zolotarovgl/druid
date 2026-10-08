@@ -203,3 +203,23 @@ def test_preflight_message(cli, monkeypatch):
     msg = model.preflight("align")
     assert msg and "ete3" in msg and "conda activate phylo" in msg
     assert model.preflight("gxsup") is None
+
+
+def test_sbatch_all_timeout_reports_partial_submission(cli, monkeypatch):
+    cfg = _cfg()
+    sel = model.select(cfg, "align", ["tfs.A.HG11", "tfs.C_x.HG1"])
+    p = model.plan(cfg, "align", sel, per_hg={"tfs.C_x.HG1": {"mem_mb": 8192}})
+    w = model.write_run(cfg, _raw(), p, dry_run=False)
+    assert len(w.arrays) == 2
+    # first call answers at once; the second hangs past SLURM_TIMEOUT
+    marker = _state["bin"] / "first_done"
+    _fake("sbatch", f'if [ -e {marker} ]; then exec sleep 5; fi\ntouch {marker}\necho 12345')
+    monkeypatch.setattr(model, "SLURM_TIMEOUT", 1)
+    jids, err = model.sbatch_all(w)
+    assert jids == ["12345"]
+    lines = err.splitlines()
+    assert len(lines) == 3
+    assert lines[0].startswith("sbatch failed for ") and "sbatch timed out after 1 s" in lines[0]
+    assert lines[1] == "submitted job ids: 12345"
+    assert lines[2] == "not submitted: " + str(w.arrays[1][3])
+    assert (w.run_dir / "jobs.tsv").read_text().count("12345") == 1
