@@ -243,3 +243,38 @@ def test_sbatch_all_jobs_tsv_write_error_keeps_jid(cli, monkeypatch):
     with pytest.raises(OSError):
         model.sbatch_all(w, got)
     assert got == ["12345"]                          # queued, so the caller must know
+
+
+def test_bar_segments():
+    assert model.bar_segments((1, 0, 1, 0), 10) == [5, 0, 5, 0]
+    assert sum(model.bar_segments((7, 1, 1, 1), 30)) == 30
+    assert model.bar_segments((0, 0, 0, 0), 10) == []
+
+
+def test_group_key():
+    assert model.group_key("tfs.T-box.HG1", "category") == "tfs"
+    assert model.group_key("tfs.T-box.HG1", "family") == "tfs.T-box"
+    assert model.group_key("adh.Cad.herin.HG12", "family") == "adh.Cad.herin"
+
+
+def test_group_rows_all_equals_stage_rows(cli):
+    cfg = _cfg()
+    exp = core.expected(cfg)
+    rows, known = model.group_rows(cfg, exp, "category")
+    srows, _k, _d = model.stage_rows(cfg, exp)
+    assert rows[0].group == "ALL" and rows[0].total == len(exp)
+    for s in srows:
+        got = rows[0].per_stage[s.stage]
+        assert got == ((s.done, s.running, s.ready, s.blocked) if s.applicable else None)
+    assert [r.group for r in rows] == ["ALL", "tfs"]
+
+
+def test_group_rows_family_sum_to_all(cli):
+    cfg = _cfg()
+    exp = core.expected(cfg)
+    rows, _k = model.group_rows(cfg, exp, "family")
+    assert [r.group for r in rows] == ["ALL", "tfs.A", "tfs.C_x"]
+    for st, allc in rows[0].per_stage.items():
+        if allc is None:
+            continue
+        assert tuple(sum(r.per_stage[st][i] for r in rows[1:]) for i in range(4)) == allc

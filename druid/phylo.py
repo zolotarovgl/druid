@@ -106,14 +106,9 @@ BAR_NAMES = ("done", "running", "ready", "blocked")
 def _bar(done: int, running: int, ready: int, blocked: int, mode: str = "status") -> str:
     """Fixed-width bar split into done / running (in SLURM now) / ready to run / blocked;
     largest-remainder rounding so the segments always add up to BAR_WIDTH."""
-    counts = (done, running, ready, blocked)
-    total = sum(counts)
-    if total == 0:
+    n = model.bar_segments((done, running, ready, blocked), BAR_WIDTH)
+    if not n:
         return ""
-    exact = [BAR_WIDTH * c / total for c in counts]
-    n = [int(x) for x in exact]
-    for i in sorted(range(4), key=lambda i: exact[i] - n[i], reverse=True)[:BAR_WIDTH - sum(n)]:
-        n[i] += 1
     return "".join(typer.style(ch * k, fg=fg) for (ch, fg), k in zip(BAR_STYLES[mode], n))
 
 

@@ -508,3 +508,68 @@ def sbatch_all(w: Written, submitted: list[str] | None = None) -> tuple[list[str
         with open(w.run_dir / "jobs.tsv", "a") as fh:
             fh.write(f"{jid}\t{ids_file}\n")
     return submitted, None
+
+
+def bar_segments(counts, width: int) -> list[int]:
+    """Largest-remainder split of `width` cells over `counts`; [] when all are 0."""
+    total = sum(counts)
+    if total == 0:
+        return []
+    exact = [width * c / total for c in counts]
+    n = [int(x) for x in exact]
+    for i in sorted(range(len(n)), key=lambda i: exact[i] - n[i], reverse=True)[:width - sum(n)]:
+        n[i] += 1
+    return n
+
+
+def group_key(hg: str, by: str) -> str:
+    """category = first id part (tfs); family = id without the HG part (tfs.T-box)."""
+    return hg.split(".", 1)[0] if by == "category" else hg.rsplit(".", 1)[0]
+
+
+@dataclass
+class GroupRow:
+    group: str
+    total: int
+    per_stage: dict
+
+
+def group_rows(cfg: core.Config, exp: set[str], by: str = "category",
+               done: dict | None = None, lv: dict | None = None):
+    """(rows, squeue_known): per-group done/running/ready/blocked per stage, from output files
+    and squeue only (no attempt history). rows[0] is ALL and equals stage_rows()."""
+    done = core.report_status.done_by_stage(str(cfg.outdir), exp) if done is None else done
+    known = True
+    if lv is None:
+        lv = live(exp)
+        known = lv is not None
+        lv = lv or {}
+    state: dict[str, dict[str, int]] = {}          # stage -> hg -> 0 done 1 running 2 ready 3 blocked
+    for st in core.STAGES:
+        if not core.applicable(cfg, st):
+            continue
+        d = done.get(st, set())
+        todo = exp - d
+        running = todo & lv.get(st, set())
+        ready = core.ready_set(cfg, st, todo - running)
+        state[st] = {hg: (0 if hg in d else 1 if hg in running else 2 if hg in ready else 3)
+                     for hg in exp}
+    groups: dict[str, list[str]] = collections.defaultdict(list)
+    for hg in exp:
+        groups[group_key(hg, by)].append(hg)
+
+    def row(name: str, hgs) -> GroupRow:
+        per = {}
+        for st in core.STAGES:
+            if st not in state:
+                per[st] = None
+                continue
+            c = [0, 0, 0, 0]
+            for hg in hgs:
+                c[state[st][hg]] += 1
+            per[st] = tuple(c)
+        return GroupRow(name, len(hgs), per)
+
+    rows = [row("ALL", exp)] + [row(g, h) for g, h in
+                                sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))]
+    return rows, known
