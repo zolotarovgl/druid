@@ -18,6 +18,15 @@ def test_expected_min_seqs(results_tree):
     assert core.expected(cfg) == {"tfs.C_x.HG1"}  # the 3-seq HGs drop out
 
 
+def test_expected_min_distinct(results_tree):
+    cfg, root = results_tree
+    clu = Path(cfg.outdir) / "clusters"
+    (clu / "tfs.D.HG1.fasta").write_text("".join(f">s{i}\nAA\n" for i in range(8)))  # 8 identical
+    (clu / "tfs.D.HG2.fasta").write_text("".join(f">s{i}\n{'A' * i}\n" for i in range(1, 6)))
+    cfg = dataclasses.replace(cfg, params={**cfg.params, "min_seqs": 5, "min_distinct": 4})
+    assert core.expected(cfg) == {"tfs.D.HG2"}  # tfs.C_x.HG1: 600 identical seqs
+
+
 def test_ids_file_blank_lines_and_unknown(results_tree, tmp_path):
     cfg, _ = results_tree
     f = tmp_path / "ids.txt"; f.write_text("tfs.A.HG1  \n\n tfs.NOPE.HG9\n")

@@ -128,7 +128,8 @@ def load_resources_tsv(path: Path) -> dict[str, dict[str, str]]:
 
 
 def expected(cfg: Config) -> set[str]:
-    return report_status.expected_hgs(str(cfg.outdir), min_seqs=int(cfg.params.get("min_seqs", 2)))
+    return report_status.expected_hgs(str(cfg.outdir), min_seqs=int(cfg.params.get("min_seqs", 2)),
+                                      min_distinct=int(cfg.params.get("min_distinct", 1)))
 
 
 def read_ids(path) -> list[str]:

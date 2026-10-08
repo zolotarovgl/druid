@@ -76,16 +76,36 @@ def count_seqs(path, stop=2):
     return n
 
 
-def expected_hgs(outdir, ids_file=None, min_seqs=2):
+def count_distinct(path, stop=1):
+    """Distinct sequences (case-insensitive), stopping once `stop` are seen."""
+    seen, cur = set(), []
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            if line.startswith(">"):
+                if cur:
+                    seen.add("".join(cur).upper())
+                    if len(seen) >= stop:
+                        return len(seen)
+                cur = []
+            else:
+                cur.append(line.strip())
+    if cur:
+        seen.add("".join(cur).upper())
+    return len(seen)
+
+
+def expected_hgs(outdir, ids_file=None, min_seqs=2, min_distinct=1):
     """Expected HG ids: the stripped non-blank lines of ids_file, else clusters/*.fasta with
-    >= min_seqs seqs (phylocli passes params.min_seqs, = step2.nf's filter)."""
+    >= min_seqs seqs and >= min_distinct distinct ones (phylocli passes params.min_seqs and
+    params.min_distinct, = step2.nf's filter)."""
     if ids_file:
         with open(ids_file) as fh:
             return {l.strip() for l in fh if l.strip()}
     cdir = os.path.join(outdir, "clusters")
     return {f[:-6] for f in nonempty_files(cdir)
             if f.endswith(".fasta") and ".HG" in f
-            and count_seqs(os.path.join(cdir, f), stop=min_seqs) >= min_seqs}
+            and count_seqs(os.path.join(cdir, f), stop=min_seqs) >= min_seqs
+            and count_distinct(os.path.join(cdir, f), stop=min_distinct) >= min_distinct}
 
 
 def done_by_stage(outdir, expected):
