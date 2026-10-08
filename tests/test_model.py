@@ -83,3 +83,40 @@ def test_stage_rows_without_squeue(cli):
     (_state["bin"] / "squeue").unlink()
     rows, known, _d = model.stage_rows(_cfg(), core.expected(_cfg()))
     assert known is False and all(r.running == 0 for r in rows)
+
+
+SACCT_OOM = ("12345_0|COMPLETED|10M|00:01:00|0:0\\n"
+             "12345_1|OUT_OF_MEMORY|4100M|00:03:00|0:125\\n")
+
+
+def test_hg_rows_failed_vs_ready(cli, monkeypatch):
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
+    rows = {r.hg: r for r in model.hg_rows(_cfg(), "align")}
+    assert rows["tfs.A.HG1"].state == "done"
+    assert rows["tfs.C_x.HG1"].state == "failed"
+    assert rows["tfs.C_x.HG1"].last.status == "OUT_OF_MEMORY"
+    assert rows["tfs.A.HG11"].state == "ready"          # its attempt COMPLETED, output absent
+
+
+def test_hg_rows_running_and_blocked(cli, monkeypatch):
+    assert cli(["submit", "align", "tfs.A.HG11"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SQUEUE", "12345_0|phylo-align\n")
+    rows = {r.hg: r.state for r in model.hg_rows(_cfg(), "align")}
+    assert rows["tfs.A.HG11"] == "running"
+    gx = {r.hg: r.state for r in model.hg_rows(_cfg(), "gxsup")}
+    assert set(gx.values()) == {"blocked"}              # no generax trees in the fixture
+
+
+def test_hg_detail(cli):
+    d = model.hg_detail(_cfg(), "tfs.C_x.HG1")
+    assert d.nseq == 600 and d.states["align"] == "ready" and d.latest == {}
+
+
+def test_array_rows(cli, monkeypatch):
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SACCT", "12345_0|COMPLETED\\n12345_1|RUNNING\\n")
+    rows, known = model.array_rows()
+    assert known and len(rows) == 1
+    r = rows[0]
+    assert (r.stage, r.job, r.n, r.counts["done"], r.counts["running"]) == ("align", "12345", 2, 1, 1)

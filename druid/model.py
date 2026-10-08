@@ -172,3 +172,95 @@ def stage_rows(cfg: core.Config, exp: set[str]):
         rows.append(StageRow(st, True, len(done[st]), len(running), n_ready,
                              len(todo) - len(running) - n_ready, len(exp)))
     return rows, known, done
+
+
+@dataclass
+class HGRow:
+    hg: str
+    state: str
+    last: "history.Attempt | None" = None
+
+
+def _latest_for(atts: list, stage: str) -> dict[str, "history.Attempt"]:
+    out: dict = {}
+    for a in sorted(atts, key=lambda a: (a.submitted, a.attempt, a.run)):
+        if a.stage == stage:
+            out[a.hg] = a
+    return out
+
+
+def hg_rows(cfg: core.Config, stage: str, exp: set[str] | None = None,
+            atts: list | None = None) -> list[HGRow]:
+    """One row per expected HG for `stage`. failed = inputs present, not done, not queued,
+    and the latest attempt at this stage ended in a FAILED_STATES state."""
+    exp = core.expected(cfg) if exp is None else exp
+    done = core.report_status.done_by_stage(str(cfg.outdir), exp)[stage]
+    busy = (live(core.expected(cfg)) or {}).get(stage, set())
+    todo = exp - done
+    ready = core.ready_set(cfg, stage, todo - busy)
+    latest = _latest_for(history.attempts(cfg) if atts is None else atts, stage)
+    rows = []
+    for hg in sorted(exp):
+        a = latest.get(hg)
+        if hg in done:
+            state = "done"
+        elif hg in busy:
+            state = "running"
+        elif hg in ready:
+            state = "failed" if a is not None and a.status in FAILED_STATES else "ready"
+        else:
+            state = "blocked"
+        rows.append(HGRow(hg, state, a))
+    return rows
+
+
+@dataclass
+class HGDetail:
+    hg: str
+    nseq: int
+    states: dict
+    latest: dict
+
+
+def hg_detail(cfg: core.Config, hg: str, atts: list | None = None) -> HGDetail:
+    exp = core.expected(cfg)
+    done = core.report_status.done_by_stage(str(cfg.outdir), exp)
+    lv = live(exp) or {}
+    states = {}
+    for st in core.STAGES:
+        if not core.applicable(cfg, st):
+            states[st] = "n/a"
+        elif hg in done[st]:
+            states[st] = "done"
+        elif hg in lv.get(st, set()):
+            states[st] = "running"
+        elif hg in core.ready_set(cfg, st, [hg]):
+            states[st] = "ready"
+        else:
+            states[st] = "blocked"
+    atts = history.attempts(cfg, hg) if atts is None else [a for a in atts if a.hg == hg]
+    return HGDetail(hg, core.nseq(cfg, hg), states, history.latest_by_stage(atts))
+
+
+@dataclass
+class ArrayRow:
+    run: Path
+    stage: str
+    job: str
+    n: int
+    counts: collections.Counter
+
+
+def array_rows(stage: str | None = None, last: int = 10):
+    """(rows, sacct_known): the table `phylo jobs` prints."""
+    subs = submissions(stage, last)
+    states = task_states(sorted({jid for _r, _s, jid, _f in subs}))
+    known = states is not None
+    states = states or {}
+    rows = []
+    for run, st, jid, ids_file in subs:
+        n = len(core.read_ids(ids_file)) if ids_file.is_file() else 0
+        c = collections.Counter(category(s) for s in states.get(jid, {}).values())
+        c["pending"] += max(n - sum(c.values()), 0)        # tasks sacct has not reported yet
+        rows.append(ArrayRow(run, st, jid, n, c))
+    return rows, known

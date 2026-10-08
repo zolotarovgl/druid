@@ -552,13 +552,12 @@ def jobs(job_id: str = typer.Argument(None, help="array job id: list its tasks w
     for col, colour in JOB_COLS:
         t.add_column(f"[{colour}]{col}[/]", justify="right")
     t.add_column("progress", no_wrap=True)
-    for run, st, jid, ids_file in subs:
-        n = len(core.read_ids(ids_file)) if ids_file.is_file() else 0
-        c = collections.Counter(_category(s) for s in states.get(jid, {}).values())
-        c["pending"] += max(n - sum(c.values()), 0)        # tasks sacct has not reported yet
-        cells = ([f"[{colour}]{c[col]}[/]" if c[col] else "[dim]0[/]" for col, colour in JOB_COLS]
-                 if known else ["?"] * len(JOB_COLS))
-        t.add_row(run.name.split("_")[0], st, jid, str(n), *cells, _job_bar(c) if known else "")
+    rows, _known = _guard(model.array_rows)(stage, last)
+    for r in rows:
+        cells = ([f"[{colour}]{r.counts[col]}[/]" if r.counts[col] else "[dim]0[/]"
+                  for col, colour in JOB_COLS] if known else ["?"] * len(JOB_COLS))
+        t.add_row(r.run.name.split("_")[0], r.stage, r.job, str(r.n), *cells,
+                  _job_bar(r.counts) if known else "")
     con.print(t)
 
 
