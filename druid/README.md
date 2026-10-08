@@ -153,10 +153,16 @@ Full-screen view (Textual, optional: `pip install textual` in the `phylo` env).
 
     phylocli/phylo tui [--refresh 30]
 
-Panels: stages (top left) · HGs of the highlighted stage (top right) · latest arrays
+It opens on an overview: one row per category (`ALL` first), one bar per stage
+(done / running / ready / blocked). `f` regroups by family, `c` back to category; `←→` picks
+the stage column and `enter` opens the HG panels for that row at that stage (filter `failed`);
+`esc` returns to the overview. The overview reads output files and squeue only; the slow
+attempt history is read only once an HG view is open.
+
+HG view panels: stages (top left) · HGs of the highlighted stage (top right) · latest arrays
 (bottom left) · details of the highlighted HG (bottom right). Refreshes in the background.
 
-Keys: `↑↓` move · `tab` panel · `f` filter (failed → ready → running → blocked → done) ·
+Keys (HG view): `↑↓` move · `tab` panel · `esc` overview · `f` filter (failed → ready → running → blocked → done) ·
 `space` select · `a` select all shown · `r` resubmit selection · `l` last log · `R` refresh ·
 `q` quit.
 

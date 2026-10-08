@@ -32,12 +32,18 @@ STATE_STYLE = {"done": "green", "running": "cyan", "ready": "yellow", "failed": 
 class PhyloApp(App):
     TITLE = "phylocli"
     CSS = """
-    Grid { grid-size: 2 2; grid-columns: 1fr 1fr; grid-rows: 1fr 1fr; }
-    DataTable, #detail { border: round $primary; height: 100%; }
+    #hgview { grid-size: 2 2; grid-columns: 1fr 1fr; grid-rows: 1fr 1fr; }
+    #hgview DataTable, #detail { border: round $primary; height: 100%; }
     #banner { height: auto; color: $warning; }
+    #ov { height: 1fr; }
+    #overview { height: 1fr; border: round $primary; }
+    #ovfoot { height: auto; }
+    #hgview { height: 1fr; }
     """
     BINDINGS = [
-        Binding("f", "cycle_filter", "filter"),
+        Binding("escape", "back", "overview"),
+        Binding("c", "by_category", "category"),
+        Binding("f", "cycle_filter", "filter / family"),
         Binding("space", "toggle", "select"),
         Binding("a", "select_all", "select all"),
         Binding("r", "resubmit", "resubmit"),
@@ -46,7 +52,11 @@ class PhyloApp(App):
         Binding("q", "quit", "quit"),
     ]
 
-    def __init__(self, cfg: core.Config, refresh_s: int = 30, raw: "dict | None" = None):
+    OV_BAR = 10
+    OV_GLYPHS = (("█", "green"), ("▒", "cyan"), ("▓", "yellow"), ("░", "bright_black"))
+
+    def __init__(self, cfg: core.Config, refresh_s: int = 30, raw: "dict | None" = None,
+                 start: str = "overview"):
         super().__init__()
         self.cfg = cfg
         self.raw = raw if raw is not None else load_raw()
@@ -58,11 +68,20 @@ class PhyloApp(App):
         self.by_stage: dict = {}
         self.atts: list = []
         self.nseq: dict[str, int] = {}
+        self.view = start
+        self.by = "category"
+        self.group: "str | None" = None
+        self.ov_rows: list = []
+        self._ov_inputs: tuple = (set(), {}, {}, True)
+        self._banner_text = ""
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield Static("", id="banner")
-        with Grid():
+        with Vertical(id="ov"):
+            yield DataTable(id="overview", cursor_type="cell")
+            yield Static("", id="ovfoot")
+        with Grid(id="hgview"):
             yield DataTable(id="stages", cursor_type="row")
             yield DataTable(id="hgs", cursor_type="row")
             yield DataTable(id="arrays", cursor_type="row")
@@ -74,27 +93,35 @@ class PhyloApp(App):
         self.query_one("#hgs", DataTable).add_columns(" ", "HG", "seqs", "state", "last", "req", "used")
         self.query_one("#arrays", DataTable).add_columns("job", "stage", "HGs", "done", "run",
                                                           "pend", "fail")
+        self._show_view()
         self.load_bg()
         self.set_interval(self.refresh_s, self.load_bg)
 
     # ---- data -------------------------------------------------------------------------------
     def _collect(self) -> dict:
         exp = core.expected(self.cfg)
-        for hg in exp:                       # FASTAs are read here, off the UI thread, once
-            if not self.nseq.get(hg):
-                self.nseq[hg] = core.nseq(self.cfg, hg)
-        stages, known, _done = model.stage_rows(self.cfg, exp)
-        atts = history.attempts(self.cfg)
-        # every applicable stage from ONE attempts read, ONE done scan, ONE squeue call, so
-        # that stage changes and the detail panel need no subprocess on a key press
         done_map = core.report_status.done_by_stage(str(self.cfg.outdir), exp)
-        live_map = model.live(core.expected(self.cfg)) or {}
-        by_stage = {st: (model.hg_rows(self.cfg, st, exp, atts, done_map, live_map)
-                         if core.applicable(self.cfg, st) else [])
-                    for st in core.STAGES}
-        arrays, sacct_known = model.array_rows()
-        return dict(stages=stages, known=known, atts=atts, by_stage=by_stage, arrays=arrays,
-                    sacct_known=sacct_known, when=datetime.now())
+        lv = model.live(exp)
+        known = lv is not None
+        lv = lv or {}
+        ov_rows, _k = model.group_rows(self.cfg, exp, self.by, done_map, lv)
+        snap = dict(ov_rows=ov_rows, ov_inputs=(exp, done_map, lv, known), known=known,
+                    when=datetime.now(), hg=None)
+        if self.view == "hgs":               # the slow part: attempt history, only in the HG view
+            for hg in exp:                   # FASTAs are read here, off the UI thread, once
+                if not self.nseq.get(hg):
+                    self.nseq[hg] = core.nseq(self.cfg, hg)
+            stages, _k2, _d = model.stage_rows(self.cfg, exp)
+            atts = history.attempts(self.cfg)
+            # every applicable stage from ONE attempts read, ONE done scan, ONE squeue call, so
+            # that stage changes and the detail panel need no subprocess on a key press
+            by_stage = {st: (model.hg_rows(self.cfg, st, exp, atts, done_map, lv)
+                             if core.applicable(self.cfg, st) else [])
+                        for st in core.STAGES}
+            arrays, sacct_known = model.array_rows()
+            snap["hg"] = dict(stages=stages, atts=atts, by_stage=by_stage, arrays=arrays,
+                              sacct_known=sacct_known)
+        return snap
 
     def load_now(self) -> None:
         self._apply(self._collect())
@@ -112,20 +139,32 @@ class PhyloApp(App):
             return
         self.call_from_thread(self._apply, snap)
 
+    def _set_banner(self, text: str) -> None:
+        self._banner_text = text
+        self.query_one("#banner", Static).update(text)
+
     def _apply(self, snap: dict) -> None:
-        self.atts, self.by_stage = snap["atts"], snap["by_stage"]
+        self._ov_inputs = snap["ov_inputs"]
+        self._fill_overview(snap["ov_rows"])
+        hg = snap["hg"]
+        banner = []
+        if not snap["known"]:
+            banner.append("squeue not on PATH: running jobs not detected")
+        if hg is not None and not hg["sacct_known"]:
+            banner.append("sacct not on PATH: task states unknown")
+        if hg is None and self.view == "hgs" and not self.by_stage:
+            banner.append("loading history…")
+        self._set_banner(" · ".join(banner))
+        self.sub_title = f"{self.stage} · {self.filter} · {snap['when']:%H:%M:%S}"
+        if hg is None:
+            return
+        self.atts, self.by_stage = hg["atts"], hg["by_stage"]
         self.rows = self.by_stage.get(self.stage, [])
         # a selected HG that has finished or been queued must not stay selected invisibly:
         # validate() would refuse the whole resubmit over it.  (Blocked HGs stay: they are
         # visible under their filter and test_refresh_keeps_stage_selection_and_cursor pins it.)
         self.selected &= {r.hg for r in self.rows if r.state not in ("done", "running")}
-        banner = []
-        if not snap["known"]:
-            banner.append("squeue not on PATH: running jobs not detected")
-        if not snap["sacct_known"]:
-            banner.append("sacct not on PATH: task states unknown")
-        self.query_one("#banner", Static).update(" · ".join(banner))
-        self.sub_title = f"{self.stage} · {self.filter} · {snap['when']:%H:%M:%S}"
+        snap = hg
         st = self.query_one("#stages", DataTable)
         keep_stage = self.stage
         st.clear()
@@ -149,7 +188,100 @@ class PhyloApp(App):
         self._fill_hgs()
 
     def visible(self) -> list:
-        return [r for r in self.rows if r.state == self.filter]
+        rows = [r for r in self.rows if r.state == self.filter]
+        if self.group is not None:
+            rows = [r for r in rows if model.group_key(r.hg, self.by) == self.group]
+        return rows
+
+    # ---- overview ---------------------------------------------------------------------------
+    def _show_view(self) -> None:
+        self.query_one("#ov").display = self.view == "overview"
+        self.query_one("#hgview").display = self.view == "hgs"
+        self.query_one("#overview" if self.view == "overview" else "#hgs").focus()
+
+    def _fill_overview(self, rows: list) -> None:
+        self.ov_rows = rows
+        t = self.query_one("#overview", DataTable)
+        keep = self._key_at_cursor(t)
+        col = t.cursor_column
+        if not t.columns:
+            t.add_columns("group", "HGs", *core.STAGES)
+        t.clear()
+        for r in rows:
+            cells = []
+            for st in core.STAGES:
+                c = r.per_stage.get(st)
+                if c is None:
+                    cells.append("n/a")
+                    continue
+                n = model.bar_segments(c, self.OV_BAR)
+                cells.append("".join(f"[{fg}]{ch * k}[/]"
+                                     for (ch, fg), k in zip(self.OV_GLYPHS, n) if k))
+            t.add_row(r.group, str(r.total), *cells, key=r.group)
+        keys = [r.group for r in rows]
+        t.move_cursor(row=keys.index(keep) if keep in keys else 0, column=col)
+        self._overview_footer()
+
+    def _overview_footer(self) -> None:
+        key = self._key_at_cursor(self.query_one("#overview", DataTable))
+        r = next((x for x in self.ov_rows if x.group == key), None)
+        if r is None:
+            return
+        parts = [f"{st} {c[0]}/{c[1]}/{c[2]}/{c[3]}" for st, c in r.per_stage.items() if c]
+        self.query_one("#ovfoot", Static).update(
+            f"[b]{escape(r.group)}[/] {r.total} HGs · done/running/ready/blocked: "
+            + " · ".join(parts)
+            + "\n█ done ▒ running ▓ ready/failed ░ blocked · enter: open · c/f: category/family")
+
+    def _regroup(self) -> None:
+        exp, done, lv, _known = self._ov_inputs
+        rows, _k = model.group_rows(self.cfg, exp, self.by, done, lv)   # no subprocess
+        self._fill_overview(rows)
+        self.load_bg()
+
+    def open_group(self, name: str, stage: "str | None" = None) -> None:
+        self.group = None if name == "ALL" else name
+        self.view = "hgs"
+        self.filter = "failed"
+        self.selected.clear()
+        if stage is not None and core.applicable(self.cfg, stage):
+            self.stage = stage
+            st = self.query_one("#stages", DataTable)
+            if st.row_count:
+                st.move_cursor(row=core.STAGES.index(stage))
+        self.rows = self.by_stage.get(self.stage, [])
+        self._show_view()
+        first = not self.by_stage
+        if first:
+            self._set_banner("loading history…")
+        self._fill_hgs(keep="")
+        if first:
+            # a beat before the first (history-reading) load, so the note above is seen and a
+            # quick enter/esc does not start a read nobody waits for
+            self.set_timer(0.5, self.load_bg)
+        else:
+            self.load_bg()
+
+    def action_back(self) -> None:
+        if self.view == "hgs":
+            self.view = "overview"
+            self._show_view()
+
+    def action_by_category(self) -> None:
+        if self.view == "overview":
+            self.by = "category"
+            self._regroup()
+
+    def on_data_table_cell_selected(self, event: DataTable.CellSelected) -> None:
+        if event.data_table.id != "overview" or self.view != "overview":
+            return
+        col = event.coordinate.column
+        stage = core.STAGES[col - 2] if col >= 2 else None
+        self.open_group(event.cell_key.row_key.value, stage)
+
+    def on_data_table_cell_highlighted(self, event: DataTable.CellHighlighted) -> None:
+        if event.data_table.id == "overview":
+            self._overview_footer()
 
     def _fill_hgs(self, keep: "str | None" = None) -> None:
         """Rebuild the HG table, keeping the cursor on the same HG (clear() resets it to row 0).
@@ -207,7 +339,7 @@ class PhyloApp(App):
         t = event.data_table
         # A refill (clear + add_row) posts highlights for row 0 that arrive after the cursor
         # was restored; only act on a highlight that is still where the cursor is.
-        if event.row_key.value != self._key_at_cursor(t):
+        if event.row_key is None or event.row_key.value != self._key_at_cursor(t):
             return
         if t.id == "stages" and event.row_key.value in core.STAGES:
             if event.row_key.value != self.stage:
@@ -219,6 +351,10 @@ class PhyloApp(App):
             self._show_detail()
 
     def action_cycle_filter(self) -> None:
+        if self.view == "overview":
+            self.by = "family"
+            self._regroup()
+            return
         self.filter = FILTERS[(FILTERS.index(self.filter) + 1) % len(FILTERS)]
         self._fill_hgs()
 

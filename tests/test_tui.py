@@ -27,7 +27,7 @@ def test_tui_loads_and_filters_failed(cli, monkeypatch):
     monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
 
     async def go():
-        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        app = tui.PhyloApp(_cfg(), refresh_s=3600, start="hgs")
         async with app.run_test() as pilot:
             app.load_now()
             await pilot.pause()
@@ -43,7 +43,7 @@ def test_tui_select_all_and_quit(cli, monkeypatch):
     monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
 
     async def go():
-        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        app = tui.PhyloApp(_cfg(), refresh_s=3600, start="hgs")
         async with app.run_test() as pilot:
             app.load_now()
             await pilot.pause()
@@ -80,7 +80,7 @@ def _calls():
 def _failed_app(cli, monkeypatch):
     assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
     monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
-    return tui.PhyloApp(_cfg(), refresh_s=3600)
+    return tui.PhyloApp(_cfg(), refresh_s=3600, start="hgs")
 
 
 def test_resource_groups_bump_oom(cli, monkeypatch):
@@ -201,7 +201,7 @@ def test_log_popup(cli, monkeypatch, tmp_path):
 def _three_failed(cli, monkeypatch):
     assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
     monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
-    return tui.PhyloApp(_cfg(), refresh_s=3600)
+    return tui.PhyloApp(_cfg(), refresh_s=3600, start="hgs")
 
 
 async def _tree_blocked(app, pilot):
@@ -504,7 +504,7 @@ def test_submit_result_shows_notes_and_uses_given_raw(cli, monkeypatch):
     app = _failed_app(cli, monkeypatch)
     raw = tui.load_raw()
     raw["marker_key"] = "from-the-command"
-    app = tui.PhyloApp(_cfg(), refresh_s=3600, raw=raw)
+    app = tui.PhyloApp(_cfg(), refresh_s=3600, raw=raw, start="hgs")
 
     async def go():
         async with app.run_test() as pilot:
@@ -517,3 +517,134 @@ def test_submit_result_shows_notes_and_uses_given_raw(cli, monkeypatch):
     _run(go())
     run = sorted((_state["runs"]).glob("*_align*"))[-1]
     assert "marker_key: from-the-command" in (run / "config.yaml").read_text()
+
+
+def _counting_attempts(monkeypatch):
+    from phylocli import history
+    calls = {"n": 0}
+    real = history.attempts
+
+    def counted(*a, **k):
+        calls["n"] += 1
+        return real(*a, **k)
+    monkeypatch.setattr(history, "attempts", counted)
+    return calls
+
+
+def test_overview_is_first_and_reads_no_history(cli, monkeypatch):
+    calls = _counting_attempts(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            assert app.view == "overview"
+            assert [r.group for r in app.ov_rows] == ["ALL", "tfs"]
+            exp = core.expected(_cfg())
+            srows, _k, _d = tui.model.stage_rows(_cfg(), exp)
+            a = next(s for s in srows if s.stage == "align")
+            assert app.ov_rows[0].per_stage["align"] == (a.done, a.running, a.ready, a.blocked)
+    _run(go())
+    assert calls["n"] == 0
+
+
+def test_overview_family_toggle(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await pilot.press("f")
+            await pilot.pause()
+            assert app.by == "family" and [r.group for r in app.ov_rows] == ["ALL", "tfs.A", "tfs.C_x"]
+            await pilot.press("c")
+            await pilot.pause()
+            assert app.by == "category"
+    _run(go())
+
+
+def test_open_group_restricts_hgs_and_esc_returns(cli, monkeypatch):
+    calls = _counting_attempts(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await pilot.press("f")
+            await pilot.pause()
+            app.query_one("#overview").move_cursor(row=1)          # tfs.A
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.view == "hgs" and app.group == "tfs.A"
+            app.load_now()
+            await pilot.pause()
+            assert calls["n"] >= 1
+            app.filter = "done"
+            app._fill_hgs()
+            assert {r.hg for r in app.visible()} <= {"tfs.A.HG1", "tfs.A.HG11"}
+            app.filter = "ready"
+            app._fill_hgs()
+            assert "tfs.C_x.HG1" not in {r.hg for r in app.visible()}
+            await pilot.press("f")                                   # HG view: f = cycle filter
+            assert app.view == "hgs" and app.by == "family"
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.view == "overview"
+            assert app.query_one("#overview").cursor_row == 1
+    _run(go())
+
+
+def test_enter_on_stage_cell_opens_that_stage_with_failed_filter(cli, monkeypatch):
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            ov = app.query_one("#overview")
+            ov.move_cursor(row=0, column=2 + core.STAGES.index("align"))   # ALL x align
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            app.load_now()
+            await pilot.pause()
+            assert app.view == "hgs" and app.stage == "align" and app.filter == "failed"
+            assert app.focused is app.query_one("#hgs")
+            assert [r.hg for r in app.visible()] == ["tfs.C_x.HG1"]
+            await pilot.press("space", "r")                                # select and resubmit
+            await pilot.pause()
+            assert isinstance(app.screen, tui.ResubmitScreen)
+    _run(go())
+
+
+def test_refresh_in_hg_view_stays_in_group(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.open_group("tfs")
+            await pilot.pause()
+            app.load_now()
+            await pilot.pause()
+            assert app.view == "hgs" and app.group == "tfs"
+    _run(go())
+
+
+def test_open_group_before_hg_data_shows_loading(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.by_stage = {}                       # no HG-view snapshot yet
+            app.open_group("tfs")
+            await pilot.pause()
+            assert app.visible() == []
+            assert "loading history" in app._banner_text
+    _run(go())
