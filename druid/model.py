@@ -195,12 +195,17 @@ def _latest_for(atts: list, stage: str) -> dict[str, "history.Attempt"]:
 
 
 def hg_rows(cfg: core.Config, stage: str, exp: set[str] | None = None,
-            atts: list | None = None) -> list[HGRow]:
+            atts: list | None = None, done_map: dict | None = None,
+            live_map: dict | None = None) -> list[HGRow]:
     """One row per expected HG for `stage`. failed = inputs present, not done, not queued,
-    and the latest attempt at this stage ended in a FAILED_STATES state."""
+    and the latest attempt at this stage ended in a FAILED_STATES state.
+    `done_map` / `live_map` (stage -> ids) let a caller that builds several stages compute
+    them once; when omitted they are computed here (squeue is called)."""
     exp = core.expected(cfg) if exp is None else exp
-    done = core.report_status.done_by_stage(str(cfg.outdir), exp)[stage]
-    busy = (live(core.expected(cfg)) or {}).get(stage, set())
+    done = (done_map if done_map is not None
+            else core.report_status.done_by_stage(str(cfg.outdir), exp))[stage]
+    busy = (live_map if live_map is not None
+            else (live(core.expected(cfg)) or {})).get(stage, set())
     todo = exp - done
     ready = core.ready_set(cfg, stage, todo - busy)
     latest = _latest_for(history.attempts(cfg) if atts is None else atts, stage)

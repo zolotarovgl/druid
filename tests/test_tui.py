@@ -1,6 +1,7 @@
 """phylocli/tui.py (Textual pilot tests; skipped when Textual is not installed)."""
 import asyncio
 import os
+import time
 
 import pytest
 
@@ -65,6 +66,12 @@ def test_tui_command_without_textual(cli, monkeypatch):
     assert r.exit_code == 1 and "pip install textual" in r.output
 
 
+async def _settle(app, pilot):
+    """Wait for the dialog's worker thread and the UI messages it posted."""
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+
+
 def _calls():
     p = _state["bin"] / "calls.txt"
     return p.read_text().splitlines() if p.exists() else []
@@ -98,11 +105,11 @@ def test_resubmit_dry_run_then_confirm(cli, monkeypatch):
             assert isinstance(scr, tui.ResubmitScreen)
             scr.query_one("#mem-0").value = "16G"
             await pilot.press("enter")
-            await pilot.pause()
+            await _settle(app, pilot)
             assert "dry run" in scr._shown
             assert len(_calls()) == n0                      # dry run submits nothing
             await pilot.press("y")
-            await pilot.pause()
+            await _settle(app, pilot)
             assert scr.submitted == ["12345"]
     _run(go())
     script = sorted((_state["runs"]).glob("*_align*/array_0.sbatch"))[-1].read_text()
@@ -118,7 +125,7 @@ def test_resubmit_escape_submits_nothing(cli, monkeypatch):
             app.load_now()
             await pilot.pause()
             await pilot.press("a", "r", "enter", "escape")
-            await pilot.pause()
+            await _settle(app, pilot)
             assert not isinstance(app.screen, tui.ResubmitScreen)
     _run(go())
     assert len(_calls()) == n0
@@ -165,11 +172,11 @@ def test_confirm_skips_hg_queued_after_dry_run(cli, monkeypatch):
             app.load_now()
             await pilot.pause()
             await pilot.press("a", "r", "enter")
-            await pilot.pause()
+            await _settle(app, pilot)
             scr = app.screen
             monkeypatch.setenv("FAKE_SQUEUE", "12345_1|phylo-align\n")   # queued meanwhile
             await pilot.press("y")
-            await pilot.pause()
+            await _settle(app, pilot)
             assert scr.submitted == [] and "already queued" in scr._shown
     _run(go())
 
@@ -188,4 +195,104 @@ def test_log_popup(cli, monkeypatch, tmp_path):
             assert isinstance(app.screen, tui.LogScreen)
             assert "boom: out of memory" in app.screen.text
             await pilot.press("escape")
+    _run(go())
+
+
+def _three_failed(cli, monkeypatch):
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
+    return tui.PhyloApp(_cfg(), refresh_s=3600)
+
+
+async def _tree_blocked(app, pilot):
+    """Go to stage `tree` through the stages table; its filter `blocked` has 2 HGs."""
+    app.load_now()
+    await pilot.pause()
+    app.query_one("#stages").focus()
+    await pilot.press("down")
+    await pilot.pause()
+    assert app.stage == "tree"
+    app.filter = "blocked"
+    app._fill_hgs()
+    app.query_one("#hgs").focus()
+    await pilot.pause()
+    vis = [r.hg for r in app.visible()]
+    assert len(vis) == 2
+    return vis
+
+
+def test_space_down_space_selects_two_and_cursor_follows(cli, monkeypatch):
+    app = _three_failed(cli, monkeypatch)
+
+    async def go():
+        async with app.run_test() as pilot:
+            vis = await _tree_blocked(app, pilot)
+            await pilot.press("space", "down", "space")
+            await pilot.pause()
+            assert app.selected == set(vis)
+            assert app._cursor_hg() == vis[1]           # space did not jump back to row 0
+    _run(go())
+
+
+def test_refresh_keeps_stage_selection_and_cursor(cli, monkeypatch):
+    app = _three_failed(cli, monkeypatch)
+
+    async def go():
+        async with app.run_test() as pilot:
+            vis = await _tree_blocked(app, pilot)
+            await pilot.press("space", "down")
+            await pilot.pause()
+            assert app.selected == {vis[0]} and app._cursor_hg() == vis[1]
+            app.load_now()                              # what a background refresh does
+            await pilot.pause()
+            app.load_bg()                               # and the real threaded one
+            await _settle(app, pilot)
+            assert app.stage == "tree"
+            assert app.selected == {vis[0]} and app._cursor_hg() == vis[1]
+            assert app.query_one("#stages").cursor_row == 1
+    _run(go())
+
+
+def test_key_presses_run_no_slurm(cli, monkeypatch):
+    app = _three_failed(cli, monkeypatch)
+    from phylocli import model
+
+    async def go():
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            calls = []
+            monkeypatch.setattr(model, "_slurm", lambda cmd: calls.append(cmd) or (_ for _ in ()).throw(
+                AssertionError("subprocess on the UI thread")))
+            await pilot.press("f", "f", "down", "up", "space", "a")
+            app.query_one("#stages").focus()
+            await pilot.press("down", "down", "up")
+            await pilot.pause()
+            assert calls == []
+    _run(go())
+
+
+def test_second_enter_while_busy_is_ignored(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+    from phylocli import model
+
+    async def go():
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await pilot.press("a", "r")
+            await pilot.pause()
+            scr = app.screen
+            n = []
+            orig = scr._build
+
+            def counted(*a, **k):
+                n.append(1)
+                time.sleep(0.5)                         # keep the worker in flight
+                return orig(*a, **k)
+            monkeypatch.setattr(scr, "_build", counted)
+            await pilot.press("enter", "enter", "enter")
+            assert "working" in scr._shown
+            await _settle(app, pilot)
+            assert len(n) == 1 and "dry run" in scr._shown
     _run(go())
