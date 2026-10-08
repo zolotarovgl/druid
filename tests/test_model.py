@@ -222,5 +222,24 @@ def test_sbatch_all_timeout_reports_partial_submission(cli, monkeypatch):
     assert lines[0] == (f"sbatch timed out after 1 s for {w.arrays[1][3]}: the array may have been "
                         "queued — check 'squeue --me' before resubmitting")
     assert lines[1] == "submitted job ids: 12345"
-    assert lines[2] == "not submitted: " + str(w.arrays[1][3])
+    assert lines[2] == "not submitted (or unknown): " + str(w.arrays[1][3])
     assert (w.run_dir / "jobs.tsv").read_text().count("12345") == 1
+
+
+def test_sbatch_all_jobs_tsv_write_error_keeps_jid(cli, monkeypatch):
+    import builtins
+    cfg = _cfg()
+    sel = model.select(cfg, "align", ["tfs.A.HG11"])
+    w = model.write_run(cfg, _raw(), model.plan(cfg, "align", sel), dry_run=False)
+    _fake("sbatch", "echo 12345")
+    real_open = builtins.open
+
+    def deny(path, *a, **k):
+        if str(path).endswith("jobs.tsv"):
+            raise OSError("Stale file handle")
+        return real_open(path, *a, **k)
+    monkeypatch.setattr(builtins, "open", deny)
+    got: list = []
+    with pytest.raises(OSError):
+        model.sbatch_all(w, got)
+    assert got == ["12345"]                          # queued, so the caller must know

@@ -502,8 +502,9 @@ def sbatch_all(w: Written, submitted: list[str] | None = None) -> tuple[list[str
             head = why if timed_out else f"sbatch failed for {script}: {why}"
             return submitted, (f"{head}\n"
                                f"submitted job ids: {' '.join(submitted) or 'none'}\n"
-                               "not submitted: " + " ".join(str(a[3]) for a in w.arrays[i:]))
+                               + ("not submitted (or unknown): " if timed_out else "not submitted: ")
+                               + " ".join(str(a[3]) for a in w.arrays[i:]))
+        submitted.append(jid)                        # before the write: the array IS queued
         with open(w.run_dir / "jobs.tsv", "a") as fh:
             fh.write(f"{jid}\t{ids_file}\n")
-        submitted.append(jid)
     return submitted, None
