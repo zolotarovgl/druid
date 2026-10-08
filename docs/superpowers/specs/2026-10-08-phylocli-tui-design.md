@@ -95,8 +95,10 @@ tfs    489    ██████████ █████████▓ █�
 
 The four panels below, **restricted to the HGs of that row** (all HGs for `ALL`). The attempt
 history (`history.attempts`, the slow part: ~3.5 s on v3) is loaded only here, in the background,
-and cached for the session; until it arrives the HG list shows states without the
-failed/ready split and a "loading history…" note. `esc` returns to the overview (cursor kept).
+and cached for the session; until it arrives the HG list is empty and the banner says
+"loading history…" (amended 09/10/2026: an empty list rather than states without the
+failed/ready split — a half-informed list invites resubmitting HGs whose last attempt is unknown).
+The stages panel shows the opened group's counts (the overview row), not the global ones. `esc` returns to the overview (cursor kept).
 Everything else — filters, selection, resubmit, log — is unchanged.
 
 Four panels:
