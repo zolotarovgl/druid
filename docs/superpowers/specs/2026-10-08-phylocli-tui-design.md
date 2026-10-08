@@ -69,7 +69,7 @@ Four panels:
 - **Detail** (bottom right): the highlighted HG's nseq, per-stage state, last attempt, log path.
 
 Keys: `↑↓` move · `tab` panel · `space` select HG · `a` select all in the list ·
-`r` resubmit selection · `l` open last log in `less` (TUI suspended, resumes on quit) ·
+`r` resubmit selection · `l` show the last 200 lines of the last attempt's .err/.out in a pop-up (no `less`: suspending the app needs Textual ≥ 0.48, unverified on the cluster) ·
 `R` refresh now · `q` quit.
 
 ### Resubmit flow (`r`)

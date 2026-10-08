@@ -146,3 +146,21 @@ phylocli/phylo status                             # after the array finishes
 ```
 
 Check `phylocli/runs/<ts>_<stage>/logs/*.err` for any HG that is still missing afterwards.
+
+## phylo tui
+
+Full-screen view (Textual, optional: `pip install textual` in the `phylo` env).
+
+    phylocli/phylo tui [--refresh 30]
+
+Panels: stages (top left) · HGs of the highlighted stage (top right) · latest arrays
+(bottom left) · details of the highlighted HG (bottom right). Refreshes in the background.
+
+Keys: `↑↓` move · `tab` panel · `f` filter (failed → ready → running → blocked → done) ·
+`space` select · `a` select all shown · `r` resubmit selection · `l` last log · `R` refresh ·
+`q` quit.
+
+Resubmit: one row per resource group, pre-filled with the automatic bump (out of memory →
+memory ×2, time limit → time ×2, other failures unchanged); memory and time are editable.
+`enter` = dry run (nothing submitted), `y` = submit (the selection is re-checked first, so HGs
+queued or finished meanwhile are skipped), `esc` = cancel.
