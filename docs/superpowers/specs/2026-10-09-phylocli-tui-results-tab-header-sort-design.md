@@ -55,6 +55,20 @@ first by design.)
 - Stage columns of the Jobs tab sort by their failed+ready count (as `s` does today); the `│`
   separator column cannot be selected in header mode (skipped by `←`/`→`).
 
+## Part C — `/` filters the focused pane in the Results window
+
+Grygoriy, 09/10/2026: "in the results, when in ALL tab / should filter the HGs." With `ALL` the
+`Results` pane lists ~1,900 HGs, so `/` must work there, not only in `members`.
+
+- In the Results window, `/` opens the filter box for the **focused** pane: `Results` (HG ids),
+  `OGs` (OG id and name), `members` (any column, as today). The box shows which pane it filters
+  (`filter Results: …`). Substring, case-insensitive; `enter` keeps the filter and returns to
+  the pane; `esc` in the box clears it; a pane's filter is kept when moving to another pane and
+  shown in its border title (`Results · ALL · /T-box`).
+- Filtering `Results` re-points `OGs`/`members`/`species` at the first matching HG; filtering
+  `OGs` re-points `members`/`species` at the first matching OG.
+- Typing in the box never triggers app keys (as today for `members`).
+
 ## Error handling
 - Results tab read errors per HG are counted, not fatal: a footer `n HGs unreadable` and the
   per-HG error shown in the Results window, as today.
@@ -64,6 +78,8 @@ first by design.)
 - Results tab: `tab` switches; rows = the same groups as Jobs; counts on a fixture equal the sum of
   the Results window's per-HG numbers; `p` switches source and recomputes; `enter` opens the
   Results window for the row and `esc` returns to the tab; one read only (counting `group_ogs`).
+- `/` per pane: filter Results (HG ids) on a fixture ALL group, OGs and members; the filter
+  persists across pane moves and is cleared by `esc` in the box; typing `q`/`p`/`R` is text.
 - Header sorting: `↑` from row 0 enters header mode; `←→` move (skipping `│`); `enter`/`s` sorts
   and toggles `▲`/`▼`; `↓` leaves; sort kept across refresh; numeric vs text order; `ALL` pinned;
   no file or SLURM access on these keys.
