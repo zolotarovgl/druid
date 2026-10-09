@@ -247,7 +247,7 @@ class PhyloApp(App):
                       "state", "last", "req", "used")
         ar = self.query_one("#arrays", DataTable)
         ar.clear(columns=True)
-        ar.add_columns("job", "stage", "families" if unit == "family" else "HGs", "done", "run",
+        ar.add_columns("job", "stage", "ids", "done", "run",
                        "pend", "fail")
         if not force:
             self._fill_arrays()

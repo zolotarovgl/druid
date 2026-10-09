@@ -122,6 +122,14 @@ def _missing_fams(cfg: core.Config, stage: str, ids: Path | None, ready: bool = 
                   fam: str | None = None) -> list[str]:
     fams = _families(cfg, ids, fam)
     out = sorted(fams - core.family_done(cfg, fams)[stage])
+    if stage == "cluster":
+        # HG FASTAs without a _cluster.tsv are output_exists in validate: publishing would mix
+        # two clusterings, so they are not "missing" -- say so instead of refusing the batch
+        stray = [f for f in out if f in core.hg_fasta_families(cfg)]
+        if stray:
+            out = [f for f in out if f not in stray]
+            typer.echo(f"skipped {len(stray)} families with HG FASTAs but no _cluster.tsv "
+                       f"(killed publish?): {' '.join(stray)}", err=True)
     if ready:
         busy = (_live(set()) or {}).get(stage, set())   # family tags need no HG set
         ok = core.ready_set(cfg, stage, [f for f in out if f not in busy])
@@ -456,6 +464,11 @@ def submit(stage: str = typer.Argument(...),
     cfg = core.config_from_raw(raw)
     if stage in core.FAMILY_STAGES:                # duplicates (search: also name collisions)
         _warn_families(cfg, collisions=stage == "search")
+        for run, _start, final in history.nf_runs(cfg.nextflow_dir, "step1.nf"):
+            if not final:
+                typer.echo(f"warning: a step1.nf Nextflow run appears to be active ({run}); "
+                           f"running step1.nf and phylocli search/cluster at the same time can "
+                           f"mix two clusterings of one family", err=True)
     if not core.applicable(cfg, stage):
         _fail(f"not_applicable: stage {stage} does not run with run_generax="
               f"{cfg.params.get('run_generax')}, gxsup={cfg.params.get('gxsup')}; nothing submitted", 2)

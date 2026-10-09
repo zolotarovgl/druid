@@ -986,9 +986,9 @@ def test_hg_view_headers_follow_the_unit(cli):
             app.load_now()
             await pilot.pause()
             assert heads(app, "#hgs")[1:3] == ["family", "HGs"]
-            assert "families" in heads(app, "#arrays")
+            assert "ids" in heads(app, "#arrays")
             app.open_group("ALL", "align")
             await pilot.pause()
             assert heads(app, "#hgs")[1:3] == ["HG", "seqs"]
-            assert "HGs" in heads(app, "#arrays") and "families" not in heads(app, "#arrays")
+            assert "ids" in heads(app, "#arrays") and "HGs" not in heads(app, "#arrays")
     _run(go())

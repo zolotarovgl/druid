@@ -549,8 +549,11 @@ def test_missing_family_stages(cli, results_tree):
     cfg, _ = results_tree
     step1_outputs(cfg.outdir)
     assert cli(["missing", "search"]).output.split() == ["cal.Trail", "slc.NEW"]
-    assert cli(["missing", "cluster"]).output.split() == ["tfs.C_x"]
-    assert cli(["missing", "cluster", "--all"]).output.split() == ["cal.Trail", "slc.NEW", "tfs.C_x"]
+    # tfs.C_x (HG FASTAs, no tsv) is output_exists in validate: not missing, noted on stderr
+    assert [l for l in cli(["missing", "cluster"]).output.splitlines()
+            if not l.startswith("skipped")] == []
+    assert [l for l in cli(["missing", "cluster", "--all"]).output.splitlines()
+            if not l.startswith("skipped")] == ["cal.Trail", "slc.NEW"]
     assert cli(["missing", "search", "-f", "slc"]).output.split() == ["slc.NEW"]
     r = cli(["missing", "search", "-f", "tfs.C"])
     assert r.exit_code == 1 and "no families match --fam tfs.C" in r.output
@@ -642,10 +645,11 @@ def test_submit_family_errors(cli, results_tree):
     assert r.exit_code == 2 and "output_exists (1): tfs.A" in r.output and "nothing submitted" in r.output
     r = cli(["submit", "cluster", "slc.NOPE", "-n"])
     assert r.exit_code == 2 and "unknown (1): slc.NOPE" in r.output
-    r = cli(["submit", "cluster", "--missing", "-n"])         # NEW/Trail skipped; C_x: stray HG FASTA
+    r = cli(["submit", "cluster", "slc.NEW", "tfs.C_x", "-n"])   # explicit: stray HG FASTA still refused
     assert r.exit_code == 2 and "output_exists (1): tfs.C_x" in r.output
-    r = cli(["submit", "cluster", "--missing", "--all", "-n"])
+    r = cli(["submit", "cluster", "--missing", "--all", "-n"])   # C_x is skipped, not refused
     assert r.exit_code == 2 and "input_missing (2): cal.Trail slc.NEW" in r.output
+    assert "output_exists" not in r.output
     r = cli(["submit", "search", "--missing", "-f", "nope", "-n"])
     assert r.exit_code == 1 and "no families match --fam nope" in r.output
     assert not calls_txt().exists()
@@ -855,3 +859,41 @@ def test_step1_nf_calls_stage_scripts():
     assert 'path("${pref}.${family}.*.fasta", optional: true)' in nf
     assert "python ${projectDir}/phylogeny/main.py" not in nf          # bodies live in the scripts
     assert "def familyIsDone" in nf and "stageInMode 'copy'" in nf      # skip logic / staging kept
+
+
+def _set_nf_history(tmp_path, text):
+    nf = tmp_path / "nf_active"
+    (nf / ".nextflow").mkdir(parents=True, exist_ok=True)
+    (nf / ".nextflow/history").write_text(text)
+    raw = _raw()
+    raw["nextflow_dir"] = str(nf)
+    Path(os.environ["PHYLOCLI_CONFIG"]).write_text(yaml.safe_dump(raw))
+
+
+def test_submit_warns_when_step1_nf_active(cli, results_tree, tmp_path):
+    cfg, _ = results_tree
+    step1_outputs(cfg.outdir)
+    step1_tools()
+    _set_nf_history(tmp_path, "2026-10-09 09:00:00\t-\tlive_run\t-\th3\tu1\t"
+                              "nextflow run -ansi-log false step1.nf -resume\n")
+    warn = ("warning: a step1.nf Nextflow run appears to be active (live_run); running step1.nf "
+            "and phylocli search/cluster at the same time can mix two clusterings of one family")
+    for stage in ("search", "cluster"):
+        r = cli(["submit", stage, "--missing", "-n"])
+        assert warn in r.output, (stage, r.output)
+        assert r.exit_code != 78                                  # a warning, not a refusal
+    # finished step1.nf run, or an active step2.nf run: no warning
+    _set_nf_history(tmp_path, "2026-10-09 09:00:00\t1m\tdone_run\tOK\th3\tu1\tnextflow run step1.nf\n"
+                              "2026-10-09 10:00:00\t-\tlive2\t-\th4\tu1\tnextflow run step2.nf\n")
+    assert "appears to be active" not in cli(["submit", "search", "--missing", "-n"]).output
+
+
+def test_missing_cluster_skips_hg_fastas_without_tsv(cli, results_tree):
+    cfg, _ = results_tree
+    step1_outputs(cfg.outdir)
+    step1_tools()
+    r = cli(["missing", "cluster"])
+    assert "skipped 1 families with HG FASTAs but no _cluster.tsv (killed publish?): tfs.C_x" in r.output
+    assert "tfs.C_x" not in [l for l in r.output.splitlines() if not l.startswith("skipped")]
+    r = cli(["submit", "cluster", "--missing", "-n"])             # no longer refuses the batch
+    assert "output_exists" not in r.output and "skipped 1 families with HG FASTAs" in r.output
