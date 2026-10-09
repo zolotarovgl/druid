@@ -710,3 +710,136 @@ def test_status_family_rows(hist):
     assert "done (no hits)" in next(l for l in r.output.splitlines() if l.split()[:1] == ["cluster"])
     r = cli(["status", "tfs.A", "--history"])
     assert r.exit_code == 0 and "/w/s1/1/.command.err" in r.output and "killed: out of memory?" in r.output
+
+
+# ---- Task 6: TUI -----------------------------------------------------------------------------
+
+def _tui():
+    pytest.importorskip("textual")
+    from phylocli import tui
+    return tui
+
+
+def _calls():
+    p = _state["bin"] / "calls.txt"
+    return p.read_text().splitlines() if p.exists() else []
+
+
+def test_tui_overview_family_cells_and_open(cli, results_tree, monkeypatch):
+    tui = _tui()
+    cfg, _ = results_tree
+    step1_outputs(cfg.outdir)
+    step1_tools()
+    assert cli(["submit", "search", "slc.NEW", "cal.Trail"]).exit_code == 0   # task 0 = cal.Trail
+    monkeypatch.setenv("FAKE_SACCT", SACCT_S1)
+    app = tui.PhyloApp(_cfg(), refresh_s=3600)
+    n0 = len(_calls())
+
+    async def go():
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            ov = app.query_one("#overview")
+            assert [str(c.label) for c in ov.columns.values()][:5] == ["\ngroup", "\nHGs", "step1 ·\nsearch",
+                                                                    "families\ncluster", "│\n│"]
+            rows = {r.group: r for r in app.ov_rows}
+            assert list(rows) == ["ALL", "tfs", "cal", "slc"]
+            s = {x.stage: x for x in model.stage_rows(_cfg(), core.expected(_cfg()), FAMS)[0]}
+            for st in core.FAMILY_STAGES:                         # same numbers as phylo status
+                assert rows["ALL"].per_stage[st] == (s[st].done, s[st].running, s[st].ready, s[st].blocked)
+            assert (rows["cal"].total, rows["cal"].n_fams) == (0, 1)
+            ov.move_cursor(row=2, column=tui.ov_column("search"))             # cal x search
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            app.load_now()                                         # HG view: history now
+            await pilot.pause()
+            assert app.view == "hgs" and app.group == "cal" and app.stage == "search"
+            assert app.filter == "actionable" and [r.hg for r in app.visible()] == ["cal.Trail"]  # failed
+            await pilot.press("f")                                 # actionable -> failed: same family
+            assert app.filter == "failed" and [r.hg for r in app.visible()] == ["cal.Trail"]
+            st = app.query_one("#stages")
+            assert str(st.get_cell_at((core.STAGES.index("search"), 5))) == "1"    # cal's families
+            assert str(st.get_cell_at((core.STAGES.index("align"), 5))) == "0"     # cal's HGs
+            text = app._detail_text("cal.Trail")
+            assert "cal.Trail" in text and "0 HGs" in text and "search" in text and "align" not in text
+            await pilot.press("a", "r")
+            await pilot.pause()
+            scr = app.screen
+            assert isinstance(scr, tui.ResubmitScreen) and scr.stage == "search"
+            assert [(g[0], g[1].mem_mb, g[2]) for g in scr.groups] == [("OOM", 1000, ["cal.Trail"])]
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "resources: step1 defaults for 1 families" in scr._shown
+            assert "array 0: 1 families" in scr._shown
+            assert len(_calls()) == n0                             # dry run only
+    asyncio.run(go())
+
+
+def test_tui_overview_step1_step2_separator(cli, monkeypatch):
+    tui = _tui()
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SACCT", SACCT_S1)
+    app = tui.PhyloApp(_cfg(), refresh_s=3600)
+
+    async def go():
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            ov = app.query_one("#overview")
+            labels = [str(c.label) for c in ov.columns.values()]
+            assert ov.header_height == 2
+            assert labels[2:7] == ["step1 ·\nsearch", "families\ncluster", "│\n│", "step2 ·\nalign", "HGs\ntree"]
+            sep = tui.ov_column("cluster") + 1
+            assert tui.stage_at_column(sep) is None and tui.ov_column("align") == sep + 1
+            assert all(str(ov.get_cell_at((i, sep))) == "│" for i in range(ov.row_count))
+            ov.move_cursor(row=0, column=tui.ov_column("align"))               # ALL x align
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.view == "hgs" and app.stage == "align"
+            await pilot.press("escape")
+            await pilot.pause()
+            app.stage = "tree"                                                 # the "current" stage
+            ov.move_cursor(row=0, column=sep)                                  # ALL x │
+            await pilot.pause()
+            await pilot.press("enter")                                         # not a stage: no crash
+            await pilot.pause()
+            assert app.view == "hgs" and app.stage == "tree" and app.group is None
+            await pilot.press("escape")
+            await pilot.pause()
+            ov.move_cursor(row=0, column=sep)
+            app.load_now()                                                     # a refill restores...
+            await pilot.pause()
+            assert ov.cursor_column == tui.ov_column("align")                  # ...never onto │
+    asyncio.run(go())
+
+
+def test_tui_banner_on_duplicate_ids(cli, results_tree):
+    tui = _tui()
+    _, root = results_tree
+    g = root / "gene_families_searchinfo.csv"
+    g.write_text(g.read_text() + "NEW\tPF_N\t1.1\t3\tGA\tslc\tslc\n")
+    app = tui.PhyloApp(_cfg(), refresh_s=3600)
+
+    async def go():
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            assert "duplicate family ids" in app._banner_text and "slc.NEW" in app._banner_text
+            assert app.view == "overview"                              # a warning; the app goes on
+            assert app.ov_rows[0].n_fams == 5                       # still counted, de-duplicated
+            assert "search" in [str(c.label).split("\n")[-1] for c in app.query_one("#overview").columns.values()]
+    asyncio.run(go())
+
+
+def test_status_hg_survives_malformed_genefam(cli, monkeypatch):
+    def boom(path):
+        raise ValueError("malformed genefam row")
+    monkeypatch.setattr(core, "parse_genefam", boom)
+    with pytest.raises(ValueError):                                # the family parse really fails
+        core.family_ids(_cfg(), strict=False)
+    r = cli(["status", "tfs.A.HG11"])
+    assert r.exit_code == 0, r.output
+    assert "tfs.A.HG11" in r.output

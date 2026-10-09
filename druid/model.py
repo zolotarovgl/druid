@@ -128,6 +128,8 @@ def task_states(job_ids: list[str]) -> dict[str, dict[int, str]] | None:
         if "|" not in line:
             continue
         jid, state = line.split("|", 1)
+        if "." in jid:                 # a job step (12345_0.batch): -X hides them, never a task
+            continue
         state = state.split()[0] if state.split() else "UNKNOWN"   # "CANCELLED by 1000"
         master, _, idx = jid.partition("_")
         idxs = expand_indices(idx.strip("[]")) if idx else []

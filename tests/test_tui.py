@@ -253,7 +253,7 @@ def test_refresh_keeps_stage_selection_and_cursor(cli, monkeypatch):
             await _settle(app, pilot)
             assert app.stage == "tree"
             assert app.selected == {vis[0]} and app._cursor_hg() == vis[1]
-            assert app.query_one("#stages").cursor_row == 1
+            assert app.query_one("#stages").cursor_row == core.STAGES.index("tree")
     _run(go())
 
 
@@ -544,7 +544,7 @@ def test_overview_is_first_and_reads_no_history(cli, monkeypatch):
             app.load_now()
             await pilot.pause()
             assert app.view == "overview"
-            assert [r.group for r in app.ov_rows] == ["ALL", "tfs"]
+            assert [r.group for r in app.ov_rows] == ["ALL", "tfs", "cal", "slc"]
             exp = core.expected(_cfg())
             srows, _k, _d = tui.model.stage_rows(_cfg(), exp)
             a = next(s for s in srows if s.stage == "align")
@@ -561,7 +561,7 @@ def test_overview_family_toggle(cli):
             await pilot.pause()
             await pilot.press("f")
             await pilot.pause()
-            assert app.by == "family" and [r.group for r in app.ov_rows] == ["ALL", "tfs.A", "tfs.C_x"]
+            assert app.by == "family" and [r.group for r in app.ov_rows] == ["ALL", "tfs.A", "tfs.C_x", "cal.Trail", "slc.NEW", "tfs.B"]
             await pilot.press("c")
             await pilot.pause()
             assert app.by == "category"
@@ -711,10 +711,10 @@ def test_regroup_is_in_memory(cli, monkeypatch):
             monkeypatch.setattr(core, "ready_set", boom)
             await pilot.press("f")
             await pilot.pause()
-            assert [r.group for r in app.ov_rows] == ["ALL", "tfs.A", "tfs.C_x"]
+            assert [r.group for r in app.ov_rows] == ["ALL", "tfs.A", "tfs.C_x", "cal.Trail", "slc.NEW", "tfs.B"]
             await pilot.press("c")
             await pilot.pause()
-            assert [r.group for r in app.ov_rows] == ["ALL", "tfs"]
+            assert [r.group for r in app.ov_rows] == ["ALL", "tfs", "cal", "slc"]
     _run(go())
 
 

@@ -324,7 +324,11 @@ def status(hg: str = typer.Argument(None, help="HG id: show its last attempt per
     if hg is not None:
         if ids is not None or fam:
             _fail("status HG cannot be combined with --ids / --fam", 2)
-        if hg in core.family_ids(cfg, strict=False):     # a family id is never an HG id
+        try:
+            is_fam = hg in core.family_ids(cfg, strict=False)   # a family id is never an HG id
+        except (OSError, ValueError):                            # unparseable genefam: an HG id
+            is_fam = False
+        if is_fam:
             _family_status(cfg, hg, history_)
         else:
             _hg_status(cfg, hg, history_)

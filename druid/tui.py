@@ -1,12 +1,14 @@
-"""phylo tui: interactive view of step2 progress (Textual). Imported only by `phylo tui`."""
+"""phylo tui: interactive view of step1 + step2 progress (Textual). Imported only by `phylo tui`."""
 from __future__ import annotations
 
+import collections
 import os
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 from rich.markup import escape
+from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -30,15 +32,25 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
                "#arrays": "3 Arrays", "#detail": "4 Detail"}
 STATE_STYLE = {"done": "green", "running": "cyan", "ready": "yellow", "failed": "red",
                "blocked": "bright_black"}
-# Stages the TUI shows (overview columns, stages panel, HG-view data). HG stages only until
-# the step1 TUI task widens it to core.STAGES (search/cluster in front).
-TUI_STAGES = core.HG_STAGES
+# Stages the TUI shows (overview columns, stages panel, HG-view data): search/cluster in front.
+TUI_STAGES = core.STAGES
+OV_SEP = "│"
+# Overview stage columns: step1 (families) | step2 (HGs); None = the one-character separator column.
+OV_COLUMNS = [*core.FAMILY_STAGES, None, *core.HG_STAGES]
+# Top header row (Grygoriy, 09/10/2026): block names over the first two columns of each block.
+OV_TOP = {core.FAMILY_STAGES[0]: "step1 ·", core.FAMILY_STAGES[1]: "families",
+          core.HG_STAGES[0]: "step2 ·", core.HG_STAGES[1]: "HGs"}
 
 
 def ov_column(stage: str) -> int:
-    """Overview column of `stage` (after the group and HGs columns). Task 6 adds the step1/step2
-    separator column; tests and code index the overview only through this."""
-    return 2 + TUI_STAGES.index(stage)
+    """Overview column of `stage` (after the group and HGs columns, skipping the separator)."""
+    return 2 + OV_COLUMNS.index(stage)
+
+
+def stage_at_column(col: int) -> "str | None":
+    """The stage of an overview column; None for group, HGs and the separator (not a stage).
+    The one column->stage mapping: enter, cursor restore and the `s` sort use it."""
+    return OV_COLUMNS[col - 2] if 2 <= col < 2 + len(OV_COLUMNS) else None
 
 
 class PhyloApp(App):
@@ -87,14 +99,15 @@ class PhyloApp(App):
         self.by = "category"
         self.group: "str | None" = None
         self.ov_rows: list = []
-        self._ov_inputs: tuple = (set(), {})
+        self._ov_inputs: tuple = (set(), {}, set(), {})    # exp, HG states, families, family states
+        self.hg_count: dict[str, int] = {}                 # family id -> expected HGs
         self._banner_text = ""
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield Static("", id="banner")
         with Vertical(id="ov"):
-            yield DataTable(id="overview", cursor_type="cell")
+            yield DataTable(id="overview", cursor_type="cell", header_height=2)   # step1/step2 header
             yield Static("", id="ovfoot")
         with Grid(id="hgview"):
             yield DataTable(id="stages", cursor_type="row")
@@ -122,22 +135,35 @@ class PhyloApp(App):
         known = lv is not None
         lv = lv or {}
         states = model.stage_states(self.cfg, exp, done_map, lv)
+        fam_warn: list = []
+        fams: set = set()
+        if self.cfg.params.get("genefam_info"):
+            try:
+                fams = core.family_ids(self.cfg)
+                fam_warn = core.family_warnings(self.cfg)      # duplicates, name collisions
+            except (OSError, ValueError) as e:   # no / unreadable genefam file: warn, go on
+                fam_warn = [f"warning: {e}"]
+        fstates = model.family_states(self.cfg, fams, lv)
         by = self.by
-        ov_rows, _k = model.group_rows(self.cfg, exp, by, states=states)
-        snap = dict(ov_rows=ov_rows, by=by, ov_inputs=(exp, states), known=known,
-                    when=datetime.now(), hg=None)
+        ov_rows, _k = model.group_rows(self.cfg, exp, by, states=states, fams=fams, fstates=fstates)
+        hg_count = dict(collections.Counter(model.group_key(h, "family") for h in exp))
+        snap = dict(ov_rows=ov_rows, by=by, ov_inputs=(exp, states, fams, fstates), known=known,
+                    fam_warn=fam_warn, hg_count=hg_count, when=datetime.now(), hg=None)
         if self.view == "hgs":               # the slow part: attempt history, only in the HG view
             for hg in exp:                   # FASTAs are read here, off the UI thread, once
                 if not self.nseq.get(hg):
                     self.nseq[hg] = core.nseq(self.cfg, hg)
             atts = history.attempts(self.cfg)
+            fatts = history.family_attempts(self.cfg)
             # every applicable stage from ONE attempts read, ONE done scan, ONE squeue call, so
             # that stage changes and the detail panel need no subprocess on a key press
-            by_stage = {st: (model.hg_rows(self.cfg, st, exp, atts, done_map, lv)
+            by_stage = {st: (model.hg_rows(self.cfg, st, exp,
+                                           fatts if st in core.FAMILY_STAGES else atts,
+                                           done_map, lv)
                              if core.applicable(self.cfg, st) else [])
                         for st in TUI_STAGES}
             arrays, sacct_known = model.array_rows()
-            snap["hg"] = dict(atts=atts, by_stage=by_stage, arrays=arrays,
+            snap["hg"] = dict(atts=atts + fatts, by_stage=by_stage, arrays=arrays,
                               sacct_known=sacct_known)
         return snap
 
@@ -163,6 +189,7 @@ class PhyloApp(App):
 
     def _apply(self, snap: dict) -> None:
         self._ov_inputs = snap["ov_inputs"]
+        self.hg_count = snap["hg_count"]
         if snap["by"] != self.by:            # c/f pressed while this was being collected
             self._regroup()
         else:
@@ -171,6 +198,7 @@ class PhyloApp(App):
         banner = []
         if not snap["known"]:
             banner.append("squeue not on PATH: running jobs not detected")
+        banner += [escape(w) for w in snap["fam_warn"]]
         if hg is not None and not hg["sacct_known"]:
             banner.append("sacct not on PATH: task states unknown")
         if hg is None and self.view == "hgs" and not self.by_stage:
@@ -207,8 +235,9 @@ class PhyloApp(App):
             rows = [r for r in self.rows if r.state in ACTIONABLE]
         else:
             rows = [r for r in self.rows if r.state == self.filter]
-        if self.group is not None:
-            rows = [r for r in rows if model.group_key(r.hg, self.by) == self.group]
+        if self.group is not None:          # search / cluster list families, the rest HGs
+            key = model.fam_group_key if self.stage in core.FAMILY_STAGES else model.group_key
+            rows = [r for r in rows if key(r.hg, self.by) == self.group]
         return rows
 
     # ---- overview ---------------------------------------------------------------------------
@@ -222,12 +251,19 @@ class PhyloApp(App):
         t = self.query_one("#overview", DataTable)
         keep = self._key_at_cursor(t)
         col = t.cursor_column
+        if col >= 2 and stage_at_column(col) is None:      # never restore onto the separator
+            col += 1
         if not t.columns:
-            t.add_columns("group", "HGs", *TUI_STAGES)
+            t.add_columns(Text("\ngroup"), Text("\nHGs"),
+                          *(Text(f"{OV_SEP}\n{OV_SEP}") if st is None
+                            else Text(f"{OV_TOP.get(st, '')}\n{st}") for st in OV_COLUMNS))
         t.clear()
         for r in rows:
             cells = []
-            for st in TUI_STAGES:
+            for st in OV_COLUMNS:
+                if st is None:
+                    cells.append(OV_SEP)
+                    continue
                 c = r.per_stage.get(st)
                 if c is None:
                     cells.append("n/a")
@@ -247,14 +283,16 @@ class PhyloApp(App):
             return
         parts = [f"{st} {c[0]}/{c[1]}/{c[2]}/{c[3]}" for st, c in r.per_stage.items() if c]
         self.query_one("#ovfoot", Static).update(
-            f"[b]{escape(r.group)}[/] {r.total} HGs · done/running/ready/blocked: "
-            + " · ".join(parts)
-            + "\n█ done ▒ running ▓ ready/failed ░ blocked · enter: open · c/f: category/family"
+            f"[b]{escape(r.group)}[/] {r.total} HGs · {r.n_fams} families · "
+            "done/running/ready/blocked: " + " · ".join(parts)
+            + "\n█ done ▒ running ▓ ready/failed ░ blocked · search/cluster count families · "
+              "enter: open · c/f: category/family"
             + " · default view: failed+ready")
 
     def _regroup(self) -> None:
-        exp, states = self._ov_inputs
-        rows, _k = model.group_rows(self.cfg, exp, self.by, states=states)   # in-memory only
+        exp, states, fams, fstates = self._ov_inputs
+        rows, _k = model.group_rows(self.cfg, exp, self.by, states=states,   # in-memory only
+                                    fams=fams, fstates=fstates)
         self._fill_overview(rows)
         if self.view == "hgs":
             self._fill_stages()
@@ -275,8 +313,8 @@ class PhyloApp(App):
             if c is None:
                 st.add_row(name, "n/a", "", "", "", "", key=name)
             else:
-                st.add_row(name, str(c[0]), str(c[1]), str(c[2]), str(c[3]), str(row.total),
-                           key=name)
+                total = row.n_fams if name in core.FAMILY_STAGES else row.total   # families / HGs
+                st.add_row(name, str(c[0]), str(c[1]), str(c[2]), str(c[3]), str(total), key=name)
         if keep_stage in TUI_STAGES:
             st.move_cursor(row=TUI_STAGES.index(keep_stage))
 
@@ -335,8 +373,7 @@ class PhyloApp(App):
     def on_data_table_cell_selected(self, event: DataTable.CellSelected) -> None:
         if event.data_table.id != "overview" or self.view != "overview":
             return
-        col = event.coordinate.column
-        stage = TUI_STAGES[col - 2] if col >= 2 else None
+        stage = stage_at_column(event.coordinate.column)   # None: group, HGs or │ -> current stage
         self.open_group(event.cell_key.row_key.value, stage)
 
     def on_data_table_cell_highlighted(self, event: DataTable.CellHighlighted) -> None:
@@ -349,10 +386,11 @@ class PhyloApp(App):
         t = self.query_one("#hgs", DataTable)
         keep = keep if keep is not None else self._cursor_hg()
         t.clear()
+        fam_stage = self.stage in core.FAMILY_STAGES
         for r in self.visible():
-            n = self.nseq.get(r.hg, 0)
+            n = f"{self.hg_count.get(r.hg, 0)} HGs" if fam_stage else str(self.nseq.get(r.hg, 0))
             a = r.last
-            t.add_row("●" if r.hg in self.selected else " ", r.hg, str(n),
+            t.add_row("●" if r.hg in self.selected else " ", r.hg, n,
                       f"[{STATE_STYLE[r.state]}]{r.state}[/]",
                       model.bump_reason(a) if a else "–",
                       f"{a.mem}/{a.time}" if a else "–",
@@ -368,15 +406,15 @@ class PhyloApp(App):
         vis = self.visible()
         return vis[t.cursor_row].hg if vis and 0 <= t.cursor_row < len(vis) else None
 
-    def _show_detail(self) -> None:
-        hg = self._cursor_hg()
-        box = self.query_one("#detail", Static)
-        if hg is None:
-            box.update("")
-            return
+    def _detail_text(self, hg: str) -> str:
+        """Detail panel for `hg`: an HG (six HG stages), or a family on search / cluster."""
+        if self.stage in core.FAMILY_STAGES:
+            head, stages = f"[b]{hg}[/]  {self.hg_count.get(hg, 0)} HGs", core.FAMILY_STAGES
+        else:
+            head, stages = f"[b]{hg}[/]  {self.nseq.get(hg, 0)} seqs", core.HG_STAGES
         latest = history.latest_by_stage([a for a in self.atts if a.hg == hg])
-        lines = [f"[b]{hg}[/]  {self.nseq.get(hg, 0)} seqs", ""]
-        for st in core.HG_STAGES:
+        lines = [head, ""]
+        for st in stages:
             rs = next((r for r in self.by_stage.get(st, []) if r.hg == hg), None)
             s_ = rs.state if rs else "n/a"
             a = latest.get(st)
@@ -386,7 +424,11 @@ class PhyloApp(App):
         a = latest.get(self.stage)
         if a is not None:
             lines += ["", f"log: {a.log}"]
-        box.update("\n".join(lines))
+        return "\n".join(lines)
+
+    def _show_detail(self) -> None:
+        hg = self._cursor_hg()
+        self.query_one("#detail", Static).update("" if hg is None else self._detail_text(hg))
 
     # ---- events / actions -------------------------------------------------------------------
     @staticmethod
@@ -498,7 +540,7 @@ class ResubmitScreen(ModalScreen):
             yield Label(f"[b]resubmit · {self.stage}[/]  enter = dry run · y = submit · esc = cancel")
             for i, (why, res, hgs) in enumerate(self.groups):
                 with Horizontal():
-                    yield Label(f"{len(hgs)} HGs · {why or 'other'} · mem ")
+                    yield Label(f"{len(hgs)} {core.unit(self.stage)} · {why or 'other'} · mem ")
                     yield Input(fmt_mem(res.mem_mb).replace(" ", "").replace("GB", "G")
                                 .replace("MB", "M"), id=f"mem-{i}")
                     yield Label(" time ")
@@ -535,7 +577,7 @@ class ResubmitScreen(ModalScreen):
         sel = model.select(self.cfg, self.stage, hgs, dry_run=dry_run)
         if not sel.selected:
             return None, "\n".join(sel.notes + ["nothing to submit"])
-        msg = model.preflight(self.stage)
+        msg = model.preflight(self.stage, self.cfg)
         if msg:
             return None, msg
         p = model.plan(self.cfg, self.stage, sel, per_hg=per)
@@ -622,7 +664,7 @@ class ResubmitScreen(ModalScreen):
                 return
             lines = ["[cyan]dry run[/] — nothing submitted yet; y to submit"] + [escape(n) for n in p.notes]
             for k, (res, ids_) in enumerate(p.groups):
-                lines.append(f"array {k}: {len(ids_)} HGs · {res.cpus} cpus · {fmt_mem(res.mem_mb)}"
+                lines.append(f"array {k}: {len(ids_)} {core.unit(self.stage)} ·{res.cpus} cpus · {fmt_mem(res.mem_mb)}"
                              f" · {fmt_time(res.time_min)} · {res.qos}")
         except Exception as e:             # never let a worker kill the app
             self._post(self._finish, f"[red]{escape(str(e))}[/]")
