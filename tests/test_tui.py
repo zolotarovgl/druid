@@ -1425,6 +1425,37 @@ def test_late_result_of_previous_group_is_dropped(cli, monkeypatch):
     _run(go())
 
 
+# ---- Results window: fix round 2 --------------------------------------------------------------
+def test_esc_cancels_results_worker(cli, monkeypatch):
+    import threading
+    write_results(_cfg())
+    gate = threading.Event()
+    reads = []
+    real = tui.model.read_ogs
+
+    def counting(*a, **k):
+        reads.append(a[1])
+        if len(reads) == 1:
+            gate.wait(10)                                      # blocked after the first file
+        return real(*a, **k)
+    monkeypatch.setattr(tui.model, "read_ogs", counting)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await pilot.press("o")                             # ALL: 3 HGs
+            await pilot.pause()
+            await _press(pilot, "escape")
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.view == "overview"
+    _run(go())
+    assert 1 <= len(reads) <= 2
+
+
 # ---- Results window: fix round 1 --------------------------------------------------------------
 def test_long_og_name_truncated_and_support_visible(cli):
     write_results(_cfg())

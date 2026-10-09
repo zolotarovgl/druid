@@ -494,6 +494,7 @@ class PhyloApp(App):
                 self.query_one("#members").focus()
                 return
             self._res_gen += 1                   # a load still running is dropped when it lands
+            self.workers.cancel_group(self, "results")   # ... and stops reading files
             self.view = self.res_from
             self._show_view()
             self.load_bg()                       # the refresh skipped the HG history meanwhile
@@ -695,7 +696,7 @@ class PhyloApp(App):
                     self.call_from_thread(self._res_progress, gen, k, n)
             snap["rows"], snap["missing"] = model.group_ogs(
                 self.cfg, hgs, snap["source"], progress=progress,
-                cancelled=lambda: worker.is_cancelled)
+                cancelled=lambda: worker.is_cancelled or gen != self._res_gen)
         except Exception as e:                   # never let a worker kill the app
             snap["note"] = f"cannot read {snap['source']}/: {e}"
         notes = []
