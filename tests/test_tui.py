@@ -2791,3 +2791,78 @@ def test_set_cols_sizes_a_sorted_column_like_a_resort(cli):
             await pilot.pause()
             assert _widths(app, "#res") == after_sort
     _run(go())
+
+
+# ---- species coverage colours (D) and overview numbers (E) ------------------------------------
+def test_coverage_style_thirds():
+    assert [tui.coverage_style(k, 3) for k in range(4)] == ["red", "yellow", "green", "green"]
+    assert tui.coverage_style(0, 0) == "red" and tui.coverage_style(1, 4) == "red"
+    assert tui.coverage_style(1, 2) == "yellow" and tui.coverage_style(5, 5) == "green"
+
+
+def test_species_text_colours_counts_only_and_never_parses_markup():
+    text = "\n".join(["Ctenophora  1/2 spp  2 genes", "  Mlei 2 · [b]x 1",
+                      "Chordata    0/3 spp  0 genes", "absent: unknown, [red]"])
+    t = tui.species_text(text)
+    assert t.plain == text                                   # numbers and names unchanged
+    assert [(t.plain[s.start:s.end], str(s.style)) for s in t.spans] == [
+        ("1/2 spp", "yellow"), ("0/3 spp", "red"), ("absent: unknown, [red]", "dim")]
+
+
+def test_species_pane_is_coloured_by_coverage(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert app._species_text.splitlines()[0] == "Ctenophora  1/2 spp  2 genes"
+            t = tui.species_text(app._species_text)
+            assert [str(s.style) for s in t.spans] == ["yellow", "green", "dim"]
+    _run(go())
+
+
+def test_ov_cell_numbers_left_of_six_cell_bar():
+    from rich.text import Text as RText
+    g = tui.PhyloApp.OV_GLYPHS
+    assert tui.PhyloApp.OV_BAR == 6
+    cell = tui.ov_cell((1800, 0, 0, 214), 9, 6, g)
+    assert RText.from_markup(cell).plain == "1800/2014 █████░"
+    assert RText.from_markup(tui.ov_cell((1, 0, 1, 0), 9, 6, g)).plain == "      1/2 ███▓▓▓"
+    assert RText.from_markup(tui.ov_cell((0, 0, 0, 0), 3, 6, g)).plain == "0/0 "
+
+
+def test_overview_cells_show_done_over_total(cli):
+    from rich.text import Text as RText
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            c = app.ov_rows[0].per_stage["align"]
+            cell = _cells(app, "#overview", 0)[tui.ov_column("align")]
+            assert RText.from_markup(cell).plain.startswith(f"{c[0]}/{sum(c)} ")
+            assert len(RText.from_markup(cell).plain.split(" ")[-1]) == 6
+            col = [RText.from_markup(_cells(app, "#overview", i)[tui.ov_column("align")]).plain
+                   for i in range(len(app.ov_shown))]
+            assert len({len(x.rsplit(" ", 1)[0]) for x in col if x != "n/a"}) == 1   # right-aligned
+    _run(go())
+
+
+def test_stage_sort_and_hide_use_failed_ready_not_the_done_total_text(cli):
+    _sorted_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            _to_col(app, "tree")
+            await _key(pilot, "s")
+            assert _pair(app) == ["tfs.C_x", "tfs.A"]               # by failed+ready, as before
+            cell = _cells(app, "#overview", 1)[tui.ov_column("tree")]
+            assert "/" in cell                                      # the new done/total text
+            await _key(pilot, "h")
+            assert all(tui._todo_at(r, "tree") != (0, 0) and tui._todo_at(r, "tree") != (-1, -1)
+                       for r in app.ov_shown if r.group != "ALL")
+    _run(go())

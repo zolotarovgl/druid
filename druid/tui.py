@@ -4,6 +4,7 @@ from __future__ import annotations
 import collections
 import math
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -99,6 +100,40 @@ def species_lines(stats: list, outside: list, width: int = 60) -> list[str]:
         out.append("not in species tree: " + w[0].strip())
         out.extend(w[1:])
     return out
+
+
+def coverage_style(k: int, m: int) -> str:
+    """Species coverage k/m as a colour: red below 1/3, yellow below 2/3, else green."""
+    f = k / m if m else 0.0
+    return "red" if f < 1 / 3 else "yellow" if f < 2 / 3 else "green"
+
+
+_SPP = re.compile(r"  (\d+)/(\d+) spp  \d+ genes?$")   # a species_lines phylum line
+
+
+def species_text(text: str) -> Text:
+    """The species pane as a Rich Text: each phylum line's `k/m spp` coloured by
+    coverage_style, the `absent:` line dim. Styles are spans over the plain text: no species
+    code or error message is ever parsed as markup."""
+    out = Text(text)
+    pos = 0
+    for line in text.split("\n"):
+        m = _SPP.search(line)
+        if line.startswith("absent: "):
+            out.stylize("dim", pos, pos + len(line))
+        elif m and not line.startswith(" "):
+            out.stylize(coverage_style(int(m.group(1)), int(m.group(2))),
+                        pos + m.start(1), pos + m.end(2) + len(" spp"))
+        pos += len(line) + 1
+    return out
+
+
+def ov_cell(c: tuple, width: int, bar: int, glyphs) -> str:
+    """An overview stage cell (Grygoriy, 09/10/2026): `<done>/<total>` right-aligned to
+    `width`, then a `bar`-cell bar of done/running/ready/blocked, as Rich markup."""
+    n = model.bar_segments(c, bar)
+    return (f"{c[0]}/{sum(c)}".rjust(width) + " "
+            + "".join(f"[{fg}]{ch * k}[/]" for (ch, fg), k in zip(glyphs, n) if k))
 
 
 def _todo_at(r, stage: str) -> tuple:
@@ -417,7 +452,7 @@ class PhyloApp(App):
         Binding("q", "quit", "quit"),
     ]
 
-    OV_BAR = 10
+    OV_BAR = 6
     OV_GLYPHS = (("█", "green"), ("▒", "cyan"), ("▓", "yellow"), ("░", "bright_black"))
 
     def __init__(self, cfg: core.Config, refresh_s: int = 30, raw: "dict | None" = None,
@@ -873,6 +908,9 @@ class PhyloApp(App):
         if col >= 2 and stage_at_column(col) is None:      # never restore onto the separator
             col += 1
         t.clear()
+        width = {st: max((len(f"{c[0]}/{sum(c)}") for r in self.ov_shown
+                          for c in [r.per_stage.get(st)] if c), default=0)
+                 for st in OV_COLUMNS if st is not None}     # numbers right-aligned per column
         for r in self.ov_shown:
             cells = []
             for st in OV_COLUMNS:
@@ -883,9 +921,7 @@ class PhyloApp(App):
                 if c is None:
                     cells.append("n/a")
                     continue
-                n = model.bar_segments(c, self.OV_BAR)
-                cells.append("".join(f"[{fg}]{ch * k}[/]"
-                                     for (ch, fg), k in zip(self.OV_GLYPHS, n) if k))
+                cells.append(ov_cell(c, width[st], self.OV_BAR, self.OV_GLYPHS))
             t.add_row(r.group, str(r.total), *cells, key=r.group)
         keys = [r.group for r in self.ov_shown]
         t.move_cursor(row=keys.index(keep) if keep in keys else max(0, min(keep_row, len(keys) - 1)),
@@ -1450,7 +1486,7 @@ class PhyloApp(App):
                                   model.og_outside(og, uni), **({"width": w} if w > 20 else {}))
             text = "\n".join(([self._sp_note, ""] if self._sp_note else []) + lines)
         self._species_text = text
-        self.query_one("#species", Static).update(text)
+        self.query_one("#species", Static).update(species_text(text))   # coverage colours
         self._results_footer()
 
     def _fill_members(self) -> None:
