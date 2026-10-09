@@ -88,9 +88,11 @@ def live(expected: set) -> dict[str, set[str]] | None:
         elif name.startswith("nf-"):
             nf = nf_job(name)
             if nf:
-                hg = history._resolve_tag(nf[1], expected)
+                st = history.PROC_STAGE[nf[0]]
+                # step1 tags are the family id itself; step2 tags may carry a prefix (pre_<id>)
+                hg = nf[1] if st in core.FAMILY_STAGES else history._resolve_tag(nf[1], expected)
                 if hg:
-                    out[history.PROC_STAGE[nf[0]]].add(hg)
+                    out[st].add(hg)
     return dict(out)
 
 
@@ -158,15 +160,47 @@ class StageRow:
     ready: int = 0
     blocked: int = 0
     total: int = 0
+    no_hits: int = 0
 
 
-def stage_rows(cfg: core.Config, exp: set[str]):
-    """(rows, live_known, done-by-stage) — exactly the counts `phylo status` draws."""
+def family_states(cfg: core.Config, fams, lv: dict) -> dict:
+    """search / cluster -> family id -> 0 done / 1 running / 2 ready / 3 blocked, from output
+    files and squeue only (no history), like stage_states() for HGs. The one family-state code
+    path: the CLI summary rows (stage_rows) and the TUI overview cells (group_rows) count it."""
+    fams = set(fams)
+    if not fams:
+        return {}
+    fd = core.family_done(cfg, fams)
+    out: dict[str, dict[str, int]] = {}
+    for st in core.FAMILY_STAGES:
+        d = fd[st]
+        todo = fams - d
+        running = todo & lv.get(st, set())
+        ready = core.ready_set(cfg, st, todo - running)
+        out[st] = {f: (0 if f in d else 1 if f in running else 2 if f in ready else 3)
+                   for f in fams}
+    return out
+
+
+def stage_rows(cfg: core.Config, exp: set[str], fams: set | None = None):
+    """(rows, live_known, done-by-stage) — exactly the counts `phylo status` draws. `fams` (family
+    ids) puts the search / cluster rows first, counted in families from family_states (cluster
+    also reports the no-hits families); None or empty: HG stages only. done-by-stage is the HG
+    stages' dict."""
     done = core.report_status.done_by_stage(str(cfg.outdir), exp)
     lv = live(core.expected(cfg))
     known = lv is not None
     lv = lv or {}
     rows = []
+    if fams:
+        fs = family_states(cfg, fams, lv)
+        no_hits = len(core.family_done(cfg, fams)["no_hits"])
+        for st in core.FAMILY_STAGES:
+            c = [0, 0, 0, 0]
+            for v in fs[st].values():
+                c[v] += 1
+            rows.append(StageRow(st, True, c[0], c[1], c[2], c[3], len(fams),
+                                 no_hits if st == "cluster" else 0))
     for st in core.HG_STAGES:
         if not core.applicable(cfg, st):
             rows.append(StageRow(st, False))
@@ -194,23 +228,9 @@ def _latest_for(atts: list, stage: str) -> dict[str, "history.Attempt"]:
     return out
 
 
-def hg_rows(cfg: core.Config, stage: str, exp: set[str] | None = None,
-            atts: list | None = None, done_map: dict | None = None,
-            live_map: dict | None = None) -> list[HGRow]:
-    """One row per expected HG for `stage`. failed = inputs present, not done, not queued,
-    and the latest attempt at this stage ended in a FAILED_STATES state.
-    `done_map` / `live_map` (stage -> ids) let a caller that builds several stages compute
-    them once; when omitted they are computed here (squeue is called)."""
-    exp = core.expected(cfg) if exp is None else exp
-    done = (done_map if done_map is not None
-            else core.report_status.done_by_stage(str(cfg.outdir), exp))[stage]
-    busy = (live_map if live_map is not None
-            else (live(core.expected(cfg)) or {})).get(stage, set())
-    todo = exp - done
-    ready = core.ready_set(cfg, stage, todo - busy)
-    latest = _latest_for(history.attempts(cfg) if atts is None else atts, stage)
+def _state_rows(ids, done, busy, ready, latest) -> list[HGRow]:
     rows = []
-    for hg in sorted(exp):
+    for hg in sorted(ids):
         a = latest.get(hg)
         if hg in done:
             state = "done"
@@ -222,6 +242,33 @@ def hg_rows(cfg: core.Config, stage: str, exp: set[str] | None = None,
             state = "blocked"
         rows.append(HGRow(hg, state, a))
     return rows
+
+
+def hg_rows(cfg: core.Config, stage: str, exp: set[str] | None = None,
+            atts: list | None = None, done_map: dict | None = None,
+            live_map: dict | None = None) -> list[HGRow]:
+    """One row per expected HG for `stage`. failed = inputs present, not done, not queued,
+    and the latest attempt at this stage ended in a FAILED_STATES state.
+    `done_map` / `live_map` (stage -> ids) let a caller that builds several stages compute
+    them once; when omitted they are computed here (squeue is called).
+    search / cluster: one row per family (`hg` = family id); `exp` and `done_map` are not used,
+    and `atts` should be history.family_attempts() (the default)."""
+    if stage in core.FAMILY_STAGES:
+        fams = core.family_ids(cfg, strict=False)
+        done = core.family_done(cfg, fams)[stage]
+        busy = (live_map if live_map is not None else (live(set()) or {})).get(stage, set())
+        ready = core.ready_set(cfg, stage, fams - done - busy)
+        latest = _latest_for(history.family_attempts(cfg) if atts is None else atts, stage)
+        return _state_rows(fams, done, busy, ready, latest)
+    exp = core.expected(cfg) if exp is None else exp
+    done = (done_map if done_map is not None
+            else core.report_status.done_by_stage(str(cfg.outdir), exp))[stage]
+    busy = (live_map if live_map is not None
+            else (live(core.expected(cfg)) or {})).get(stage, set())
+    todo = exp - done
+    ready = core.ready_set(cfg, stage, todo - busy)
+    latest = _latest_for(history.attempts(cfg) if atts is None else atts, stage)
+    return _state_rows(exp, done, busy, ready, latest)
 
 
 @dataclass
@@ -321,7 +368,10 @@ def bump(att, res: core.Res) -> core.Res:
     return base
 
 
-TOOLS = {"align": ["mafft", "clipkit"], "tree": ["iqtree2"], "generax": ["generax", "mpirun"],
+# search: main.py hmmsearch -> helper/hmmsearch.py runs hmmfetch, hmmsearch, bedtools;
+# cluster: main.py cluster -> helper/functions.py cluster runs diamond, mcl; cluster.sh: samtools.
+TOOLS = {"search": ["hmmsearch", "hmmfetch", "bedtools"], "cluster": ["samtools", "diamond", "mcl"],
+         "align": ["mafft", "clipkit"], "tree": ["iqtree2"], "generax": ["generax", "mpirun"],
          "gxsup": ["iqtree2"], "possvm": [], "possvm_prev": []}
 MAX_ARRAY = 1000  # SLURM MaxArraySize default 1001 -> indices 0..1000
 SBATCH = """#!/usr/bin/env bash
@@ -370,8 +420,21 @@ def new_run_dir(stage: str, dry_run: bool = False) -> Path:
     return d
 
 
-def preflight(stage: str) -> str | None:
+def _missing_files(stage: str, cfg: "core.Config | None") -> list[str]:
+    """search reads these by their configured paths (pfam_db is passed as a path, not staged)."""
+    if cfg is None or stage != "search":
+        return []
+    out = [f"{k}={cfg.params.get(k)}" for k in ("genefam_info", "infasta", "pfam_db")
+           if not cfg.params.get(k) or not Path(cfg.params[k]).is_file()]
+    h = cfg.params.get("hmm_dir")
+    if h and not Path(h).is_dir():
+        out.append(f"hmm_dir={h}")
+    return out
+
+
+def preflight(stage: str, cfg: "core.Config | None" = None) -> str | None:
     lost = [t for t in TOOLS[stage] if shutil.which(t) is None]
+    files = _missing_files(stage, cfg)
     hint = ("       run 'conda activate phylo' and 'module load OpenMPI' before submitting;\n"
             "       see workflow/environment.yaml.")
     py_err = None
@@ -386,12 +449,14 @@ def preflight(stage: str) -> str | None:
                 py_err = (f"{py} (PYTHONNOUSERSITE=1) cannot import ete3, Bio, yaml:\n"
                           f"       {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else 'exit ' + str(r.returncode)}")
     if not (lost or py_err):
-        return None
+        return f"ERROR: not found: {' '.join(files)}" if files else None
     msg = "ERROR:"
     if lost:
         msg += f" not on PATH: {' '.join(lost)}"
     if py_err:
         msg += f"\n       {py_err}"
+    if files:
+        msg += f"\n       not found: {' '.join(files)}"
     return msg + "\n" + hint
 
 
@@ -414,7 +479,14 @@ def select(cfg: core.Config, stage: str, hgs: list[str], all_: bool = False,
            dry_run: bool = False) -> Selection:
     """The submit command's selection rules: unknown ids are an error; by default HGs
     without inputs or already queued are skipped with a note."""
-    exp = core.expected(cfg)
+    family = stage in core.FAMILY_STAGES
+    if family:
+        try:
+            exp = core.family_ids(cfg)
+        except core.FamilyError as e:
+            raise ModelError(str(e), 1) from None
+    else:
+        exp = core.expected(cfg)
     unknown = sorted(set(hgs) - exp)
     if unknown:
         raise ModelError(f"unknown ({len(unknown)}): {show(unknown)}\nnothing submitted", 2)
@@ -422,12 +494,17 @@ def select(cfg: core.Config, stage: str, hgs: list[str], all_: bool = False,
     notes: list[str] = []
     selected = list(hgs)
     if not all_:
-        unready = [hg for hg in selected if not core.inputs_ready(cfg, stage, hg)]
+        if family:                         # one listing for all families, not one per id
+            ok = core.ready_set(cfg, stage, selected)
+            unready = [hg for hg in selected if hg not in ok]
+        else:
+            unready = [hg for hg in selected if not core.inputs_ready(cfg, stage, hg)]
         busy = [hg for hg in selected if hg in queued and hg not in unready]
+        unit = core.unit(stage)
         if unready:
-            notes.append(f"skipped {len(unready)} HGs without inputs")
+            notes.append(f"skipped {len(unready)} {unit} without inputs")
         if busy:
-            notes.append(f"skipped {len(busy)} HGs already queued")
+            notes.append(f"skipped {len(busy)} {unit} already queued")
         drop = set(unready) | set(busy)
         selected = [hg for hg in selected if hg not in drop]
     return Selection(selected, notes, queued)
@@ -443,16 +520,22 @@ class Plan:
 
 def plan(cfg: core.Config, stage: str, sel: Selection, override: dict | None = None,
          per_hg: dict | None = None, over_flags=()) -> Plan:
-    errs = core.validate(cfg, stage, sel.selected, sel.queued)
+    try:
+        errs = core.validate(cfg, stage, sel.selected, sel.queued)
+    except core.FamilyError as e:
+        raise ModelError(str(e), 1) from None
     bad = {k: v for k, v in errs.items() if v}
     notes = list(sel.notes)
     if bad:
         return Plan(stage, [], notes, bad)
-    n_rows = core.resources_rows(cfg, sel.selected)
     over_flags = list(over_flags)
-    notes.append(f"resources.tsv: row found for {n_rows} of {len(sel.selected)} HGs"
-                 + (" (others: step2 defaults)" if n_rows < len(sel.selected) else "")
-                 + (f"; overridden by {' '.join(over_flags)}" if over_flags else ""))
+    over = f"; overridden by {' '.join(over_flags)}" if over_flags else ""
+    if stage in core.FAMILY_STAGES:                  # family ids never have resources.tsv rows
+        notes.append(f"resources: step1 defaults for {len(sel.selected)} families{over}")
+    else:
+        n_rows = core.resources_rows(cfg, sel.selected)
+        notes.append(f"resources.tsv: row found for {n_rows} of {len(sel.selected)} HGs"
+                     + (" (others: step2 defaults)" if n_rows < len(sel.selected) else "") + over)
     groups = core.group(cfg, stage, sel.selected, override, per_hg)
     pieces = [(res, c) for res, g in groups.items() for c in chunks(g)]
     return Plan(stage, pieces, notes, {})
@@ -466,8 +549,16 @@ class Written:
 
 def write_run(cfg: core.Config, raw: dict, p: Plan, dry_run: bool, max_running: int = 50,
               partition: str | None = None, qos: str | None = None) -> Written:
+    import copy
     import yaml
     run_dir = new_run_dir(p.stage, dry_run)
+    if p.stage == "search":
+        # main.py hmmsearch reads the family's row at run time: the jobs read a copy taken now
+        # (the file the ids were validated against), and the run keeps it as the record.
+        raw = copy.deepcopy(raw)
+        snap = run_dir / "genefam.csv"
+        shutil.copy2(cfg.params["genefam_info"], snap)
+        raw.setdefault("params", {})["genefam_info"] = str(snap)
     (run_dir / "config.yaml").write_text(yaml.safe_dump(raw, sort_keys=False))
     arrays = []
     for k, (res, ids_) in enumerate(p.groups):
@@ -527,11 +618,18 @@ def group_key(hg: str, by: str) -> str:
     return hg.split(".", 1)[0] if by == "category" else hg.rsplit(".", 1)[0]
 
 
+def fam_group_key(fam: str, by: str) -> str:
+    """Group of a FAMILY id (search / cluster rows): category = first id part (slc); family = the
+    family id itself (slc.SLC25) -- an HG's family group (group_key(hg, "family")) is the same."""
+    return fam.split(".", 1)[0] if by == "category" else fam
+
+
 @dataclass
 class GroupRow:
     group: str
     total: int
     per_stage: dict
+    n_fams: int = 0
 
 
 def stage_states(cfg: core.Config, exp: set[str], done: dict, lv: dict) -> dict:
@@ -551,35 +649,49 @@ def stage_states(cfg: core.Config, exp: set[str], done: dict, lv: dict) -> dict:
 
 
 def group_rows(cfg: core.Config, exp: set[str], by: str = "category",
-               done: dict | None = None, lv: dict | None = None, states: dict | None = None):
+               done: dict | None = None, lv: dict | None = None, states: dict | None = None,
+               fams: set | None = None, fstates: dict | None = None):
     """(rows, squeue_known): per-group done/running/ready/blocked per stage, from output files
     and squeue only (no attempt history). rows[0] is ALL and equals stage_rows().
-    `states` (from stage_states) makes this pure in-memory counting."""
+    `states` (from stage_states) makes this pure in-memory counting.
+    `fams` (family ids) fills the search / cluster cells, counted in FAMILIES: ALL = all
+    families, a category row = that category's families, a family row = that one family; a group
+    with families but no HG yet (a new genefam row) gets a row too. `fstates` (from
+    family_states) keeps that in-memory as well. GroupRow.total stays the HG count, .n_fams the
+    families. Without `fams` the search / cluster cells are None (as for a non-applicable stage)."""
     known = True
-    if states is None:
-        done = core.report_status.done_by_stage(str(cfg.outdir), exp) if done is None else done
+    fams = set(fams or ())
+    if states is None or (fams and fstates is None):
         if lv is None:
             lv = live(exp)
             known = lv is not None
             lv = lv or {}
-        states = stage_states(cfg, exp, done, lv)
-    state = states
+        if states is None:
+            done = core.report_status.done_by_stage(str(cfg.outdir), exp) if done is None else done
+            states = stage_states(cfg, exp, done, lv)
+        if fams and fstates is None:
+            fstates = family_states(cfg, fams, lv)
+    fstates = fstates or {}
     groups: dict[str, list[str]] = collections.defaultdict(list)
     for hg in exp:
         groups[group_key(hg, by)].append(hg)
+    fgroups: dict[str, list[str]] = collections.defaultdict(list)
+    for f in fams:
+        fgroups[fam_group_key(f, by)].append(f)
 
-    def row(name: str, hgs) -> GroupRow:
+    def row(name: str, hgs, fs) -> GroupRow:
         per = {}
         for st in core.STAGES:
-            if st not in state:
+            src, ids = (fstates, fs) if st in core.FAMILY_STAGES else (states, hgs)
+            if st not in src:
                 per[st] = None
                 continue
             c = [0, 0, 0, 0]
-            for hg in hgs:
-                c[state[st][hg]] += 1
+            for i in ids:
+                c[src[st][i]] += 1
             per[st] = tuple(c)
-        return GroupRow(name, len(hgs), per)
+        return GroupRow(name, len(hgs), per, len(fs))
 
-    rows = [row("ALL", exp)] + [row(g, h) for g, h in
-                                sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))]
+    names = sorted(set(groups) | set(fgroups), key=lambda g: (-len(groups.get(g, ())), g))
+    rows = [row("ALL", exp, fams)] + [row(g, groups.get(g, []), fgroups.get(g, [])) for g in names]
     return rows, known

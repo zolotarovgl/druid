@@ -20,7 +20,8 @@ from phylocli import core
 from phylocli.common import (FAILED_STATES, expand_indices, fmt_mem, fmt_time, ids_path,
                              runs_dir)
 
-PROC_STAGE = {"ALN": "align", "PHY": "tree", "PVM_PREV": "possvm_prev",
+PROC_STAGE = {"SEARCH": "search", "CLUSTER": "cluster",                       # step1.nf
+              "ALN": "align", "PHY": "tree", "PVM_PREV": "possvm_prev",       # step2.nf
               "GR_watcher": "generax", "GXSUP": "gxsup", "PVM": "possvm"}
 NF_FIELDS = "process,tag,status,exit,attempt,cpus,memory,time,peak_rss,realtime,workdir,submit"
 NF_VER = "25.04.2"
@@ -82,16 +83,16 @@ def history_dir() -> Path:
     return Path(p) if p else runs_dir().parent / "history"
 
 
-def nf_runs(nextflow_dir: Path) -> list[tuple[str, str, bool]]:
-    """(run name, start 'YYYY-mm-dd HH:MM:SS', final) for every step2.nf run; final = safe to
-    cache (finished, or not the newest run)."""
+def nf_runs(nextflow_dir: Path, script: str = "step2.nf") -> list[tuple[str, str, bool]]:
+    """(run name, start 'YYYY-mm-dd HH:MM:SS', final) for every run of `script` (step2.nf: the HG
+    stages; step1.nf: search / cluster); final = safe to cache (finished, or not the newest run)."""
     f = Path(nextflow_dir) / ".nextflow" / "history"
     if not f.is_file():
         return []
     out = []
     for line in f.read_text(errors="replace").splitlines():
         c = line.split("\t")
-        if len(c) >= 7 and "step2.nf" in c[6]:
+        if len(c) >= 7 and script in c[6]:
             out.append((c[2], c[0].strip(), c[3].strip() != "-"))
     # Nextflow holds a lock per launch dir, so only the newest run can still be running: an
     # older run still marked "-" is a crashed/killed session and will never change.
@@ -140,11 +141,11 @@ def _write_cache(path: Path, rows: list[tuple]):
     os.replace(tmp, path)
 
 
-def _nf_rows(cfg: core.Config, warn) -> list[tuple[str, tuple]]:
+def _nf_rows(cfg: core.Config, warn, script: str = "step2.nf") -> list[tuple[str, tuple]]:
     out = []
     hdir = history_dir()
     warned = False
-    for run, started, finished in nf_runs(cfg.nextflow_dir):
+    for run, started, finished in nf_runs(cfg.nextflow_dir, script):
         cache = hdir / f"nf_{run}.tsv"
         if finished and cache.is_file():
             rows = [tuple(l.split("\t")) for l in cache.read_text().splitlines()]
@@ -176,9 +177,10 @@ def _resolve_tag(tag: str, expected: set) -> str | None:
     return None
 
 
-def _nextflow_attempts(cfg: core.Config, hg: str | None, expected: set, warn) -> list[Attempt]:
+def _nextflow_attempts(cfg: core.Config, hg: str | None, expected: set, warn,
+                       script: str = "step2.nf") -> list[Attempt]:
     out = []
-    for run, r in _nf_rows(cfg, warn):
+    for run, r in _nf_rows(cfg, warn, script):
         tag, stage, status, exit_, att, cpus, mem, time, peak, rt, wd, sub = r
         h = _resolve_tag(tag, expected)
         if h is None or (hg and h != hg):
@@ -283,11 +285,12 @@ def _sbatch_request(path: Path) -> tuple[str, str, str]:
             fmt_time(int(time.group(1))) if time else "-")
 
 
-def _phylocli_attempts(hg: str | None) -> list[Attempt]:
+def _phylocli_attempts(hg: str | None, stages=None) -> list[Attempt]:
+    stages = core.HG_STAGES if stages is None else stages
     subs = []     # (run dir, stage, submitted, job id, ids list, array k)
     for f in sorted(runs_dir().glob("*/jobs.tsv")):
         m = RUN_RE.match(f.parent.name)
-        if not m or m.group(7) not in core.HG_STAGES:
+        if not m or m.group(7) not in stages:
             continue
         sub = f"{m.group(1)}-{m.group(2)}-{m.group(3)} {m.group(4)}:{m.group(5)}:{m.group(6)}"
         for line in f.read_text().splitlines():
@@ -333,6 +336,17 @@ def attempts(cfg: core.Config, hg: str | None = None, warn=None) -> list[Attempt
     """Every recorded attempt (Nextflow + phylocli), for one HG if given, oldest first."""
     warn = warn or (lambda _msg: None)
     out = _nextflow_attempts(cfg, hg, core.expected(cfg), warn) + _phylocli_attempts(hg)
+    return sorted(out, key=lambda a: (a.submitted, a.attempt, a.run))
+
+
+def family_attempts(cfg: core.Config, fam: str | None = None, warn=None) -> list[Attempt]:
+    """Every recorded search / cluster attempt, for one family if given, oldest first: step1.nf
+    runs (processes SEARCH / CLUSTER, tag = <pref>.<family>) + phylocli runs of those stages.
+    Kept apart from attempts() so `status HG` never starts nextflow for step1 runs."""
+    warn = warn or (lambda _msg: None)
+    fams = core.family_ids(cfg, strict=False)
+    out = (_nextflow_attempts(cfg, fam, fams, warn, script="step1.nf")
+           + _phylocli_attempts(fam, core.FAMILY_STAGES))
     return sorted(out, key=lambda a: (a.submitted, a.attempt, a.run))
 
 

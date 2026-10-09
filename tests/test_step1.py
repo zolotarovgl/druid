@@ -16,6 +16,7 @@ import report_status
 from phylocli import core, history, model, runner
 from phylocli import phylo as cli_mod
 from phylocli.tests.test_cli import _state, calls_txt, cli, dry_dir, runs_dir  # noqa: F401  (fixture)
+from phylocli.tests.test_history import hist  # noqa: E402,F401  (fixture)
 
 FAMS = {"tfs.A", "tfs.B", "tfs.C_x", "slc.NEW", "cal.Trail"}
 
@@ -385,3 +386,131 @@ def test_cluster_all_small_publishes_tsv_only(results_tree, tmp_path, monkeypatc
     assert (cfg.outdir / "clusters/slc.NEW_cluster.tsv").is_file()
     assert not list((cfg.outdir / "clusters").glob("slc.NEW.HG*.fasta"))
     assert core.family_done(cfg, {"slc.NEW"})["cluster"] == {"slc.NEW"}
+
+
+# ---- Task 4: data layer ------------------------------------------------------------------
+
+S1_LOG = ("SEARCH\ttfs.A\tFAILED\t137\t1\t4\t500 MB\t5m\t-\t2m\t/w/s1/1\t2026-09-20 10:01:00.000\n"
+          "SEARCH\ttfs.A\tCOMPLETED\t0\t2\t4\t1 GB\t15m\t300 MB\t3m\t/w/s1/2\t2026-09-20 10:05:00.000\n"
+          "CLUSTER\ttfs.A\tCOMPLETED\t0\t1\t4\t300 MB\t10m\t100 MB\t1m\t/w/s1/3\t2026-09-20 10:10:00.000\n"
+          "CLUSTER\ttfs.ZZ\tCOMPLETED\t0\t1\t4\t300 MB\t10m\t100 MB\t1m\t/w/s1/4\t2026-09-20 10:11:00.000\n")
+SACCT_S1 = ("12345_0|OUT_OF_MEMORY||00:03:00|0:125\\n12345_0.batch|OUT_OF_MEMORY|512000K|00:03:00|0:125\\n"
+            "12345_1|COMPLETED||00:01:00|0:0\\n")
+
+
+def test_family_attempts_read_step1_runs(hist):
+    _cli, cfg, _calls, tmp = hist
+    (tmp / "nflog/run_s1.tsv").write_text(S1_LOG)
+    atts = history.family_attempts(cfg, "tfs.A")
+    assert [(a.stage, a.attempt, a.status, a.run) for a in atts] == [
+        ("search", 1, "FAILED", "run_s1"), ("search", 2, "COMPLETED", "run_s1"),
+        ("cluster", 1, "COMPLETED", "run_s1")]
+    assert history.latest_by_stage(atts)["search"].mem == "1 GB"
+    assert not any(a.hg == "tfs.ZZ" for a in history.family_attempts(cfg))   # not in the genefam file
+    assert all(a.stage in core.HG_STAGES for a in history.attempts(cfg))     # step2 history unchanged
+
+
+def test_live_family_tags(cli, monkeypatch):
+    monkeypatch.setenv("FAKE_SQUEUE", "999|nf-SEARCH_(slc.NEW)\n998|nf-CLUSTER_(tfs.C_x)\n")
+    assert model.live(set()) == {"search": {"slc.NEW"}, "cluster": {"tfs.C_x"}}
+
+
+def test_stage_rows_with_families(cli, results_tree):
+    cfg, _ = results_tree
+    step1_outputs(cfg.outdir)
+    rows, _known, _d = model.stage_rows(_cfg(), core.expected(_cfg()), FAMS)
+    assert [r.stage for r in rows] == core.STAGES
+    by = {r.stage: r for r in rows}
+    assert (by["search"].done, by["search"].ready, by["search"].blocked, by["search"].total) == (3, 2, 0, 5)
+    assert (by["cluster"].done, by["cluster"].ready, by["cluster"].blocked, by["cluster"].no_hits) == \
+        (2, 1, 2, 1)
+    assert [r.stage for r in model.stage_rows(_cfg(), core.expected(_cfg()))[0]] == core.HG_STAGES
+
+
+def test_family_states(cli, results_tree):
+    cfg, _ = results_tree
+    step1_outputs(cfg.outdir)
+    fs = model.family_states(_cfg(), FAMS, {})
+    assert fs["search"] == {"tfs.A": 0, "tfs.B": 0, "tfs.C_x": 0, "slc.NEW": 2, "cal.Trail": 2}
+    assert fs["cluster"] == {"tfs.A": 0, "tfs.B": 0, "tfs.C_x": 2, "slc.NEW": 3, "cal.Trail": 3}
+    assert model.family_states(_cfg(), FAMS, {"search": {"slc.NEW"}})["search"]["slc.NEW"] == 1
+    assert model.family_states(_cfg(), set(), {}) == {}
+
+
+def test_group_rows_with_families(cli, results_tree):
+    cfg, _ = results_tree
+    step1_outputs(cfg.outdir)
+    exp = core.expected(_cfg())
+    rows, _k = model.group_rows(_cfg(), exp, "category", fams=FAMS)
+    by = {r.group: r for r in rows}
+    assert list(by) == ["ALL", "tfs", "cal", "slc"]            # cal, slc: families, no HG yet
+    srows = {s.stage: s for s in model.stage_rows(_cfg(), exp, FAMS)[0]}
+    for st in core.STAGES:                                     # ALL == the CLI summary, all 8 stages
+        s = srows[st]
+        assert by["ALL"].per_stage[st] == (s.done, s.running, s.ready, s.blocked)
+    assert (by["ALL"].total, by["ALL"].n_fams) == (3, 5)
+    assert (by["tfs"].total, by["tfs"].n_fams, by["tfs"].per_stage["search"]) == (3, 3, (3, 0, 0, 0))
+    assert (by["slc"].total, by["slc"].per_stage["search"], by["slc"].per_stage["align"]) == \
+        (0, (0, 0, 1, 0), (0, 0, 0, 0))
+    fam = {r.group: r for r in model.group_rows(_cfg(), exp, "family", fams=FAMS)[0]}
+    assert list(fam) == ["ALL", "tfs.A", "tfs.C_x", "cal.Trail", "slc.NEW", "tfs.B"]
+    assert (fam["tfs.B"].total, fam["tfs.B"].per_stage["cluster"]) == (0, (1, 0, 0, 0))   # no hits
+    for st in core.FAMILY_STAGES:                              # family rows sum to ALL
+        assert tuple(sum(r.per_stage[st][i] for g, r in fam.items() if g != "ALL")
+                     for i in range(4)) == fam["ALL"].per_stage[st]
+
+
+def test_select_and_plan_family_ids(cli, results_tree):
+    cfg, _ = results_tree
+    step1_outputs(cfg.outdir)
+    sel = model.select(_cfg(), "cluster", ["slc.NEW", "tfs.C_x"])
+    assert sel.selected == ["tfs.C_x"] and sel.notes == ["skipped 1 families without inputs"]
+    assert model.plan(_cfg(), "cluster", sel).errors == {"output_exists": ["tfs.C_x"]}
+    with pytest.raises(model.ModelError) as e:
+        model.select(_cfg(), "search", ["slc.NOPE"])
+    assert e.value.code == 2 and "unknown (1): slc.NOPE" in str(e.value)
+    p = model.plan(_cfg(), "search", model.select(_cfg(), "search", ["slc.NEW"]))
+    assert p.groups == [(core.Res(4, 500, 5, "normal", None), ["slc.NEW"])]
+    assert p.notes == ["resources: step1 defaults for 1 families"]
+
+
+def test_select_family_duplicates_proceed(cli, results_tree, tmp_path):
+    _, root = results_tree
+    g = root / "gene_families_searchinfo.csv"
+    g.write_text(g.read_text() + "B\tPF_B\t1.1\t3\tGA\tTF\ttfs\n")
+    sel = model.select(_cfg(), "search", ["slc.NEW", "tfs.B"])
+    assert sel.selected == ["slc.NEW", "tfs.B"]
+    gone = dataclasses.replace(_cfg(), params={**_cfg().params, "genefam_info": str(tmp_path / "x")})
+    with pytest.raises(model.ModelError) as e:
+        model.select(gone, "search", ["slc.NEW"])
+    assert e.value.code == 1 and "genefam file not found" in str(e.value)
+
+
+def test_preflight_family_tools_and_files(cli, results_tree, monkeypatch, tmp_path):
+    cfg, _ = results_tree
+    monkeypatch.setenv("PATH", str(_state["bin"]))
+    assert "not on PATH: hmmsearch hmmfetch bedtools" in model.preflight("search", cfg)
+    assert "not on PATH: samtools diamond mcl" in model.preflight("cluster", cfg)
+    step1_tools()
+    assert model.preflight("search", cfg) is None and model.preflight("cluster", cfg) is None
+    gone = dataclasses.replace(cfg, params={**cfg.params, "pfam_db": str(tmp_path / "no.hmm")})
+    assert model.preflight("search", gone) == f"ERROR: not found: pfam_db={tmp_path / 'no.hmm'}"
+    assert model.preflight("align", gone) is None                  # HG stages: same checks as before
+
+
+def test_write_run_search_snapshots_genefam(cli, results_tree):
+    cfg, root = results_tree
+    raw = _raw()
+    before = copy.deepcopy(raw)
+    p = model.plan(cfg, "search", model.Selection(["slc.NEW"], [], set()))
+    w = model.write_run(cfg, raw, p, dry_run=True)
+    snap = w.run_dir / "genefam.csv"
+    src = root / "gene_families_searchinfo.csv"
+    assert snap.read_text() == src.read_text()
+    assert yaml.safe_load((w.run_dir / "config.yaml").read_text())["params"]["genefam_info"] == str(snap)
+    assert raw == before                                           # the caller's raw is not changed
+    src.write_text("")                                             # edited after the submission:
+    assert core.family_ids(core.load_config(w.run_dir / "config.yaml")) == FAMS   # job reads the copy
+    p = model.plan(cfg, "align", model.Selection(["tfs.C_x.HG1"], [], set()))
+    w = model.write_run(cfg, _raw(), p, dry_run=True)
+    assert not (w.run_dir / "genefam.csv").exists()               # HG stages: no snapshot
