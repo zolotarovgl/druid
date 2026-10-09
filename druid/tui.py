@@ -63,6 +63,7 @@ class PhyloApp(App):
         self.refresh_s = refresh_s
         self.stage = core.STAGES[0]
         self.filter = FILTERS[0]
+        self._auto_filter = False
         self.selected: set[str] = set()
         self.rows: list = []
         self.by_stage: dict = {}
@@ -164,6 +165,9 @@ class PhyloApp(App):
             return
         self.atts, self.by_stage = hg["atts"], hg["by_stage"]
         self.rows = self.by_stage.get(self.stage, [])
+        if self.view == "hgs":
+            self._auto_pick_filter()
+            self.sub_title = f"{self.stage} · {self.filter} · {snap['when']:%H:%M:%S}"
         # a selected HG that has finished or been queued must not stay selected invisibly:
         # validate() would refuse the whole resubmit over it.  (Blocked HGs stay: they are
         # visible under their filter and test_refresh_keeps_stage_selection_and_cursor pins it.)
@@ -255,6 +259,19 @@ class PhyloApp(App):
         if keep_stage in core.STAGES:
             st.move_cursor(row=core.STAGES.index(keep_stage))
 
+    def _auto_pick_filter(self) -> None:
+        """While the filter is still the automatic one, pick the first filter (FILTERS order)
+        that shows something for this group and stage; "failed" if none does.  Waits for real
+        data (by_stage) and is done once it has chosen from it."""
+        if not self._auto_filter or not self.by_stage:
+            return
+        self._auto_filter = False
+        for f in FILTERS:
+            self.filter = f
+            if self.visible():
+                return
+        self.filter = "failed"
+
     def open_group(self, name: str, stage: "str | None" = None) -> None:
         self.group = None if name == "ALL" else name
         self.view = "hgs"
@@ -266,6 +283,8 @@ class PhyloApp(App):
             if st.row_count:
                 st.move_cursor(row=core.STAGES.index(stage))
         self.rows = self.by_stage.get(self.stage, [])
+        self._auto_filter = True
+        self._auto_pick_filter()
         self._show_view()
         if not self.by_stage:
             self._set_banner("loading history…")
@@ -374,6 +393,7 @@ class PhyloApp(App):
             self.by = "family"
             self._regroup()
             return
+        self._auto_filter = False
         self.filter = FILTERS[(FILTERS.index(self.filter) + 1) % len(FILTERS)]
         self._fill_hgs()
 

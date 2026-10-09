@@ -725,3 +725,76 @@ def test_footer_keys_follow_view(cli):
             assert app.check_action("back", ()) and app.check_action("resubmit", ())
             assert not app.check_action("by_category", ())
     _run(go())
+
+
+def test_open_group_with_failures_opens_on_failed(cli, monkeypatch):
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.open_group("ALL", "align")
+            await pilot.pause()
+            app.load_now()
+            await pilot.pause()
+            assert app.filter == "failed" and app.visible()
+    _run(go())
+
+
+def test_open_group_without_failures_picks_first_nonempty_filter(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            ov = app.query_one("#overview")
+            ov.move_cursor(row=0, column=2 + core.STAGES.index("align"))   # ALL x align
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            app.load_now()
+            await pilot.pause()
+            assert app.view == "hgs" and app.stage == "align"
+            assert app.filter == "ready" and app.visible()
+    _run(go())
+
+
+def test_f_while_history_loading_keeps_user_filter(cli, monkeypatch):
+    import threading
+    from phylocli import history
+    gate = threading.Event()
+    real = history.attempts
+
+    def slow(*a, **k):
+        gate.wait(10)
+        return real(*a, **k)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            monkeypatch.setattr(history, "attempts", slow)
+            app.by_stage = {}
+            app.open_group("ALL", "align")
+            await pilot.pause()
+            assert app._auto_filter and app.filter == "failed"
+            await pilot.press("f")                          # failed -> ready, by hand
+            assert app.filter == "ready" and not app._auto_filter
+            await pilot.press("f")                          # ready -> running
+            user = app.filter
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.by_stage and app.filter == user == "running"
+    _run(go())
+
+
+def test_tui_command_runs_without_mouse(cli, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(tui.PhyloApp, "run", lambda self, **kw: seen.update(kw))
+    assert cli(["tui"]).exit_code == 0
+    assert seen.get("mouse") is False
