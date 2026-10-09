@@ -2,69 +2,76 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `o` opens a third TUI window, **Results** (panes `Results` / `OGs` / `species tree`), showing each HG's POSSVM ortholog groups with call, support and species coverage on the species tree; in the overview, `s` sorts and `h` hides rows by the highlighted column.
+**Goal:** `o` opens a third TUI window, **Results**, with four panes (`Results` / `OGs` / `members` / `species`): the HGs of a group, the POSSVM ortholog groups of the highlighted HG with call and support, the annotation-file rows of the highlighted OG (filterable with `/`) and its per-phylum species counts. In the overview, `s` sorts and `h` hides rows by the highlighted column.
 
-**Architecture:** `model.py` gains print-free readers for `ortholog_groups.csv` (`read_ogs`, `group_ogs`, one directory listing per load). A new pure module `phylocli/species_tree.py` parses the binary species tree (ete3, imported inside `load`) and draws it as text. `tui.py` adds a `results` view next to `overview` / `hgs`; all file reads run in a worker of its own group (`"results"`), so the existing `load_bg` refresh and this load never cancel each other. Sort/hide is a pure function `ov_order(rows, sort, hide)` over the in-memory `ov_rows`, keyed by column NAME.
+**Architecture:** `model.py` gains print-free readers: `read_ogs` / `group_ogs` (one directory listing per load) produce `OG`s whose `genes` are `Member` rows; `species_universe` (tip names of the species tree by regex, no ete3), `phyla` (`species_info.tsv`) and `og_species_stats` give the per-phylum counts. `tui.py` adds a `results` view next to `overview` / `hgs`; every file read runs in a worker of its own group (`"results"`), so the existing `load_bg` refresh and this load never cancel each other; cursor moves and the filter work on the in-memory snapshot. Sort/hide is a pure function `ov_order(rows, sort, hide)` over the in-memory `ov_rows`, keyed by column name.
 
-**Tech Stack:** Python ≥ 3.9, Textual 8.2.8 (optional), ete3 3.1.3 (lazy), pytest.
+**Tech Stack:** Python ≥ 3.9, Textual 8.2.8 (optional), pytest. No ete3.
 
-**Spec:** `docs/superpowers/specs/2026-10-09-phylocli-tui-og-explorer-sort-design.md` — Part A (Results window, amended 09/10/2026) and Part B (overview sort and filter).
+**Spec:** `docs/superpowers/specs/2026-10-09-phylocli-tui-og-explorer-sort-design.md` — Part A (Results window; amended 09/10/2026: no species-tree drawing, members + species panes, commit `8beca66`) and Part B (overview sort and filter).
 
-**Repo / branch:** worktree `~/Documents/projects/phylogenies/phylocli-wt`, branch `phylocli`. Spec commit `1d76050` (195 tests). ⚠ The step1 plan (`docs/superpowers/plans/2026-10-08-phylocli-step1.md`) is being implemented in the same worktree while this plan was written. **Rebased 09/10/2026 onto HEAD `a0fb496` (253 tests)**, where `tui.py` has: `TUI_STAGES = core.STAGES` (search, cluster first); `OV_COLUMNS = [*FAMILY_STAGES, None, *HG_STAGES]` with a `│` separator column (`None`), `OV_TOP`, a two-row header with unkeyed `Text` labels; `ov_column(stage)` and `stage_at_column(col)` (the one column↔stage mapping; None for group, HGs and `│`); `_set_units` (the `#hgs`/`#arrays` columns are built there, not in `on_mount`); family rows in the HG view at search/cluster (`r.hg` is then a family id, `model.fam_group_key`); `_ov_inputs = (exp, states, fams, fstates)`; `GroupRow.n_fams`, and `per_stage` for search/cluster counts families. No key added since uses `o`, `p`, `s` or `h`. Locate code by function name, not line number; never revert step1's code; `git add` only the files a task lists. This whole plan was applied to a scratch copy of `a0fb496` and both suites passed (288 = 253 + 35, 09/10/2026).
+**Repo / branch:** worktree `~/Documents/projects/phylogenies/phylocli-wt`, branch `phylocli`, HEAD `8beca66` (code = `a0fb496`, 253 tests). Step1 is built; `tui.py` there has: `TUI_STAGES = core.STAGES` (search, cluster first); `OV_COLUMNS = [*FAMILY_STAGES, None, *HG_STAGES]` with a `│` separator column (`None`), `OV_TOP`, a two-row header with unkeyed `Text` labels; `ov_column(stage)` and `stage_at_column(col)` (the one column↔stage mapping; None for group, HGs and `│`); `_set_units` (the `#hgs`/`#arrays` columns are built there, not in `on_mount`); family rows in the HG view at search/cluster (`r.hg` is then a family id); `_ov_inputs = (exp, states, fams, fstates)`; `GroupRow.n_fams`, and `per_stage` for search/cluster counts families. No existing binding uses `o`, `p`, `/`, `s` or `h` (BINDINGS: escape, c, f, space, a, r, l, R, q). Locate code by function name, not line number; never revert step1's code; `git add` only the files a task lists. This whole plan was applied to a scratch copy of `a0fb496` and both suites passed (286 = 253 + 33, 09/10/2026).
 
 ## File Structure
 
 | file | change | responsibility |
 |---|---|---|
-| `phylocli/model.py` | append | `OG`, `HGOgs`, `read_ogs`, `group_ogs`, `species_of`, `og_coverage`, `hg_sort_key`, `default_source` (no Textual, no ete3) |
-| `phylocli/species_tree.py` | create | `load(path)` (ete3 imported inside), `render(tree, counts) -> list[str]` (pure) |
-| `phylocli/tui.py` | modify | Results view (compose, CSS, bindings, worker, panes); overview `s`/`h` (`ov_order`, title) |
-| `phylocli/README.md` | modify | `## phylo tui`: Results window, `o`/`p`, `s`/`h` |
-| `phylocli/tests/test_model.py` | append | readers + shared fixture data (`OG_HEAD`, `write_results`) |
-| `phylocli/tests/test_species_tree.py` | create | render/load |
+| `phylocli/model.py` | append | `OG`, `Member`, `HGOgs`, `PhylumRow`, `read_ogs`, `group_ogs`, `species_of`, `hg_sort_key`, `default_source`, `species_universe`, `species_info_path`, `phyla`, `og_species_stats`, `og_outside` (no Textual) |
+| `phylocli/tui.py` | modify | Results view (compose, CSS, bindings, worker, four panes, `/` filter); overview `s`/`h` (`ov_order`, title) |
+| `phylocli/README.md` | modify | `## phylo tui`: Results window, `o`/`p`/`/`, `s`/`h` |
+| `phylocli/tests/test_model.py` | append | readers + shared fixture data (`OG_HEAD`, `SP4`, `SPINFO`, `write_results`) |
 | `phylocli/tests/test_tui.py` | append | Results window and overview sort/hide pilot tests |
 
 ## Global Constraints
 
-- CLI output text and exit codes of every `phylo` command stay byte-identical. **No existing test is modified** (the spec changes no existing expectation). `test_panes_are_named_top_left` iterates `PANE_TITLES`, so the three new entries are covered by it unchanged.
+- CLI output text and exit codes of every `phylo` command stay byte-identical. **No existing test is modified** (the spec changes no existing expectation). `test_panes_are_named_top_left` iterates `PANE_TITLES`, so the four new entries are covered by it unchanged.
 - Python 3.9-safe (`from __future__ import annotations`; no `match`; no `X | Y` outside annotations; annotations in `tui.py` written as strings, as the file already does).
-- Textual is imported only in `tui.py`. `species_tree.py` imports ete3 only inside `load()`; importing the module never imports ete3. `model.py` imports neither.
-- No file or SLURM access on a key press (`o`, `p`, `s`, `h`, `esc`, `tab`, cursor moves). File reads go in workers: `load_bg` (existing) and `_load_results` (new, `group="results"`), following the `_collect` / `_apply` pattern (worker builds a snapshot dict, `call_from_thread` applies it, exceptions never escape the worker).
+- Textual is imported only in `tui.py`. Nothing in this plan imports ete3: the species universe is the tip names of `params.SPECIES_TREE`, read with a regex.
+- No file or SLURM access on a key press (`o`, `p`, `/`, typing in the filter, `s`, `h`, `esc`, `tab`, cursor moves). File reads go in workers: `load_bg` (existing) and `_load_results` (new, `group="results"`), following the `_collect` / `_apply` pattern (worker builds a snapshot dict, `call_from_thread` applies it, exceptions never escape the worker). The species universe and the phyla are read once per session (cached on the app after the first successful read).
+- `species_info.tsv` is found next to the species tree (`Path(params.SPECIES_TREE).parent / "species_info.tsv"`, i.e. `data/species_info.tsv`), overridable by an optional `params.species_info`; no change to `config.yaml`, `core.PATH_PARAMS` or `conftest.py`.
 - Overview sort/hide is keyed by column **name**, never by column index: column 0 = `group`, 1 = `HGs`, every other column goes through step1's `stage_at_column(col)`; the `│` separator (None) does nothing. Sort/hide state stores the stage name, so it survives any later column change. Family stages (search, cluster) sort and hide on their `per_stage` family counts.
 - `ov_rows` keeps its current meaning (the rows as computed by `model.group_rows`); the displayed order lives in a new `ov_shown`. Existing tests read `ov_rows`.
 - Test commands (both must pass, output clean):
   `python3 -m pytest phylocli/tests -q -p no:cacheprovider` and
   `/tmp/claude-1000/-home-grygoriyzolotarov-Documents-projects-phylogenies/3dad6ea4-c859-4fe6-b319-93a358944ac8/scratchpad/py39/bin/python -m pytest phylocli/tests -q -p no:cacheprovider`.
-  Baseline 253 at `a0fb496`. Record **N0 = the passed count before you start each task**; each task states its delta (Task 1 +8, Task 2 +6, Task 3 +13, Task 4 +8; 288 total from 253 if nothing else lands).
+  Baseline 253 at `a0fb496`. Record **N0 = the passed count before you start each task**; each task states its delta (Task 1 +11, Task 2 +14, Task 3 +8; 286 total from 253 if nothing else lands).
 - Commit on `phylocli`, message ending `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Edit with Edit/Write tools only, never sed or python string-replace.
 - Dates in docs are `dd/mm/yyyy`.
 
 ## Review Focus
 
 1. **Big groups** — `o` on `ALL` or on a 556-HG family (`tfs.zf-C2H2`) over NFS must list each source directory once per load, not once per HG → Task 1 `test_group_ogs_lists_hgs_with_output_one_listing`.
-2. **The periodic refresh during a Results load** — `load_bg` is `exclusive=True` in the default worker group; if `_load_results` shared that group, a refresh would cancel it and Results would stay empty forever → Task 3 `test_results_read_in_worker_shows_loading` calls `load_bg()` mid-load.
+2. **The periodic refresh during a Results load** — `load_bg` is `exclusive=True` in the default worker group; if `_load_results` shared that group, a refresh would cancel it and Results would stay empty forever → Task 2 `test_results_read_in_worker_shows_loading` calls `load_bg()` mid-load.
 3. **Real support values other than a plain positive number** — v3 POSSVM writes `-1` (measured 09/10/2026: 10,804 rows in the first 300 `possvm/` files, 2,780 in `possvm_prev/`; root-spanning groups); `NA` was not seen but is accepted. These must parse (no "unparseable row"), display as numbers / `–`, and never get `⚠`, which is for exactly 0 → Task 1 `test_read_ogs_negative_and_na_support`.
-4. **ete3 missing in the TUI's env, or an unreadable species tree** — the OG table must still work and the tree pane must say why (`pip install ete3`, or the path and the error) → Task 3 `test_results_without_ete3_still_lists_ogs`.
-5. **Sorted or filtered overview** — `enter`, `o` and `esc` act on the row under the cursor by key (not the pre-sort index), and hiding the row under the cursor lands the cursor on a shown row → Task 4 `test_enter_on_sorted_overview_opens_row_under_cursor`.
+4. **Species files missing or ragged** — no species tree or no `species_info.tsv`: OGs and members must still work and the species pane must name the file and the error (Task 2 `test_results_without_species_files_still_lists_ogs`). The real `species_info.tsv` (189 rows) has rows with a trailing tab (`Lpol`) and rows with no phylum column (`Dicjap`, `Clim`; measured 09/10/2026): they parse, the latter as `unknown` (Task 1 `test_phyla_from_species_info`).
+5. **Sorted or filtered overview** — `enter`, `o` and `esc` act on the row under the cursor by key (not the pre-sort index), and hiding the row under the cursor lands the cursor on a shown row → Task 3 `test_enter_on_sorted_overview_opens_row_under_cursor`.
 
 ---
 
-### Task 1: `model` — read POSSVM ortholog groups
+### Task 1: `model` — POSSVM ortholog groups, members and species stats
 
 **Files:**
 - Modify: `phylocli/model.py` (append at the end)
 - Test: `phylocli/tests/test_model.py` (append)
 
 **Interfaces:**
-- Consumes: `core.Config` (`cfg.outdir: Path`, `cfg.params: dict`), `core.report_status.nonempty_files(d: str) -> set[str]` (existing: names of non-empty files in a directory, empty set when the directory is missing), `ModelError(msg, code=1)`.
+- Consumes: `core.Config` (`cfg.outdir: Path`, `cfg.params: dict`; `params["SPECIES_TREE"]` is absolute after `load_config`), `core.ROOT`, `core.report_status.nonempty_files(d: str) -> set[str]` (existing: names of non-empty files in a directory, empty set when the directory is missing), `ModelError(msg, code=1)`.
 - Produces:
   - `OG_SUFFIX = ".ortholog_groups.csv"`, `OG_HEADER: list[str]`
-  - `@dataclass OG: id: str` (`<hg>.<n>`, e.g. `tfs.T-box.HG1.0`); `name: str` (after the first `:`, e.g. `like:Tbx2/Tbx3`); `genes: list[str]`; `support: float | None` (`orthogroup_support`; None for `NA`/empty); `ref: str`; `ref_support: str`
+  - `@dataclass Member: gene: str; species: str; ref: str; ref_support: str` — one annotation-file row (`species = species_of(gene)`; `ref` / `ref_support` = that row's `reference_ortholog` / `reference_support`, as written)
+  - `@dataclass OG: id: str` (`<hg>.<n>`, e.g. `tfs.T-box.HG1.0`); `name: str` (after the first `:`, e.g. `like:Tbx2/Tbx3`); `genes: list[Member]` (file order); `support: float | None` (`orthogroup_support`; None for `NA`/empty); `ref: str`; `ref_support: str` (from the OG's first row)
   - `@dataclass HGOgs: hg: str; ogs: list[OG]; error: str = ""` (error = a `ModelError` message; then `ogs == []`)
+  - `@dataclass PhylumRow: phylum: str; covered: int; total: int; n_genes: int; species: list[tuple[str, int]]`
   - `read_ogs(cfg, hg: str, source: str, names: set[str] | None = None) -> list[OG] | None` — sorted by gene count desc, then OG number; None when no non-empty file; `ModelError` for two files / bad header / bad row (message starts `<path>:<line>:`)
   - `group_ogs(cfg, hgs, source: str) -> tuple[list[HGOgs], int]` — rows for HGs with output (sorted by `hg_sort_key`), number without output; one directory listing
-  - `species_of(gene: str) -> str`, `og_coverage(og: OG) -> dict[str, int]`, `hg_sort_key(hg: str) -> tuple`, `default_source(cfg) -> str` (`"possvm"` when `<outdir>/possvm/` is a directory, else `"possvm_prev"`)
-  - Test helpers (module level in `test_model.py`, imported by `test_tui.py` in Task 3): `OG_HEAD`, `SP4`, `POSSVM_HG1`, `POSSVM_HG11`, `PREV_HG1`, `og_csv(rows) -> str`, `write_results(cfg) -> None`
+  - `species_of(gene) -> str`, `hg_sort_key(hg) -> tuple`, `default_source(cfg) -> str` (`"possvm"` when `<outdir>/possvm/` is a directory, else `"possvm_prev"`)
+  - `species_universe(cfg) -> list[str]` — tip names of `params.SPECIES_TREE`, newick order, by regex (FileNotFoundError when missing)
+  - `species_info_path(cfg) -> Path`; `phyla(cfg) -> dict[str, str]` — species code → phylum (column 3; missing/empty → `"unknown"`)
+  - `og_species_stats(og, universe, phyla) -> list[PhylumRow]` — one row per phylum of the universe (species without a phylum → `"unknown"`): phyla with members first (by `n_genes` desc, then name), then absent ones (by name); `species` = `(code, n)` with n > 0, by n desc then code
+  - `og_outside(og, universe) -> list[tuple[str, int]]` — member species not in the universe, by n desc then code
+  - Test helpers (module level in `test_model.py`, imported by `test_tui.py` in Task 2): `OG_HEAD`, `SP4`, `SPINFO`, `POSSVM_HG1`, `POSSVM_HG11`, `PREV_HG1`, `og_csv(rows) -> str`, `write_results(cfg) -> None`
+
+Real-data checks done while writing this plan (09/10/2026): the tip regex below returns the same 59 names, in the same order, as ete3's `get_leaf_names()` on `data/species_tree.binary.newick`; all 59 are rows of `data/species_info.tsv` (189 rows, `code\tLatin name\tphylum`).
 
 - [ ] **Step 1: Write the failing tests** (append to `phylocli/tests/test_model.py`):
 
@@ -73,7 +80,13 @@
 from pathlib import Path  # noqa: E402
 
 OG_HEAD = "gene\torthogroup\torthogroup_support\treference_ortholog\treference_support\n"
-SP4 = "((Mlei:1,Bova:1)Cteno:1,(Hsap:1,Nvec:1)Para:1);\n"       # 4-tip species tree, root unnamed
+SP4 = "((Mlei:1,Bova:1)Cteno:1,(Hsap:1,Nvec:1)Para:1);\n"       # 4 tips; internal names ignored
+SPINFO = ("Mlei\tMnemiopsis leidyi\tCtenophora\n"
+          "Bova\tBeroe ovata\tCtenophora\n"
+          "Hsap\tHomo sapiens\tChordata\t\n"                    # trailing tab, as Lpol in v3
+          "Nvec\tNematostella vectensis\n"                      # no phylum column, as Dicjap
+          "\n"
+          "Zzz\tZz zz\tPorifera\n")                             # not a tip of the species tree
 POSSVM_HG1 = [("Mlei_v05_G1", "tfs.A.HG1.0:T/Tbx19", "78.4", "T/Tbx19", "98.2/98.2"),
               ("Mlei_v05_G2", "tfs.A.HG1.0:T/Tbx19", "78.4", "T/Tbx19", "98.2/98.2"),
               ("Hsap_ENSP1", "tfs.A.HG1.0:T/Tbx19", "78.4", "T/Tbx19", "98.2/98.2"),
@@ -90,13 +103,15 @@ def og_csv(rows) -> str:
 
 
 def write_results(cfg) -> None:
-    """POSSVM output for tfs.A.HG1 (possvm + possvm_prev) and tfs.A.HG11 (possvm only), and
-    the 4-tip species tree.  tfs.C_x.HG1 keeps no output."""
+    """POSSVM output for tfs.A.HG1 (possvm + possvm_prev) and tfs.A.HG11 (possvm only), the
+    4-tip species tree and species_info.tsv next to it.  tfs.C_x.HG1 keeps no output."""
     o = cfg.outdir
     (o / "possvm/tfs.A.HG1.generax.support.tree.ortholog_groups.csv").write_text(og_csv(POSSVM_HG1))
     (o / "possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv").write_text(og_csv(POSSVM_HG11))
     (o / "possvm_prev/tfs.A.HG1.treefile.ortholog_groups.csv").write_text(og_csv(PREV_HG1))
-    Path(cfg.params["SPECIES_TREE"]).write_text(SP4)
+    tree = Path(cfg.params["SPECIES_TREE"])
+    tree.write_text(SP4)
+    (tree.parent / "species_info.tsv").write_text(SPINFO)
 
 
 def test_read_ogs_parses_and_sorts(cli):
@@ -106,7 +121,8 @@ def test_read_ogs_parses_and_sorts(cli):
     assert [(o.id, o.name, len(o.genes), o.support, o.ref, o.ref_support) for o in ogs] == [
         ("tfs.A.HG1.0", "T/Tbx19", 3, 78.4, "T/Tbx19", "98.2/98.2"),
         ("tfs.A.HG1.1", "like:Eomes/Tbr1", 2, 0.0, "NA", "NA")]
-    assert ogs[0].genes == ["Mlei_v05_G1", "Mlei_v05_G2", "Hsap_ENSP1"]
+    assert [m.gene for m in ogs[0].genes] == ["Mlei_v05_G1", "Mlei_v05_G2", "Hsap_ENSP1"]
+    assert ogs[1].genes[0] == model.Member("Hsap_ENSP2", "Hsap", "NA", "NA")
     # tfs.A.HG1 must not pick up tfs.A.HG11's file (HG1 is a prefix of HG11)
     assert [o.id for o in model.read_ogs(cfg, "tfs.A.HG11", "possvm")] == ["tfs.A.HG11.0"]
     assert [o.name for o in model.read_ogs(cfg, "tfs.A.HG1", "possvm_prev")] == ["like:Tbx2/Tbx3"]
@@ -154,12 +170,10 @@ def test_read_ogs_negative_and_na_support(cli):
     assert [(o.id, o.support) for o in ogs] == [("tfs.A.HG11.0", None), ("tfs.A.HG11.1", -1.0)]
 
 
-def test_species_of_and_coverage():
+def test_species_of():
     assert model.species_of("Mlei_v05_G009201") == "Mlei"
     assert model.species_of("Mertsp_Mesp_sb563561") == "Mertsp"
     assert model.species_of("nounderscore") == "nounderscore"
-    og = model.OG("x.HG1.0", "n", ["Mlei_a", "Mlei_b", "Hsap_c"], 1.0, "NA", "NA")
-    assert model.og_coverage(og) == {"Mlei": 2, "Hsap": 1}
 
 
 def test_group_ogs_lists_hgs_with_output_one_listing(cli, monkeypatch):
@@ -185,11 +199,46 @@ def test_default_source(cli):
     assert model.default_source(cfg) == "possvm"
     shutil.rmtree(cfg.outdir / "possvm")
     assert model.default_source(cfg) == "possvm_prev"
+
+
+def test_species_universe_reads_tip_names(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    assert model.species_universe(cfg) == ["Mlei", "Bova", "Hsap", "Nvec"]
+    Path(cfg.params["SPECIES_TREE"]).write_text("((A:1,(B:0.5,C:2)x.y:1)Clade_1:1,D);\n")
+    assert model.species_universe(cfg) == ["A", "B", "C", "D"]          # clade names skipped
+    Path(cfg.params["SPECIES_TREE"]).unlink()
+    with pytest.raises(FileNotFoundError):
+        model.species_universe(cfg)
+
+
+def test_phyla_from_species_info(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    assert model.species_info_path(cfg) == Path(cfg.params["SPECIES_TREE"]).parent / "species_info.tsv"
+    assert model.phyla(cfg) == {"Mlei": "Ctenophora", "Bova": "Ctenophora", "Hsap": "Chordata",
+                                "Nvec": "unknown", "Zzz": "Porifera"}
+
+
+def test_og_species_stats_per_phylum(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    uni, ph = model.species_universe(cfg), model.phyla(cfg)
+    og = model.read_ogs(cfg, "tfs.A.HG1", "possvm")[0]            # Mlei 2, Hsap 1
+    rows = model.og_species_stats(og, uni, ph)
+    assert [(r.phylum, r.covered, r.total, r.n_genes, r.species) for r in rows] == [
+        ("Ctenophora", 1, 2, 2, [("Mlei", 2)]),
+        ("Chordata", 1, 1, 1, [("Hsap", 1)]),
+        ("unknown", 0, 1, 0, [])]                                  # absent phyla last
+    assert model.og_outside(og, uni) == []
+    prev = model.read_ogs(cfg, "tfs.A.HG1", "possvm_prev")[0]     # Mlei 1, Zzz 1
+    assert model.og_outside(prev, uni) == [("Zzz", 1)]            # in species_info, not a tip
+    assert [r.phylum for r in model.og_species_stats(prev, uni, {})] == ["unknown"]
 ```
 
-(The fixture, `conftest.results_tree`, already holds `possvm_prev/tfs.A.HG1.treefile.ortholog_groups.csv` = `"x\n"` and an **empty** `possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv`; `report_status` counts an empty file as "not done", so `read_ogs` does too.)
+(The fixture, `conftest.results_tree`, already holds `possvm_prev/tfs.A.HG1.treefile.ortholog_groups.csv` = `"x\n"`, an **empty** `possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv` (`report_status` counts an empty file as "not done", so `read_ogs` does too) and `params.SPECIES_TREE = <root>/species.newick` = `"(a,b);\n"`, which `write_results` overwrites.)
 
-- [ ] **Step 2: Run** `python3 -m pytest phylocli/tests/test_model.py -q -p no:cacheprovider` — Expected: FAIL, `AttributeError: module 'phylocli.model' has no attribute 'read_ogs'` (and `'OG'`, `'species_of'`, …).
+- [ ] **Step 2: Run** `python3 -m pytest phylocli/tests/test_model.py -q -p no:cacheprovider` — Expected: FAIL, `AttributeError: module 'phylocli.model' has no attribute 'read_ogs'` (and `'Member'`, `'species_universe'`, …).
 
 - [ ] **Step 3: Implement** (append to `phylocli/model.py`; `re`, `collections`, `dataclass`, `Path`, `core` are already imported there):
 
@@ -200,13 +249,21 @@ OG_HEADER = ["gene", "orthogroup", "orthogroup_support", "reference_ortholog", "
 
 
 @dataclass
+class Member:
+    gene: str
+    species: str               # species_of(gene)
+    ref: str                   # this row's reference_ortholog (as written, NA included)
+    ref_support: str           # this row's reference_support (as written)
+
+
+@dataclass
 class OG:
     id: str                    # <hg>.<n>, e.g. tfs.T-box.HG1.0
     name: str                  # after the first ':', e.g. like:Tbx2/Tbx3
-    genes: list
+    genes: list                # [Member], file order
     support: "float | None"    # orthogroup_support; None for NA / empty
-    ref: str                   # reference_ortholog (as written, NA included)
-    ref_support: str           # reference_support (as written)
+    ref: str                   # reference_ortholog of the OG's first row
+    ref_support: str
 
 
 @dataclass
@@ -214,6 +271,20 @@ class HGOgs:
     hg: str
     ogs: list                  # [OG]; [] when error is set
     error: str = ""
+
+
+@dataclass
+class PhylumRow:
+    phylum: str
+    covered: int               # species of this phylum with >= 1 member
+    total: int                 # species of this phylum in the universe
+    n_genes: int
+    species: list              # [(code, n)] with n > 0, n desc
+
+
+def species_of(gene: str) -> str:
+    """Species code = the gene id up to the first '_' (Mlei_v05_G1 -> Mlei)."""
+    return gene.split("_", 1)[0]
 
 
 def read_ogs(cfg: core.Config, hg: str, source: str, names: set[str] | None = None):
@@ -252,7 +323,7 @@ def read_ogs(cfg: core.Config, hg: str, source: str, names: set[str] | None = No
             og = by.get(og_id)
             if og is None:
                 og = by[og_id] = OG(og_id, name, [], sup, f[3], f[4])
-            og.genes.append(f[0])
+            og.genes.append(Member(f[0], species_of(f[0]), f[3], f[4]))
     return sorted(by.values(), key=lambda o: (-len(o.genes), int(o.id.rsplit(".", 1)[1])))
 
 
@@ -282,196 +353,94 @@ def group_ogs(cfg: core.Config, hgs, source: str) -> tuple[list[HGOgs], int]:
     return rows, missing
 
 
-def species_of(gene: str) -> str:
-    """Species code = the gene id up to the first '_' (Mlei_v05_G1 -> Mlei)."""
-    return gene.split("_", 1)[0]
-
-
-def og_coverage(og: OG) -> dict[str, int]:
-    """{species: number of member genes}."""
-    return dict(collections.Counter(species_of(g) for g in og.genes))
-
-
 def default_source(cfg: core.Config) -> str:
     """possvm/ (post-GeneRax) when it exists, else possvm_prev/ (raw IQ-TREE)."""
     return "possvm" if (cfg.outdir / "possvm").is_dir() else "possvm_prev"
-```
-
-- [ ] **Step 4: Run both suites** — Expected: N0 + 8 passed on both (261 from 253), output clean.
-
-- [ ] **Step 5: Commit** — `git add phylocli/model.py phylocli/tests/test_model.py`; message `phylocli: model.read_ogs/group_ogs (POSSVM ortholog groups) and species_of/og_coverage` + trailer.
-
----
-
-### Task 2: `phylocli/species_tree.py` — load and draw the species tree
-
-**Files:**
-- Create: `phylocli/species_tree.py`
-- Test: `phylocli/tests/test_species_tree.py` (create)
-
-**Interfaces:**
-- Consumes: nothing from earlier tasks (counts are `{species: n}` as `model.og_coverage` returns).
-- Produces:
-  - `load(path) -> ete3.Tree` — reads the file (FileNotFoundError when missing), parses with `format=1` so internal node names (clades) are kept; imports ete3 inside the function (ImportError when ete3 is absent).
-  - `render(tree, counts: dict[str, int]) -> list[str]` — one line per node, `├─ ` / `└─ ` connectors, `│  ` / `   ` indents (3 chars per level); tips end in `●n` (n > 0) or `·`; named internal nodes end in `k/m spp` (k of the clade's m tips with ≥ 1 member); unnamed internal nodes are a bare `┐`; marks aligned in one column; species in `counts` (n > 0) but not tips are listed after a blank line as `not in species tree: A, B`.
-
-Real-tree check done while writing this plan (09/10/2026, `data/species_tree.binary.newick`): parses with `format=1` in both venvs, 59 tips, depth 12, renders to 117 lines, 60 characters wide.
-
-- [ ] **Step 1: Write the failing tests** (`phylocli/tests/test_species_tree.py`):
-
-```python
-"""phylocli/species_tree.py: the species tree for the TUI Results window (ete3, lazy)."""
-import importlib
-import sys
-
-import pytest
-
-from phylocli import species_tree
-
-SP4 = "((Mlei:1,Bova:1)Cteno:1,(Hsap:1,Nvec:1)Para:1);\n"
 
 
-@pytest.fixture
-def tree(tmp_path):
-    pytest.importorskip("ete3")
-    p = tmp_path / "sp.newick"
-    p.write_text(SP4)
-    return species_tree.load(p)
+_NEWICK_TIP = re.compile(r"[(,]\s*([^\s():,;\[\]]+)")    # a name right after '(' or ',' = a tip
 
 
-def test_load_keeps_clade_names(tree):
-    assert sorted(tree.get_leaf_names()) == ["Bova", "Hsap", "Mlei", "Nvec"]
-    assert [c.name for c in tree.children] == ["Cteno", "Para"]
+def species_universe(cfg: core.Config) -> list[str]:
+    """Tip names of params.SPECIES_TREE in newick order (names after ')' are clades: skipped).
+    Only the names are read: no tree parsing, no ete3."""
+    text = Path(cfg.params["SPECIES_TREE"]).read_text()
+    return list(dict.fromkeys(_NEWICK_TIP.findall(text)))
 
 
-def test_render_tips_and_clades(tree):
-    assert species_tree.render(tree, {"Mlei": 2, "Hsap": 1}) == [
-        "┐",
-        "├─ Cteno   1/2 spp",
-        "│  ├─ Mlei ●2",
-        "│  └─ Bova ·",
-        "└─ Para    1/2 spp",
-        "   ├─ Hsap ●1",
-        "   └─ Nvec ·",
-    ]
+def species_info_path(cfg: core.Config) -> Path:
+    """params.species_info if set (relative = to the repo root), else species_info.tsv next to
+    the species tree (data/species_info.tsv)."""
+    p = cfg.params.get("species_info")
+    if p:
+        return Path(p) if Path(p).is_absolute() else core.ROOT / p
+    return Path(cfg.params.get("SPECIES_TREE", "")).parent / "species_info.tsv"
 
 
-def test_render_lists_species_not_in_tree(tree):
-    out = species_tree.render(tree, {"Zzz": 1, "Mlei": 1, "Aaa": 0})
-    assert out[1] == "├─ Cteno   1/2 spp" and out[4] == "└─ Para    0/2 spp"
-    assert out[-2:] == ["", "not in species tree: Zzz"]        # Aaa has 0 members: not listed
-
-
-def test_render_unnamed_internal_node(tmp_path):
-    pytest.importorskip("ete3")
-    p = tmp_path / "t.newick"
-    p.write_text("(((A:1,B:1):1,C:1)X:1,D:1);\n")
-    assert species_tree.render(species_tree.load(p), {"A": 1}) == [
-        "┐",
-        "├─ X       1/3 spp",
-        "│  ├─ ┐",
-        "│  │  ├─ A ●1",
-        "│  │  └─ B ·",
-        "│  └─ C    ·",
-        "└─ D       ·",
-    ]
-
-
-def test_load_missing_file(tmp_path):
-    pytest.importorskip("ete3")
-    with pytest.raises(FileNotFoundError):
-        species_tree.load(tmp_path / "nope.newick")
-
-
-def test_ete3_is_imported_only_by_load(tmp_path, monkeypatch):
-    import phylocli
-    monkeypatch.setitem(sys.modules, "ete3", None)          # any `import ete3` now fails
-    monkeypatch.delitem(sys.modules, "phylocli.species_tree", raising=False)
-    monkeypatch.delattr(phylocli, "species_tree", raising=False)
-    mod = importlib.import_module("phylocli.species_tree")  # importing the module is fine
-    (tmp_path / "t.newick").write_text(SP4)
-    with pytest.raises(ImportError):
-        mod.load(tmp_path / "t.newick")
-```
-
-- [ ] **Step 2: Run** `python3 -m pytest phylocli/tests/test_species_tree.py -q -p no:cacheprovider` — Expected: FAIL at collection, `ImportError: cannot import name 'species_tree' from 'phylocli'`.
-
-- [ ] **Step 3: Implement** (`phylocli/species_tree.py`):
-
-```python
-"""The species tree for the TUI Results window: parse (ete3, imported only inside load())
-and draw as text lines with per-species member counts.  Pure functions, no Textual."""
-from __future__ import annotations
-
-from pathlib import Path
-
-
-def load(path):
-    """The species tree at `path` (newick) with internal node names kept (format=1)."""
-    from ete3 import Tree                     # lazy: only the Results window needs ete3
-    return Tree(Path(path).read_text().strip(), format=1)
-
-
-def _walk(node, counts: dict, lead: str, conn: str, below: str, out: list) -> None:
-    """Append (text, mark) for `node` and its subtree.  lead: the ancestors' indent; conn: this
-    node's connector; below: what this node adds to its children's indent."""
-    if node.is_leaf():
-        n = counts.get(node.name, 0)
-        out.append((lead + conn + node.name, f"●{n}" if n else "·"))
-        return
-    if node.name:
-        leaves = node.get_leaf_names()
-        k = sum(1 for x in leaves if counts.get(x, 0) > 0)
-        out.append((lead + conn + node.name, f"{k}/{len(leaves)} spp"))
-    else:
-        out.append((lead + conn + "┐", ""))
-    kids = node.children
-    for i, c in enumerate(kids):
-        last = i == len(kids) - 1
-        _walk(c, counts, lead + below, "└─ " if last else "├─ ", "   " if last else "│  ", out)
-
-
-def render(tree, counts: dict) -> list[str]:
-    """One line per node: tips `●n` (n member genes) or `·`, named clades `k/m spp`, marks in
-    one column; species with members that are not tips are listed under the tree."""
-    rows: list = []
-    _walk(tree, counts, "", "", "", rows)
-    width = max((len(t) for t, m in rows if m), default=0)
-    out = [f"{t.ljust(width)} {m}" if m else t for t, m in rows]
-    tips = set(tree.get_leaf_names())
-    extra = sorted(s for s, n in counts.items() if n and s not in tips)
-    if extra:
-        out += ["", "not in species tree: " + ", ".join(extra)]
+def phyla(cfg: core.Config) -> dict[str, str]:
+    """species code -> phylum from species_info.tsv (code, Latin name, phylum; tab-separated).
+    A row without a phylum (2 columns, or an empty 3rd) gives "unknown"."""
+    out: dict[str, str] = {}
+    with open(species_info_path(cfg), errors="replace") as fh:
+        for line in fh:
+            f = line.rstrip("\r\n").split("\t")
+            code = f[0].strip()
+            if not code or code.startswith("#"):
+                continue
+            out[code] = (f[2].strip() if len(f) > 2 else "") or "unknown"
     return out
+
+
+def og_species_stats(og: OG, universe, phyla: dict) -> list[PhylumRow]:
+    """Per phylum of the universe: species covered / total and member genes; phyla with
+    members first (n_genes desc, then name), then the absent ones (by name)."""
+    counts = collections.Counter(m.species for m in og.genes)
+    groups: dict[str, list[str]] = collections.defaultdict(list)
+    for sp in universe:
+        groups[phyla.get(sp) or "unknown"].append(sp)
+    rows = []
+    for ph, sps in groups.items():
+        present = sorted(((sp, counts[sp]) for sp in sps if counts[sp]), key=lambda x: (-x[1], x[0]))
+        rows.append(PhylumRow(ph, len(present), len(sps), sum(n for _, n in present), present))
+    return (sorted((r for r in rows if r.covered), key=lambda r: (-r.n_genes, r.phylum))
+            + sorted((r for r in rows if not r.covered), key=lambda r: r.phylum))
+
+
+def og_outside(og: OG, universe) -> list[tuple[str, int]]:
+    """Member species that are not tips of the species tree, with their gene counts."""
+    u = set(universe)
+    c = collections.Counter(m.species for m in og.genes if m.species not in u)
+    return sorted(c.items(), key=lambda x: (-x[1], x[0]))
 ```
 
-- [ ] **Step 4: Run both suites** — Expected: N0 + 6 passed on both (267 from 253), output clean.
+- [ ] **Step 4: Run both suites** — Expected: N0 + 11 passed on both (264 from 253), output clean.
 
-- [ ] **Step 5: Commit** — `git add phylocli/species_tree.py phylocli/tests/test_species_tree.py`; message `phylocli: species_tree.load/render (text species tree with member counts; ete3 lazy)` + trailer.
+- [ ] **Step 5: Commit** — `git add phylocli/model.py phylocli/tests/test_model.py`; message `phylocli: model.read_ogs/group_ogs (POSSVM ortholog groups, members) and per-phylum species stats` + trailer.
 
 ---
 
-### Task 3: TUI Results window (`o`, three panes, `p`, `esc`)
+### Task 2: TUI Results window (`o`, four panes, `/`, `p`, `esc`)
 
 **Files:**
 - Modify: `phylocli/tui.py`, `phylocli/README.md` (`## phylo tui` section)
 - Test: `phylocli/tests/test_tui.py` (append)
 
 **Interfaces:**
-- Consumes: `model.group_ogs`, `model.HGOgs`, `model.OG`, `model.og_coverage`, `model.hg_sort_key`, `model.default_source`, `model.group_key` (existing) from Task 1; `species_tree.load`, `species_tree.render` from Task 2; test helpers `OG_HEAD`, `write_results` from `test_model.py`.
-- Produces (Task 4 and tests rely on these names):
-  - `view ∈ {"overview", "hgs", "results"}`; widgets `#resv` (Vertical, gets class `loading`), `#results` (Horizontal), `#res` and `#ogs` (DataTable, row cursor), `#sptree_box` (ScrollableContainer) holding `#sptree` (Static, markup off), `#resfoot` (Static)
-  - attributes `res_from: str`, `res_group: str`, `res_hgs: list[str]`, `res_source: str | None`, `res_rows: list[model.HGOgs]`, `res_missing: int`, `_res_gen: int`, `_res_note: str`, `_res_foot: str` (footer text as shown), `_tree_text: str` (tree pane text as shown)
-  - actions `open_results` (`o`), `toggle_source` (`p`); methods `_open_results(group, by, focus=None)`, `_reload_results()`, worker `_load_results(hgs, source, gen)` (`group="results"`), `_apply_results(snap)`, `_cur_res()`, `_cur_og()`, `_fill_ogs()`, `_show_tree()`, `_results_footer()`
+- Consumes: from Task 1 `model.group_ogs`, `model.HGOgs`, `model.OG`, `model.Member`, `model.PhylumRow`, `model.hg_sort_key`, `model.default_source`, `model.species_universe`, `model.species_info_path`, `model.phyla`, `model.og_species_stats`, `model.og_outside`; existing `model.group_key`, `core.FAMILY_STAGES`; test helpers `OG_HEAD`, `write_results` from `test_model.py`.
+- Produces (Task 3 and tests rely on these names):
+  - `view ∈ {"overview", "hgs", "results"}`; widgets `#resv` (Vertical, gets class `loading`), `#results` (Horizontal), `#res`, `#ogs`, `#members` (DataTable, row cursor), `#rescol` (Vertical), `#memfilter` (Input, hidden until `/`), `#species_box` (ScrollableContainer) holding `#species` (Static, markup off), `#resfoot` (Static)
+  - attributes `res_from`, `res_group`, `res_hgs: list[str]`, `res_source: str | None`, `res_rows: list[model.HGOgs]`, `res_missing: int`, `_res_gen: int`, `_res_note: str`, `_res_foot: str` (footer text as shown), `_species_text: str` (species pane text as shown), `_mem_filter: str`, `_universe: list | None`, `_phyla: dict | None`, `_sp_note: str`
+  - module functions `species_lines(stats, outside) -> list[str]`, `_short_og(og_id) -> str`
+  - actions `open_results` (`o`), `toggle_source` (`p`), `member_filter` (`/`); methods `_open_results(group, by, focus=None)`, `_reload_results()`, worker `_load_results(hgs, source, gen)` (`group="results"`), `_apply_results(snap)`, `_cur_res()`, `_cur_og()`, `_fill_ogs()`, `_show_og()`, `_fill_members()`, `_results_footer()`
 
 Decisions this task implements (from the spec, where it leaves room):
-- `o` on an HG in `2 HGs` opens Results for `model.group_key(hg, self.by)` — the HG's own category/family under the current grouping (equal to the open group whenever one is open; from an `ALL` HG view it avoids reading every HG's file).
-- `o` on a **family** row (HG view at search/cluster, where `r.hg` is a family id such as `tfs.A`) opens Results for that family's HGs (`group_key(h, "family") == fam`, the identity `model.fam_group_key` documents), no HG highlighted. A family with no expected HGs opens on "no ortholog groups yet".
-- Keys checked against `a0fb496`: no binding uses `o` or `p` (the BINDINGS list is escape, c, f, space, a, r, l, R, q).
-- The HG list of a group comes from the last snapshot in memory (`self._ov_inputs[0]`, the expected HGs), so `o` itself touches no file.
-- The source is decided in the worker (`model.default_source`), so `o` does not even stat `possvm/`. `p` before the first load has finished is ignored.
-- An HG whose file cannot be read stays listed with `–`, `–`, `!`; its error (file and line) shows in the tree pane and the footer.
+- `o` on an HG in `2 HGs` opens Results for `model.group_key(hg, self.by)` (spec), with the HG highlighted. `o` on a **family** row (HG view at search/cluster, `r.hg` = a family id such as `tfs.A`) opens Results for that family's HGs (`group_key(h, "family") == fam`), none highlighted; a family with no expected HGs opens on "no ortholog groups yet".
+- The HG list of a group comes from the last snapshot in memory (`self._ov_inputs[0]`, the expected HGs), so `o` itself touches no file. The source is decided in the worker (`model.default_source`). `p` before the first load has finished is ignored.
+- The species universe and phyla are read by the worker on the first load and kept on the app (`_universe`, `_phyla`); a failed read is retried on the next load and its message (file + error) heads the species pane. Without a universe every member species is listed as "not in species tree"; without phyla every phylum is `unknown`.
+- `/` shows and focuses the filter box; the filter is a case-insensitive substring over gene, species, ref, ref support; it updates on every keystroke; `enter` keeps it and returns to `members`; `esc` (while the box is shown) clears and hides it and returns to `members` — only the next `esc` leaves Results. The filter stays across OG moves and is reset when Results is opened.
+- An HG whose file cannot be read stays listed with `–`, `–`, `!`; its error (file and line) shows in the species pane and the footer.
 - Support display: `0.0 ⚠` for exactly 0, `–` for NA, otherwise one decimal (`-1.0` stays visible).
+- Species pane text: per present phylum `"<phylum padded>  k/m spp  n gene(s)"` then `"  sp n · sp n"`; then `absent: A, B`; then `not in species tree: sp n, …`.
 
 - [ ] **Step 1: Write the failing tests** (append to `phylocli/tests/test_tui.py`; add the import below next to the existing `from phylocli.tests.test_cli import ...` line):
 
@@ -485,13 +454,18 @@ def _ov_row(app, group):
     return [r.group for r in app.ov_rows].index(group)
 
 
+async def _press(pilot, *keys):
+    for k in keys:
+        await pilot.press(k)
+        await pilot.pause()
+
+
 async def _open_results(app, pilot, group, family=False):
     """Overview -> cursor on `group` -> o -> wait for the Results load."""
     app.load_now()
     await pilot.pause()
     if family:
-        await pilot.press("f")
-        await pilot.pause()
+        await _press(pilot, "f")
     app.query_one("#overview").move_cursor(row=_ov_row(app, group), column=2)
     await pilot.pause()
     await pilot.press("o")
@@ -504,8 +478,12 @@ def _cells(app, table, row):
     return [str(t.get_cell_at((row, c))) for c in range(len(t.columns))]
 
 
+def _member_genes(app):
+    t = app.query_one("#members")
+    return [str(t.get_cell_at((i, 0))) for i in range(t.row_count)]
+
+
 def test_o_on_overview_opens_results_for_that_group(cli):
-    pytest.importorskip("ete3")
     write_results(_cfg())
 
     async def go():
@@ -521,7 +499,13 @@ def test_o_on_overview_opens_results_for_that_group(cli):
             assert _cells(app, "#ogs", 0) == ["HG1.0", "T/Tbx19", "3", "2", "78.4", "T/Tbx19",
                                               "98.2/98.2"]
             assert _cells(app, "#ogs", 1)[4] == "0.0 ⚠"
-            assert "│  ├─ Mlei ●2" in app._tree_text.splitlines()
+            assert app.query_one("#members").border_title == "members · HG1.0 T/Tbx19"
+            assert _cells(app, "#members", 2) == ["Hsap_ENSP1", "Hsap", "T/Tbx19", "98.2/98.2"]
+            assert app.query_one("#species_box").border_title == "species · HG1.0"
+            assert app._species_text.splitlines() == [
+                "Ctenophora  1/2 spp  2 genes", "  Mlei 2",
+                "Chordata    1/1 spp  1 gene", "  Hsap 1",
+                "absent: unknown"]
             assert "2 OGs · possvm · ⚠ = support 0 (GeneRax bug case; check possvm_prev)" \
                 in app._res_foot
     _run(go())
@@ -550,8 +534,7 @@ def test_o_on_hg_highlights_it_and_esc_returns_to_hg_view(cli):
             assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG11"
             assert app.query_one("#ogs").border_title == "OGs · tfs.A.HG11 · possvm"
             assert _cells(app, "#ogs", 0)[:2] == ["HG11.0", "Tbx20"]
-            await pilot.press("escape")
-            await pilot.pause()
+            await _press(pilot, "escape")
             assert app.view == "hgs" and app._cursor_hg() == "tfs.A.HG11"
             assert app.focused is app.query_one("#hgs")
     _run(go())
@@ -580,14 +563,12 @@ def test_o_on_family_row_opens_results_for_its_hgs(cli):
             assert app.res_hgs == ["tfs.A.HG1", "tfs.A.HG11"]
             assert [r.hg for r in app.res_rows] == ["tfs.A.HG1", "tfs.A.HG11"]
             assert app.query_one("#res").border_title == "Results · tfs.A"
-            await pilot.press("escape")
-            await pilot.pause()
+            await _press(pilot, "escape")
             assert app.view == "hgs" and app.stage == "search" and app._cursor_hg() == "tfs.A"
     _run(go())
 
 
-def test_results_cursor_moves_redraw_without_file_reads(cli, monkeypatch):
-    pytest.importorskip("ete3")
+def test_results_cursor_moves_update_panes_without_file_reads(cli, monkeypatch):
     write_results(_cfg())
 
     def boom(*a, **k):
@@ -597,28 +578,53 @@ def test_results_cursor_moves_redraw_without_file_reads(cli, monkeypatch):
         app = tui.PhyloApp(_cfg(), refresh_s=3600)
         async with app.run_test() as pilot:
             await _open_results(app, pilot, "tfs")
-            monkeypatch.setattr(tui.model, "read_ogs", boom)
-            monkeypatch.setattr(tui.model, "group_ogs", boom)
-            monkeypatch.setattr(tui.species_tree, "load", boom)
+            for name in ("read_ogs", "group_ogs", "species_universe", "phyla"):
+                monkeypatch.setattr(tui.model, name, boom)
             monkeypatch.setattr(core.report_status, "nonempty_files", boom)
-            await pilot.press("down")                              # Results: tfs.A.HG11
-            await pilot.pause()
+            await _press(pilot, "down")                            # Results: tfs.A.HG11
             assert app.query_one("#ogs").border_title == "OGs · tfs.A.HG11 · possvm"
-            assert "│  └─ Bova ●1" in app._tree_text.splitlines()
-            await pilot.press("up")                                # back to tfs.A.HG1
-            await pilot.pause()
-            await pilot.press("tab")                               # into the OGs pane
-            await pilot.pause()
+            assert _member_genes(app) == ["Bova_x1", "Mlei_v05_G9"]
+            assert app._species_text.splitlines()[:2] == ["Ctenophora  2/2 spp  2 genes",
+                                                          "  Bova 1 · Mlei 1"]
+            await _press(pilot, "up", "tab")                       # back to HG1, into OGs
             assert app.focused is app.query_one("#ogs")
-            await pilot.press("down")                              # OG HG1.1: Hsap + Nvec
-            await pilot.pause()
-            lines = app._tree_text.splitlines()
-            assert "└─ Para    2/2 spp" in lines and "│  ├─ Mlei ·" in lines
+            await _press(pilot, "down")                            # OG HG1.1: Hsap + Nvec
+            assert app.query_one("#members").border_title == "members · HG1.1 like:Eomes/Tbr1"
+            assert _member_genes(app) == ["Hsap_ENSP2", "Nvec_v1_g3"]
+            assert app._species_text.splitlines() == [
+                "Chordata  1/1 spp  1 gene", "  Hsap 1",
+                "unknown   1/1 spp  1 gene", "  Nvec 1",
+                "absent: Ctenophora"]
+    _run(go())
+
+
+def test_slash_filters_members_and_esc_clears(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert len(_member_genes(app)) == 3
+            inp = app.query_one("#memfilter")
+            assert not inp.display
+            await _press(pilot, "slash")
+            assert inp.display and app.focused is inp
+            await _press(pilot, "h", "s", "a", "p")               # `p` is text here, not a switch
+            assert app.res_source == "possvm" and inp.value == "hsap"
+            assert _member_genes(app) == ["Hsap_ENSP1"]
+            await _press(pilot, "escape")                          # clears; stays in Results
+            assert app.view == "results" and not inp.display and inp.value == ""
+            assert len(_member_genes(app)) == 3 and app.focused is app.query_one("#members")
+            await _press(pilot, "slash", "M", "L", "E", "I", "enter")   # case-insensitive; enter keeps
+            assert app.focused is app.query_one("#members")
+            assert _member_genes(app) == ["Mlei_v05_G1", "Mlei_v05_G2"]
+            await _press(pilot, "escape", "escape")
+            assert app.view == "overview"
     _run(go())
 
 
 def test_p_switches_source_and_recomputes_results(cli):
-    pytest.importorskip("ete3")
     write_results(_cfg())
 
     async def go():
@@ -633,7 +639,10 @@ def test_p_switches_source_and_recomputes_results(cli):
             assert [r.hg for r in app.res_rows] == ["tfs.A.HG1"] and app.res_missing == 2
             assert app.query_one("#ogs").border_title == "OGs · tfs.A.HG1 · possvm_prev"
             assert _cells(app, "#ogs", 0)[:2] == ["HG1.0", "like:Tbx2/Tbx3"]
-            assert app._tree_text.splitlines()[-1] == "not in species tree: Zzz"
+            assert app._species_text.splitlines() == [
+                "Ctenophora  1/2 spp  1 gene", "  Mlei 1",
+                "absent: Chordata, unknown",
+                "not in species tree: Zzz 1"]
             await pilot.press("p")
             await app.workers.wait_for_complete()
             await pilot.pause()
@@ -647,8 +656,7 @@ def test_esc_from_results_returns_to_overview_cursor_kept(cli):
         async with app.run_test() as pilot:
             app.load_now()
             await pilot.pause()
-            await pilot.press("f")
-            await pilot.pause()
+            await _press(pilot, "f")
             ov = app.query_one("#overview")
             ov.move_cursor(row=_ov_row(app, "tfs.C_x"), column=3)
             await pilot.pause()
@@ -656,8 +664,7 @@ def test_esc_from_results_returns_to_overview_cursor_kept(cli):
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert app.view == "results" and app.res_group == "tfs.C_x"
-            await pilot.press("escape")
-            await pilot.pause()
+            await _press(pilot, "escape")
             assert app.view == "overview" and app.focused is ov
             assert (ov.cursor_row, ov.cursor_column) == (_ov_row(app, "tfs.C_x"), 3)
     _run(go())
@@ -670,7 +677,7 @@ def test_results_without_output_says_so_and_p_still_works(cli):
             await _open_results(app, pilot, "tfs.C_x", family=True)
             assert app.res_rows == []
             assert "no ortholog groups yet (possvm not done)" in app._res_foot
-            assert app._tree_text == "no ortholog groups yet (possvm not done)"
+            assert app._species_text == "no ortholog groups yet (possvm not done)"
             await pilot.press("p")
             await app.workers.wait_for_complete()
             await pilot.pause()
@@ -724,41 +731,34 @@ def test_results_bad_row_is_shown_not_a_crash(cli):
             await _open_results(app, pilot, "tfs")
             assert [r.hg for r in app.res_rows] == ["tfs.A.HG1", "tfs.A.HG11"]
             assert _cells(app, "#res", 1) == ["tfs.A.HG11", "–", "–", "!"]
-            await pilot.press("down")
-            await pilot.pause()
-            assert f"{p}:2:" in app._tree_text and f"{p}:2:" in app._res_foot
-            assert app.query_one("#ogs").row_count == 0
+            await _press(pilot, "down")
+            assert f"{p}:2:" in app._species_text and f"{p}:2:" in app._res_foot
+            assert app.query_one("#ogs").row_count == 0 and _member_genes(app) == []
     _run(go())
 
 
-def test_results_without_ete3_still_lists_ogs(cli, monkeypatch):
+def test_results_without_species_files_still_lists_ogs(cli):
+    from pathlib import Path
     write_results(_cfg())
-
-    def no_ete3(path):
-        raise ModuleNotFoundError("No module named 'ete3'", name="ete3")
-
-    def bad(path):
-        raise ValueError("bad newick")
+    tree = Path(_cfg().params["SPECIES_TREE"])
+    info = tui.model.species_info_path(_cfg())
+    tree.unlink()
+    info.unlink()
 
     async def go():
         app = tui.PhyloApp(_cfg(), refresh_s=3600)
         async with app.run_test() as pilot:
-            monkeypatch.setattr(tui.species_tree, "load", no_ete3)
             await _open_results(app, pilot, "tfs")
             assert _cells(app, "#ogs", 0)[:2] == ["HG1.0", "T/Tbx19"]
-            assert "pip install ete3" in app._tree_text
-            await pilot.press("escape")
-            await pilot.pause()
-            monkeypatch.setattr(tui.species_tree, "load", bad)
-            await pilot.press("o")
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-            path = _cfg().params["SPECIES_TREE"]
-            assert app._tree_text == f"species tree {path}: bad newick"
+            assert len(_member_genes(app)) == 3
+            lines = app._species_text.splitlines()
+            assert lines[0].startswith(f"species tree {tree}: ")
+            assert f"{info}: " in lines[0] and "phyla shown as unknown" in lines[0]
+            assert lines[-1] == "not in species tree: Mlei 2, Hsap 1"
     _run(go())
 
 
-def test_results_tab_cycles_panes_with_orange_border(cli):
+def test_results_tab_cycles_four_panes_with_orange_border(cli):
     from textual.color import Color
     write_results(_cfg())
 
@@ -766,19 +766,16 @@ def test_results_tab_cycles_panes_with_orange_border(cli):
         app = tui.PhyloApp(_cfg(), refresh_s=3600)
         async with app.run_test() as pilot:
             await _open_results(app, pilot, "tfs")
-            panes = ("#res", "#ogs", "#sptree_box")
+            panes = ("#res", "#ogs", "#members", "#species_box")
             for pane in panes:
                 assert app.focused is app.query_one(pane)
                 for other in panes:
                     colour = app.query_one(other).styles.border.top[1]
                     assert (colour == Color.parse("orange")) == (other == pane), (pane, other)
-                await pilot.press("tab")
-                await pilot.pause()
+                await _press(pilot, "tab")
             assert app.focused is app.query_one("#res")             # wraps around
-            await pilot.press("shift+tab")
-            await pilot.pause()
-            assert app.focused is app.query_one("#sptree_box")
-            assert app.query_one("#sptree_box").border_title == "species tree"
+            await _press(pilot, "shift+tab")
+            assert app.focused is app.query_one("#species_box")
     _run(go())
 
 
@@ -788,9 +785,11 @@ def test_footer_keys_in_results(cli):
         async with app.run_test() as pilot:
             app.load_now()
             await pilot.pause()
-            assert app.check_action("open_results", ()) and not app.check_action("toggle_source", ())
+            assert app.check_action("open_results", ())
+            assert not app.check_action("toggle_source", ()) and not app.check_action("member_filter", ())
             await _open_results(app, pilot, "tfs")
-            assert app.check_action("toggle_source", ()) and app.check_action("back", ())
+            for a in ("toggle_source", "member_filter", "back"):
+                assert app.check_action(a, ()), a
             for a in ("open_results", "resubmit", "toggle", "select_all", "log", "by_category",
                       "cycle_filter"):
                 assert not app.check_action(a, ()), a
@@ -814,19 +813,14 @@ def test_late_result_of_previous_group_is_dropped(cli, monkeypatch):
         async with app.run_test() as pilot:
             app.load_now()
             await pilot.pause()
-            await pilot.press("f")
-            await pilot.pause()
+            await _press(pilot, "f")
             ov = app.query_one("#overview")
             ov.move_cursor(row=_ov_row(app, "tfs.C_x"))
             await pilot.pause()
-            await pilot.press("o")                                 # blocked in the worker
-            await pilot.pause()
-            await pilot.press("escape")
-            await pilot.pause()
+            await _press(pilot, "o", "escape")                     # first load blocked in the worker
             ov.move_cursor(row=_ov_row(app, "tfs.A"))
             await pilot.pause()
-            await pilot.press("o")
-            await pilot.pause()
+            await _press(pilot, "o")
             gate.set()
             await app.workers.wait_for_complete()
             await pilot.pause()
@@ -835,51 +829,76 @@ def test_late_result_of_previous_group_is_dropped(cli, monkeypatch):
     _run(go())
 ```
 
-- [ ] **Step 2: Run** `python3 -m pytest phylocli/tests/test_tui.py -q -p no:cacheprovider` — Expected: the 13 new tests FAIL (e.g. `NoMatches: No nodes match '#res'`, `AssertionError: assert 'overview' == 'results'`); the existing ones pass.
+- [ ] **Step 2: Run** `python3 -m pytest phylocli/tests/test_tui.py -q -p no:cacheprovider` — Expected: the 14 new tests FAIL (e.g. `NoMatches: No nodes match '#res'`, `AssertionError: assert 'overview' == 'results'`); the existing ones pass.
 
 - [ ] **Step 3: Implement** in `phylocli/tui.py`.
 
-3a. Imports — change two lines:
+2a. Imports — change the containers line (`Input` is already imported from `textual.widgets`):
 
 ```python
 from textual.containers import Grid, Horizontal, ScrollableContainer, Vertical, VerticalScroll
 ```
-```python
-from phylocli import core, history, model, species_tree
-```
 
-3b. `PANE_TITLES` — replace with:
+2b. `PANE_TITLES` — replace with:
 
 ```python
 PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
                "#arrays": "3 Arrays", "#detail": "4 Detail",
-               "#res": "Results", "#ogs": "OGs", "#sptree_box": "species tree"}
+               "#res": "Results", "#ogs": "OGs", "#members": "members", "#species_box": "species"}
 ```
 
-3c. `PhyloApp.CSS` — append these lines inside the string, after `#hgview.loading { opacity: 40%; }`:
+2c. Module-level functions — add right after `def stage_at_column(...)`:
+
+```python
+def _short_og(og_id: str) -> str:
+    """tfs.T-box.HG1.6 -> HG1.6"""
+    return ".".join(og_id.rsplit(".", 2)[-2:])
+
+
+def species_lines(stats: list, outside: list) -> list[str]:
+    """The species pane: per phylum with members `k/m spp  n genes` and its species, then the
+    absent phyla, then member species that are not tips of the species tree."""
+    present = [r for r in stats if r.covered]
+    absent = [r for r in stats if not r.covered]
+    w = max((len(r.phylum) for r in present), default=0)
+    out: list[str] = []
+    for r in present:
+        out.append(f"{r.phylum.ljust(w)}  {r.covered}/{r.total} spp  "
+                   f"{r.n_genes} gene{'' if r.n_genes == 1 else 's'}")
+        out.append("  " + " · ".join(f"{sp} {n}" for sp, n in r.species))
+    if absent:
+        out.append("absent: " + ", ".join(r.phylum for r in absent))
+    if outside:
+        out.append("not in species tree: " + ", ".join(f"{sp} {n}" for sp, n in outside))
+    return out
+```
+
+2d. `PhyloApp.CSS` — append these lines inside the string, after `#hgview.loading { opacity: 40%; }`:
 
 ```
     #resv { height: 1fr; }
     #results { height: 1fr; }
     #res { width: 1fr; }
-    #ogs, #sptree_box { width: 2fr; }
-    #results DataTable, #sptree_box { border: round $primary; height: 100%; }
-    #results DataTable:focus, #sptree_box:focus { border: round orange; }
+    #ogs, #rescol { width: 2fr; }
+    #res, #ogs, #rescol { height: 100%; }
+    #members, #species_box { height: 1fr; }
+    #results DataTable, #species_box { border: round $primary; }
+    #results DataTable:focus, #species_box:focus { border: round orange; }
+    #memfilter { height: 3; }
     #resv.loading { opacity: 40%; }
-    #sptree { width: auto; }
+    #species { width: auto; }
     #resfoot { height: auto; }
 ```
 
-(`#sptree { width: auto; }` stops the Static from wrapping the tree lines; the ScrollableContainer scrolls both ways.)
-
-3d. `BINDINGS` — insert after `Binding("l", "log", "log"),`:
+2e. `BINDINGS` — insert after `Binding("l", "log", "log"),`:
 
 ```python
         Binding("o", "open_results", "results"),
         Binding("p", "toggle_source", "possvm/prev"),
+        Binding("slash", "member_filter", "filter members"),
 ```
 
-3e. `__init__` — append after `self._banner_text = ""`:
+2f. `__init__` — append after `self._banner_text = ""`:
 
 ```python
         self.res_from = "overview"              # the view esc returns to from Results
@@ -892,32 +911,40 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
         self._res_gen = 0                       # bumped per load / esc: late snapshots dropped
         self._res_note = ""
         self._res_foot = ""
-        self._tree_text = ""
-        self._sptree = None                     # ete3 tree, loaded once by the worker
-        self._sptree_err = ""
+        self._species_text = ""
+        self._mem_filter = ""
+        self._universe: "list | None" = None    # species tree tips, read once by the worker
+        self._phyla: "dict | None" = None       # species -> phylum, read once by the worker
+        self._sp_note = ""                      # why the universe / phyla could not be read
 ```
 
-3f. `compose` — insert after the `with Grid(id="hgview"):` block, before `yield Footer()`:
+2g. `compose` — insert after the `with Grid(id="hgview"):` block, before `yield Footer()`:
 
 ```python
         with Vertical(id="resv"):
             with Horizontal(id="results"):
                 yield DataTable(id="res", cursor_type="row")
                 yield DataTable(id="ogs", cursor_type="row")
-                with ScrollableContainer(id="sptree_box"):
-                    yield Static("", id="sptree", markup=False)
+                with Vertical(id="rescol"):
+                    yield Input(placeholder="filter members (enter: keep · esc: clear)",
+                                id="memfilter")
+                    yield DataTable(id="members", cursor_type="row")
+                    with ScrollableContainer(id="species_box"):
+                        yield Static("", id="species", markup=False)
             yield Static("", id="resfoot")
 ```
 
-3g. `on_mount` — insert after the line `self._set_units(force=True)` (step1 builds the `#hgs` / `#arrays` columns there):
+2h. `on_mount` — insert after the line `self._set_units(force=True)` (step1 builds the `#hgs` / `#arrays` columns there):
 
 ```python
         self.query_one("#res", DataTable).add_columns("HG", "OGs", "genes", "⚠")
         self.query_one("#ogs", DataTable).add_columns("OG", "name", "genes", "spp", "support",
                                                        "ref", "ref sup")
+        self.query_one("#members", DataTable).add_columns("gene", "sp", "ref.orth", "sup")
+        self.query_one("#memfilter").display = False
 ```
 
-3h. `_show_view` — replace the whole method:
+2i. `_show_view` — replace the whole method:
 
 ```python
     def _show_view(self) -> None:
@@ -927,9 +954,9 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
         self.query_one({"overview": "#overview", "hgs": "#hgs", "results": "#res"}[self.view]).focus()
 ```
 
-3i. `_overview_footer` — its text is split over several string literals; in the literal `"enter: open · c/f: category/family"` replace it with `"enter: open · o: results · c/f: category/family"`.
+2j. `_overview_footer` — its text is split over several string literals; replace the literal `"enter: open · c/f: category/family"` with `"enter: open · o: results · c/f: category/family"`.
 
-3j. `check_action` — replace the whole method:
+2k. `check_action` — replace the whole method:
 
 ```python
     def check_action(self, action: str, parameters: tuple) -> "bool | None":
@@ -942,16 +969,24 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
             return self.view in ("hgs", "results")
         if action in ("open_results", "cycle_filter"):
             return self.view in ("overview", "hgs")
-        if action == "toggle_source":
+        if action in ("toggle_source", "member_filter"):
             return self.view == "results"
         return True
 ```
 
-3k. `action_back` — replace the whole method:
+2l. `action_back` — replace the whole method:
 
 ```python
     def action_back(self) -> None:
         if self.view == "results":
+            inp = self.query_one("#memfilter", Input)
+            if inp.display:                      # esc with the filter box open: clear it first
+                inp.value = ""
+                inp.display = False
+                self._mem_filter = ""
+                self._fill_members()
+                self.query_one("#members").focus()
+                return
             self._res_gen += 1                   # a load still running is dropped when it lands
             self.view = self.res_from
             self._show_view()
@@ -960,23 +995,23 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
             self._show_view()
 ```
 
-3l. `on_data_table_row_highlighted` — after the `elif t.id == "hgs":` branch, add:
+2m. `on_data_table_row_highlighted` — after the `elif t.id == "hgs":` branch (`self._show_detail()`), add:
 
 ```python
         elif t.id == "res":
             self._fill_ogs()
         elif t.id == "ogs":
-            self._show_tree()
+            self._show_og()
 ```
 
-3m. `action_cycle_filter` — insert at the top of its body:
+2n. `action_cycle_filter` — insert at the top of its body:
 
 ```python
         if self.view == "results":           # f has no meaning in Results (check_action hides it)
             return
 ```
 
-3n. New methods — add after `action_log` (still inside `PhyloApp`):
+2o. New methods — add after `action_log` (still inside `PhyloApp`, before `def resource_groups`):
 
 ```python
     # ---- Results window ---------------------------------------------------------------------
@@ -1004,6 +1039,10 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
                               key=model.hg_sort_key)
         self.res_from, self.res_group, self._res_focus = self.view, group, focus
         self.res_source, self.res_rows, self.res_missing = None, [], 0
+        self._mem_filter = ""
+        inp = self.query_one("#memfilter", Input)
+        inp.value = ""
+        inp.display = False
         self.query_one("#res", DataTable).clear()
         self.query_one("#res").border_title = f"Results · {group}"
         self.view = "results"
@@ -1012,7 +1051,7 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
 
     def _reload_results(self) -> None:
         """Grey the window and start a load; the #res rows stay (greyed) so the cursor's HG is
-        kept across `p`, while the OG pane empties until the new source is read."""
+        kept across `p`, while the other panes empty until the new source is read."""
         self._res_gen += 1
         self.res_rows = []
         self.query_one("#resv").add_class("loading")
@@ -1022,24 +1061,29 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
 
     @work(thread=True, exclusive=True, group="results")
     def _load_results(self, hgs: list, source: "str | None", gen: int) -> None:
-        """Reads the ortholog_groups.csv files (NFS) and, once, the species tree: never on the
-        UI thread.  Own worker group: load_bg (default group, exclusive) must not cancel it."""
+        """Reads the ortholog_groups.csv files (NFS) and, until they have been read once, the
+        species tree tips and species_info.tsv: never on the UI thread.  Own worker group:
+        load_bg (default group, exclusive) must not cancel it, nor it load_bg."""
         worker = get_current_worker()
         snap = dict(gen=gen, source=source or "possvm", rows=[], missing=0, note="",
-                    tree=self._sptree, tree_err=self._sptree_err)
+                    universe=self._universe, phyla=self._phyla, sp_note="")
         try:
             snap["source"] = source or model.default_source(self.cfg)
             snap["rows"], snap["missing"] = model.group_ogs(self.cfg, hgs, snap["source"])
         except Exception as e:                   # never let a worker kill the app
             snap["note"] = f"cannot read {snap['source']}/: {e}"
-        if snap["tree"] is None:
-            path = self.cfg.params.get("SPECIES_TREE", "")
+        notes = []
+        if snap["universe"] is None:
             try:
-                snap["tree"], snap["tree_err"] = species_tree.load(path), ""
-            except ImportError:
-                snap["tree_err"] = "species tree needs ete3: pip install ete3 (in the phylo env)"
+                snap["universe"] = model.species_universe(self.cfg)
             except Exception as e:
-                snap["tree_err"] = f"species tree {path}: {e}"
+                notes.append(f"species tree {self.cfg.params.get('SPECIES_TREE', '')}: {e}")
+        if snap["phyla"] is None:
+            try:
+                snap["phyla"] = model.phyla(self.cfg)
+            except Exception as e:
+                notes.append(f"{model.species_info_path(self.cfg)}: {e} (phyla shown as unknown)")
+        snap["sp_note"] = "; ".join(notes)
         if worker.is_cancelled:
             return
         self.call_from_thread(self._apply_results, snap)
@@ -1049,7 +1093,7 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
             return
         self.query_one("#resv").remove_class("loading")
         self.res_source, self.res_rows, self.res_missing = snap["source"], snap["rows"], snap["missing"]
-        self._sptree, self._sptree_err = snap["tree"], snap["tree_err"]
+        self._universe, self._phyla, self._sp_note = snap["universe"], snap["phyla"], snap["sp_note"]
         self._res_note = snap["note"] or ("" if self.res_rows else
                                           f"no ortholog groups yet ({self.res_source} not done)")
         t = self.query_one("#res", DataTable)
@@ -1079,7 +1123,7 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
         return next((o for o in r.ogs if o.id == key), None)
 
     def _fill_ogs(self) -> None:
-        """OG table of the HG under the Results cursor (in memory), then its tree."""
+        """OG table of the HG under the Results cursor (in memory), then its members/species."""
         r = self._cur_res()
         t = self.query_one("#ogs", DataTable)
         t.clear()
@@ -1087,26 +1131,46 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
         for og in (r.ogs if r else []):
             sup = ("–" if og.support is None else "0.0 ⚠" if og.support == 0
                    else f"{og.support:.1f}")
-            t.add_row(".".join(og.id.rsplit(".", 2)[-2:]), escape(og.name), str(len(og.genes)),
-                      str(len(model.og_coverage(og))), sup, escape(og.ref), escape(og.ref_support),
-                      key=og.id)
+            t.add_row(_short_og(og.id), escape(og.name), str(len(og.genes)),
+                      str(len({m.species for m in og.genes})), sup, escape(og.ref),
+                      escape(og.ref_support), key=og.id)
         if t.row_count:
             t.move_cursor(row=0)
-        self._show_tree()
+        self._show_og()
 
-    def _show_tree(self) -> None:
+    def _show_og(self) -> None:
+        """members + species panes for the OG under the OGs cursor (in memory, no file access)."""
         r, og = self._cur_res(), self._cur_og()
+        self.query_one("#members").border_title = (
+            f"members · {_short_og(og.id)} {escape(og.name)}" if og else "members")
+        self.query_one("#species_box").border_title = (
+            f"species · {_short_og(og.id)}" if og else "species")
+        self._fill_members()
         if r is not None and r.error:
             text = r.error
         elif og is None:
             text = self._res_note
-        elif self._sptree is None:
-            text = self._sptree_err or "species tree not loaded"
         else:
-            text = "\n".join(species_tree.render(self._sptree, model.og_coverage(og)))
-        self._tree_text = text
-        self.query_one("#sptree", Static).update(text)
+            uni = self._universe or []
+            lines = species_lines(model.og_species_stats(og, uni, self._phyla or {}),
+                                  model.og_outside(og, uni))
+            text = "\n".join(([self._sp_note, ""] if self._sp_note else []) + lines)
+        self._species_text = text
+        self.query_one("#species", Static).update(text)
         self._results_footer()
+
+    def _fill_members(self) -> None:
+        """Annotation rows of the highlighted OG, filtered by the `/` box (case-insensitive
+        substring on any column)."""
+        og = self._cur_og()
+        t = self.query_one("#members", DataTable)
+        t.clear()
+        q = self._mem_filter.lower()
+        for i, m in enumerate(og.genes if og else []):
+            cells = (m.gene, m.species, m.ref, m.ref_support)
+            if q and not any(q in c.lower() for c in cells):
+                continue
+            t.add_row(*(escape(c) for c in cells), key=f"{i}:{m.gene}")
 
     def _results_footer(self) -> None:
         r = self._cur_res()
@@ -1115,8 +1179,8 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
             self.res_source or "…", "⚠ = support 0 (GeneRax bug case; check possvm_prev)"]
         if self.res_missing:
             parts.append(f"{self.res_missing} HG{'' if self.res_missing == 1 else 's'} without output")
-        lines = ([head] if head else []) + [" · ".join(parts),
-                                             "p: possvm ↔ possvm_prev · tab: pane · esc: back"]
+        lines = ([head] if head else []) + [
+            " · ".join(parts), "/: filter members · p: possvm ↔ possvm_prev · tab: pane · esc: back"]
         self._res_foot = "\n".join(lines)
         self.query_one("#resfoot", Static).update(escape(self._res_foot))
 
@@ -1125,38 +1189,57 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
             return
         self.res_source = "possvm_prev" if self.res_source == "possvm" else "possvm"
         self._reload_results()
+
+    def action_member_filter(self) -> None:
+        if self.view != "results":
+            return
+        inp = self.query_one("#memfilter", Input)
+        inp.display = True
+        inp.focus()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "memfilter":        # (the resubmit dialog's Inputs have other ids)
+            self._mem_filter = event.value
+            self._fill_members()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "memfilter":        # enter: keep the filter, back to the rows
+            self.query_one("#members").focus()
 ```
 
-3o. `phylocli/README.md`, section `## phylo tui` — after the paragraph that ends "…read only once an HG view is open.", insert:
+2p. `phylocli/README.md`, section `## phylo tui` — after the paragraph that ends "…read only once an HG view is open.", insert:
 
 ```markdown
-`o` opens the **Results** window for the overview row under the cursor (`ALL` included) or, in
-the HG view, for the highlighted HG's category/family with that HG highlighted. Three panes,
-`tab` between them: **Results** (the group's HGs that have POSSVM output: OGs, genes, OGs with
-support 0 `⚠`; the footer counts the HGs without output), **OGs** (the ortholog groups of the
-highlighted HG, largest first: OG, name, genes, species, orthogroup support, reference ortholog
-and its support) and **species tree** (`params.SPECIES_TREE`; `●n` = n member genes of that
-species, `·` = none, `k/m spp` per named clade). `p` switches `possvm/` (post-GeneRax, default)
-↔ `possvm_prev/` (raw IQ-TREE); `esc` goes back. Support `0.0 ⚠` is the GeneRax bug case:
-check `possvm_prev`. Files are read in the background; the tree needs `ete3`.
+`o` opens the **Results** window for the overview row under the cursor (`ALL` included); in the
+HG view, for the highlighted HG's category/family (that HG highlighted) or, on search/cluster,
+for the highlighted family's HGs. Four panes, `tab` between them: **Results** (the group's HGs
+that have POSSVM output: OGs, genes, OGs with support 0 `⚠`; the footer counts the HGs without
+output), **OGs** (the ortholog groups of the highlighted HG, largest first: OG, name, genes,
+species, orthogroup support, reference ortholog and its support), **members** (the highlighted
+OG's rows of `*.ortholog_groups.csv`: gene, species, reference ortholog and support; `/` filters,
+`enter` keeps the filter, `esc` clears it) and **species** (per phylum `k/m spp  n genes` with
+the species and their counts, absent phyla last; the universe is the tips of
+`params.SPECIES_TREE`, phyla from `data/species_info.tsv`). `p` switches `possvm/` (post-GeneRax,
+default) ↔ `possvm_prev/` (raw IQ-TREE); `esc` goes back. Support `0.0 ⚠` is the GeneRax bug
+case: check `possvm_prev`. Files are read in the background.
 ```
 
 and in the HG-view keys line replace `` `l` last log · `` with `` `l` last log · `o` results · ``.
 
-- [ ] **Step 4: Run both suites** — Expected: N0 + 13 passed on both (280 from 253), output clean.
+- [ ] **Step 4: Run both suites** — Expected: N0 + 14 passed on both (278 from 253), output clean.
 
-- [ ] **Step 5: Commit** — `git add phylocli/tui.py phylocli/tests/test_tui.py phylocli/README.md`; message `phylocli tui: Results window (o): HGs / OGs / species tree, p possvm <-> possvm_prev, reads in a worker` + trailer.
+- [ ] **Step 5: Commit** — `git add phylocli/tui.py phylocli/tests/test_tui.py phylocli/README.md`; message `phylocli tui: Results window (o): HGs / OGs / members (/ filter) / species per phylum, p possvm <-> possvm_prev, reads in a worker` + trailer.
 
 ---
 
-### Task 4: Overview `s` sort and `h` hide
+### Task 3: Overview `s` sort and `h` hide
 
 **Files:**
 - Modify: `phylocli/tui.py`, `phylocli/README.md`
 - Test: `phylocli/tests/test_tui.py` (append)
 
 **Interfaces:**
-- Consumes: `model.GroupRow` (`group`, `total`, `per_stage[stage] = (done, running, ready, blocked)` or None; `ready` includes failed HGs whose inputs exist — the overview's `▓ ready/failed`; for `search`/`cluster` the four counts are **families**, `n_fams` the group's family total), step1's `stage_at_column(col) -> str | None` and `ov_column(stage) -> int` (module level in `tui.py`), `PhyloApp._fill_overview`, `_key_at_cursor`, `check_action` (Task 3 version).
+- Consumes: `model.GroupRow` (`group`, `total`, `per_stage[stage] = (done, running, ready, blocked)` or None; `ready` includes failed HGs whose inputs exist — the overview's `▓ ready/failed`; for `search`/`cluster` the four counts are **families**, `n_fams` the group's family total), step1's `stage_at_column(col) -> str | None` and `ov_column(stage) -> int` (module level in `tui.py`), `PhyloApp._fill_overview`, `_key_at_cursor`, `check_action` (Task 2 version).
 - Produces:
   - module function `ov_order(rows: list, sort: tuple | None, hide: str | None) -> list` — `ALL` first; `hide` = stage name; `sort` = `(column name, reversed: bool)`
   - `PhyloApp.ov_sort: tuple | None`, `ov_hide: str | None`, `ov_shown: list[model.GroupRow]` (displayed rows); `ov_rows` unchanged (all rows as computed)
@@ -1386,7 +1469,7 @@ def test_s_h_on_family_stage_count_families_and_skip_separator(cli):
 
 - [ ] **Step 3: Implement** in `phylocli/tui.py`.
 
-4a. Module-level functions — add after `STATE_STYLE = {...}`, before `class PhyloApp`:
+3a. Module-level functions — add after `STATE_STYLE = {...}`, before `class PhyloApp`:
 
 ```python
 def _todo_at(r, stage: str) -> tuple:
@@ -1415,14 +1498,14 @@ def ov_order(rows: list, sort: "tuple | None", hide: "str | None") -> list:
 
 (Python's sort is stable, also with `reverse=True`, so ties keep the name order in both directions.)
 
-4b. `BINDINGS` — insert after `Binding("f", "cycle_filter", "filter / family"),`:
+3b. `BINDINGS` — insert after `Binding("f", "cycle_filter", "filter / family"),`:
 
 ```python
         Binding("s", "sort", "sort"),
         Binding("h", "hide", "only actionable"),
 ```
 
-4c. `__init__` — append after the line `self._array_rows: list = []`:
+3c. `__init__` — append after the line `self._array_rows: list = []`:
 
 ```python
         self.ov_sort: "tuple | None" = None     # (column name, reversed); s
@@ -1430,7 +1513,7 @@ def ov_order(rows: list, sort: "tuple | None", hide: "str | None") -> list:
         self.ov_shown: list = []                # ov_rows as displayed (sorted / filtered)
 ```
 
-4d. `_fill_overview` — targeted edits only; **do not replace the method and do not touch its columns**. Step1 owns the column list (`OV_COLUMNS`, the `│` separator, the two-row `Text` headers, the restore-off-the-separator step); column→stage goes through `stage_at_column`. (At `411134d` a whole-method replacement was tried and broke `enter`.) Four Edit calls, each old → new:
+3d. `_fill_overview` — targeted edits only; **do not replace the method and do not touch its columns**. Step1 owns the column list (`OV_COLUMNS`, the `│` separator, the two-row `Text` headers, the restore-off-the-separator step); column→stage goes through `stage_at_column`. (At `411134d` a whole-method replacement was tried and broke `enter`.) Four Edit calls, each old → new:
 
 1. `        self.ov_rows = rows\n` →
 ```python
@@ -1462,16 +1545,16 @@ Then add these two methods right after `_fill_overview`:
         return ("group", "HGs")[col] if col < 2 else stage_at_column(col)
 ```
 
-4e. `_overview_footer` — in the literal `"enter: open · o: results · c/f: category/family"` (Task 3), replace it with `"enter: open · o: results · c/f: category/family · s: sort · h: only actionable"`.
+3e. `_overview_footer` — replace the literal `"enter: open · o: results · c/f: category/family"` (Task 2) with `"enter: open · o: results · c/f: category/family · s: sort · h: only actionable"`.
 
-4f. `check_action` — change its first test to:
+3f. `check_action` — change its first test to:
 
 ```python
         if action in ("by_category", "sort", "hide"):
             return self.view == "overview"
 ```
 
-4g. New actions — add after `action_by_category`:
+3g. New actions — add after `action_by_category`:
 
 ```python
     def action_sort(self) -> None:
@@ -1491,7 +1574,7 @@ Then add these two methods right after `_fill_overview`:
         self._fill_overview(self.ov_rows)        # in memory only
 ```
 
-4h. `phylocli/README.md`, section `## phylo tui` — after the overview paragraph (the one ending "…read only once an HG view is open."), insert:
+3h. `phylocli/README.md`, section `## phylo tui` — after the overview paragraph (the one ending "…read only once an HG view is open."), insert:
 
 ```markdown
 `s` sorts the overview by the highlighted column — a stage: most ready/failed first, ties by
@@ -1501,7 +1584,7 @@ highlighted stage (on search/cluster: families); `h` again shows all.
 `ALL` stays on top, the pane title shows the state, and both survive refreshes and `c`/`f`.
 ```
 
-- [ ] **Step 4: Run both suites** — Expected: N0 + 8 passed on both (288 from 253), output clean.
+- [ ] **Step 4: Run both suites** — Expected: N0 + 8 passed on both (286 from 253), output clean.
 
 - [ ] **Step 5: Commit** — `git add phylocli/tui.py phylocli/tests/test_tui.py phylocli/README.md`; message `phylocli tui: overview s (sort by the highlighted column) and h (only actionable at a stage)` + trailer.
 
@@ -1509,7 +1592,7 @@ highlighted stage (on search/cluster: families); `h` again shows all.
 
 ## Self-review (done while writing)
 
-- **Spec coverage.** Part A: entry/exit (`o` from overview any column incl. ALL, `o` from `2 HGs` with HG highlighted, `esc` back with cursor, `R` untouched) → Task 3 tests 1, 2, 5; three panes + `tab`/`shift+tab` + orange → test 10; Results pane columns, sort by HG id, HGs without output counted → test 1 + Task 1 `hg_sort_key`; OG table columns, gene-count order, `0.0 ⚠` → Task 1 test 1 + Task 3 test 1; species tree `●n`/`·`/`k/m spp`, redraw on OG move → Task 2 + Task 3 test 3; `p` and title → test 4; footer → test 1; data API (`read_ogs`, `species_of`, `og_coverage`, one file expected, `None` when missing) → Task 1; `species_tree.load/render`, unknown species → Task 2; errors (no output + `p`, bad row with file and line, worker + loading) → tests 6, 8, 7. Part B: `s` per column type and reversal, `h`, ALL pinned, title, survives refresh and `c`/`f`, in memory → Task 4. "With step1 built, works on search/cluster" → `stage_at_column` + family counts, Task 4 `test_s_h_on_family_stage_count_families_and_skip_separator` (also the `│` no-op); `o` on a family row → Task 3 `test_o_on_family_row_opens_results_for_its_hgs`.
+- **Spec coverage.** Part A: entry/exit (`o` from the overview any column incl. ALL, from an HG with it highlighted, from a family row; `esc` back with cursor; `R` untouched) → Task 2 tests 1, 2, 3, 7; four panes + `tab`/`shift+tab` + orange → test 12; Results pane columns, sort by HG id, HGs without output counted → test 1 + Task 1 `hg_sort_key`; OG table columns, gene-count order, `0.0 ⚠` / `-1` / `NA` → Task 1 tests 1, 5 + Task 2 test 1; members rows and `/` filter → Task 2 tests 1, 4, 5; species per phylum (`k/m spp  n genes`, species with counts, absent last, outside the universe) → Task 1 test 11 + Task 2 tests 1, 4, 6; members/species follow the OG cursor → test 4; `p` and title → test 6; footer → test 1; data API (`read_ogs` with `Member`, `species_of`, `species_universe` by regex, `phyla` with `unknown`, `og_species_stats`, one file expected, `None` when missing) → Task 1; errors (no output + `p`, bad row with file and line, worker + loading, missing species files) → Task 2 tests 8, 10, 9, 11. Part B: `s` per column type and reversal, `h`, ALL pinned, title, survives refresh and `c`/`f`, in memory, search/cluster in families, `│` no-op → Task 3.
 - **Placeholders.** None: every code step carries the code; README text given verbatim.
-- **Type consistency.** `read_ogs(cfg, hg, source, names=None)`, `group_ogs(cfg, hgs, source) -> (list[HGOgs], int)`, `HGOgs.error: str`, `OG.support: float | None`, `species_tree.render(tree, counts) -> list[str]`, `ov_order(rows, sort, hide)`, `ov_sort = (name, reversed)`, `ov_hide = stage name` — the same names are used in every task and test.
-- **Review Focus.** Each of the five lines has its test in the owning task (Task 1 ×2, Task 3 ×2, Task 4 ×1).
+- **Type consistency.** `read_ogs(cfg, hg, source, names=None)`, `OG.genes: list[Member]`, `group_ogs(cfg, hgs, source) -> (list[HGOgs], int)`, `HGOgs.error: str`, `OG.support: float | None`, `og_species_stats(og, universe, phyla) -> list[PhylumRow]`, `og_outside(og, universe)`, `species_lines(stats, outside)`, `_open_results(group, by, focus=None)`, `ov_order(rows, sort, hide)`, `ov_sort = (name, reversed)`, `ov_hide = stage name` — the same names are used in every task and test.
+- **Review Focus.** Each of the five lines has its test in the owning task (Task 1 ×3, Task 2 ×2, Task 3 ×1).
