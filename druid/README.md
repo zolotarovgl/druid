@@ -1,8 +1,9 @@
 # phylocli
 
-`phylo` reports step2 progress (per category, per stage) and submits one SLURM job array per
+`phylo` reports step1 + step2 progress (per stage) and submits one SLURM job array per
 resource group for a single stage, without Nextflow. The stage scripts in `stages/` are the
-step2.nf process bodies; step2.nf now calls the same scripts (created 30/09/2026).
+step1.nf / step2.nf process bodies; both pipelines call the same scripts (step2 30/09/2026,
+step1 09/10/2026).
 
 ## Setup
 
@@ -17,7 +18,9 @@ PYTHONNOUSERSITE=1 python -c "import ete3, Bio, yaml"   # self-check, same env t
 phylocli/phylo --help
 ```
 
-`submit` checks the tools the stage needs (mafft/clipkit, iqtree2, generax/mpirun) and, for
+`submit` checks the tools the stage needs (hmmsearch/hmmfetch/bedtools, samtools/diamond/mcl,
+mafft/clipkit, iqtree2, generax/mpirun; for `search` also that `genefam_info`, `infasta`,
+`pfam_db` exist) and, for
 every stage except `gxsup`, that `PYTHONNOUSERSITE=1 python -c "import ete3, Bio, yaml"` works
 (the `python` the stage scripts use). On failure it names the interpreter and the import error,
 and exits 78 with nothing written. Arrays are split into chunks of at most 1000 HGs (SLURM
@@ -27,7 +30,7 @@ MaxArraySize), each chunk its own `ids_<k>.txt` / `array_<k>.sbatch` / sbatch ca
 
 ```
 phylocli/phylo status [--ids PATH] [--fam/-f PREFIX]
-phylocli/phylo status HG [--history]
+phylocli/phylo status HG|FAMILY [--history]
 phylocli/phylo missing [STAGE] [--ids PATH] [--fam/-f PREFIX] [--all] [--per-fam]
 phylocli/phylo submit STAGE [HGS]... [--missing] [--ids PATH] [--fam/-f PREFIX] [--all] [-n/--dry-run]
                             [--max-running INTEGER] [--partition TEXT] [--qos TEXT]
@@ -35,8 +38,10 @@ phylocli/phylo submit STAGE [HGS]... [--missing] [--ids PATH] [--fam/-f PREFIX] 
 phylocli/phylo jobs [--stage TEXT] [--last N] [--failed]
 ```
 
-STAGE is one of `align tree possvm_prev generax gxsup possvm`. `submit` takes exactly one of:
-HG ids, `--ids FILE`, or `--missing`. `--fam` takes a category (`tfs`) or a family
+STAGE is one of `search cluster align tree possvm_prev generax gxsup possvm`. `search` and
+`cluster` (step1) work on FAMILY ids `<pref>.<family>` (genefam column 1 and its last non-empty
+field, e.g. `slc.SLC25`), the others on HG ids. `submit` takes exactly one of: ids,
+`--ids FILE`, or `--missing`. `--fam` takes a category (`tfs`) or a family
 (`tfs.T-box`), matched on whole dot-separated id parts (`tfs.T-box` does not match `tfs.T-box2`).
 
 ```
@@ -62,6 +67,11 @@ phylocli/phylo submit align --ids ids.new.txt
 phylocli/phylo jobs                               # pending/running/done/failed per submission
 phylocli/phylo jobs --failed                      # failed HGs + state + .err log
 phylocli/phylo jobs 29318676                      # one array: task | HG | state | log (--failed, --running)
+phylocli/phylo missing search                     # families never searched (new genefam rows)
+phylocli/phylo submit search --missing -n         # dry run; then without -n
+phylocli/phylo missing cluster                    # searched, with hits, not clustered
+phylocli/phylo submit cluster --missing
+phylocli/phylo status slc.SLC25                   # one family: search / cluster state + latest job
 ```
 
 ## `status HG`: job history (added 02/10/2026)
@@ -100,6 +110,20 @@ Sources (code: `history.py`):
   queued"), and the rest is submitted. With `--all` (strict) they are errors instead and the
   whole submission is refused.
 - Errors list the offending ids per reason and end with "nothing submitted".
+- `search` / `cluster`: done = `search/<id>.domains.fasta` exists / `clusters/<id>_cluster.tsv`
+  exists (or the domains FASTA is empty: "no hits", counted as done). `search` is always ready;
+  `cluster` is ready when the domains FASTA is non-empty. HG FASTAs in `clusters/` without a
+  `_cluster.tsv` count as existing output (two clusterings must not mix). `--per-fam` is an error.
+- A duplicated family id in the genefam file is a warning, never an error: the summaries, the
+  TUI banner and every search/cluster command print it and go on; the last row of the id is used,
+  as `main.py hmmsearch` and step1.nf do (09/10/2026: `slc.SLC44`, `neu.Synapsin`).
+- A family NAME under two prefixes (`rbp.CSD` / `tfs.CSD`): `main.py hmmsearch` keys rows by name
+  (the last row wins), so `rbp.CSD`'s hits are written as `tfs.CSD.*` and `rbp.CSD` is published
+  empty ("no hits"), as in step1.nf. `search` prints a `WARNING` saying so; the summaries, the TUI
+  banner and `submit search` list every such name beforehand.
+- `cluster` writes `<id>.HG<n>.fasta` only for HGs with >= `min_seqs` sequences and >=
+  `min_distinct` distinct ones (the rule step2 uses); `<id>_cluster.tsv` stays complete, so HG
+  numbers have gaps. It prints `skipped <k> HGs below min_seqs/min_distinct`.
 
 `missing STAGE` lists the HGs not done for STAGE whose inputs exist, i.e. the ones that can
 run now; `--all` lists every HG not done (30/09/2026). Stage order: `align`, `tree`, then
@@ -117,10 +141,13 @@ than 500 sequences). Resources: the HG's `resources.tsv` row if it has one, else
 `submit` prints how many selected HGs had a row. `--mem/--time/--cpus` override that for every
 selected HG. No retry ladder. Outputs are
 published to `results/<dir>/` only on success (marker file last).
+A `search` submission copies the genefam file to `runs/<run>/genefam.csv` and its `config.yaml`
+points there: the jobs search the rows that were validated, even if the file is edited while
+they wait in the queue.
 
 ## config.yaml
 
-`phylocli/config.yaml` holds `outdir`, `partition`, `qos` and the step2 parameters the stages
+`phylocli/config.yaml` holds `outdir`, `partition`, `qos`, the step1 parameters (`genefam_info`, `infasta`, `pfam_db`, `hmm_dir`, `domain_expand`, `s1_ncpu`, `s2_ncpu`, `max_n`, `s2_inflation`) and the step2 parameters the stages
 read (`MAFFT_OPT`, `TREE_METHOD`, `IQTREE2_MODEL`, `SUBS_MODEL`, `SPECIES_TREE`, `MAX_SPR`,
 `NCPU_GENERAX`, `REFNAMES`, `REFSPECIES`, `run_generax`, `gxsup`, `resources_tsv`). Values
 mirror `nextflow.config` + the `precise` profile and the 24/09/2026 run
@@ -134,6 +161,10 @@ Nextflow task hashes include the script text, so `nextflow run ... -resume` will
 tasks cached before the change; they re-run. Fill gaps with `phylo submit` instead, or run
 Nextflow on a fresh id list. The original is `step2.nf.bak-20260930` (restore with
 `cp step2.nf.bak-20260930 step2.nf`).
+
+`step1.nf` `SEARCH` / `CLUSTER` call `phylocli/stages/search.sh` / `cluster.sh` (09/10/2026;
+original: `step1.nf.bak-<date of the copy>`). step1.nf decides completeness from the published
+outputs, not the resume cache, so the changed script text costs no rerun.
 
 ## Typical loop
 
@@ -159,7 +190,14 @@ the stage column and `enter` opens the HG panels for that row at that stage (fil
 `esc` returns to the overview. The overview reads output files and squeue only; the slow
 attempt history is read only once an HG view is open.
 
-HG view panels: stages (top left) · HGs of the highlighted stage (top right) · latest arrays
+`search` and `cluster` are the first two columns and count FAMILIES (`ALL` = all families, a
+category row = its families, a family row = that family); the `HGs` column stays the group's HG
+count, so a family added to the genefam file shows as its own row with 0 HGs until `cluster`
+has run. `enter` on a search/cluster cell lists that group's families (select, resubmit and log
+work on family ids); the stages panel then counts families for search/cluster and HGs for the
+other stages.
+
+HG view panels: stages (top left) · HGs — or families, for search / cluster — of the highlighted stage (top right) · latest arrays
 (bottom left) · details of the highlighted HG (bottom right). Refreshes in the background.
 
 Keys (HG view): `↑↓` move · `tab` panel · `esc` overview · `f` filter (failed → ready → running → blocked → done) ·

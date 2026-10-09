@@ -843,3 +843,15 @@ def test_status_hg_survives_malformed_genefam(cli, monkeypatch):
     r = cli(["status", "tfs.A.HG11"])
     assert r.exit_code == 0, r.output
     assert "tfs.A.HG11" in r.output
+
+
+# ---- Task 7: step1.nf ------------------------------------------------------------------------
+
+def test_step1_nf_calls_stage_scripts():
+    nf = (core.ROOT / "step1.nf").read_text()
+    assert "exec bash ${projectDir}/phylocli/stages/search.sh genefam.csv input.fasta" in nf
+    assert "exec bash ${projectDir}/phylocli/stages/cluster.sh ${domains_fasta}" in nf
+    assert "min_seqs=${params.min_seqs} min_distinct=${params.min_distinct}" in nf
+    assert 'path("${pref}.${family}.*.fasta", optional: true)' in nf
+    assert "python ${projectDir}/phylogeny/main.py" not in nf          # bodies live in the scripts
+    assert "def familyIsDone" in nf and "stageInMode 'copy'" in nf      # skip logic / staging kept

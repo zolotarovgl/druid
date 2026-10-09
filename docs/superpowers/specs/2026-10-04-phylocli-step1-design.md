@@ -109,3 +109,33 @@ across the size range, run each stage on them with the current pipeline setup, f
 scaling of memory/time on HG size, and use the fit so step2 submissions request informed
 resources. Builds on `workflow/train.R` (quantile regression on Nextflow traces) and
 `workflow/predict_resources.py`; must also learn from phylocli runs.
+
+## Implementation decisions (plan 2026-10-08-phylocli-step1.md, 09/10/2026)
+- Duplicate family ids (decided by Grygoriy 09/10/2026: warning): never an error. The
+  summaries, the TUI banner and every search/cluster command (`missing`, `submit`, `status
+  FAMILY`) print a warning naming them and proceed; each id counts once and its LAST row is used,
+  as main.py hmmsearch (keys rows by name, the last row wins) and step1.nf do. The real file has
+  two: `slc.SLC44` and `neu.Synapsin`.
+- "Stage the CURRENT file": `submit search` snapshots the genefam file into the run dir
+  (`genefam.csv`, the name step1.nf stages it under) and the run's `config.yaml` points there.
+- `pfam_db` is checked by preflight, not staged (step1.nf passes it as a path too); search is
+  ready whenever the family has a row.
+- A family name under two prefixes (decided by Grygoriy 09/10/2026: warning): `search.sh`
+  keeps step1.nf's behaviour (the empty files are published) and prints `WARNING: family name
+  <N> is listed under more than one prefix ...` naming the id its hits were written under; the
+  summaries, the TUI banner and `submit search` print `warning: family name CSD is listed under 2
+  prefixes (rbp, tfs); hmmsearch keys rows by name, so rbp.CSD's hits are written as tfs.CSD.*
+  and rbp.CSD looks like "no hits"`. `search.sh` copies `hmm_dir` before use because `main.py`
+  fetches missing models into it.
+- `cluster` counts HG FASTAs without a `_cluster.tsv` as existing output.
+- `status` (summary) shows the family rows too (it draws the same `stage_rows` as `missing`);
+  `status HG` keeps its six HG rows; the TUI HG view still opens on `align` when no stage cell
+  was chosen.
+- TUI overview: `search` / `cluster` cells count families (from `model.family_states`, the same
+  function as the CLI summary rows); the `HGs` column stays the HG count (step2's unit) and the
+  footer adds the family count; a group with families but no HG yet gets a row (0 HGs), because
+  a newly added family is exactly what `search` is for and would otherwise be invisible.
+- Tools: search = hmmsearch, hmmfetch, bedtools (helper/hmmsearch.py); cluster = samtools,
+  diamond, mcl. step1.nf CLUSTER's HG-FASTA output is `optional: true`.
+- The 18 SLC families already have search + cluster outputs in v3 (04/10/2026), so the real
+  check compares against those instead of "nothing (new)".
