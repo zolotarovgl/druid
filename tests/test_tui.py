@@ -1991,3 +1991,21 @@ def test_selection_keys_stay_in_footer(cli, monkeypatch):
             for a in ("toggle", "select_all", "resubmit"):
                 assert app.check_action(a, ()) is True
     _run(go())
+
+
+def test_esc_outside_box_clears_all_filters_then_leaves(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            await _press(pilot, "tab", "tab", "slash", "b", "o", "v", "enter")   # members /bov only
+            await _press(pilot, "shift+tab")                            # focus on OGs (no filter)
+            assert getattr(app.focused, "id", None) == "ogs"
+            await _press(pilot, "escape")                               # 1st esc: clears members'
+            assert app.view == "results" and all(not q for q in app._flt.values())
+            assert len(_member_genes(app)) > 1                         # members unfiltered again
+            await _press(pilot, "escape")                               # 2nd esc: leaves
+            assert app.view != "results"
+    _run(go())

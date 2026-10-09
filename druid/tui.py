@@ -539,11 +539,15 @@ class PhyloApp(App):
         if self.view == "results":
             inp = self.query_one("#memfilter", Input)
             pane = self._flt_pane if inp.display else self._focused_pane()
-            if inp.display or self._flt[pane]:   # esc: clear the pane's filter first
+            # esc in the box clears that pane's filter; esc outside the box clears EVERY pane's
+            # filter if any is set; only an esc with no filter left leaves Results (Grygoriy)
+            if inp.display or any(self._flt.values()):
+                panes = [pane] if inp.display else [p for p, q in self._flt.items() if q]
                 inp.value = ""
                 inp.display = False
-                self._flt[pane] = ""
-                self._refilter(pane)
+                for p in panes:
+                    self._flt[p] = ""
+                    self._refilter(p)
                 self.query_one(self._PANE_ID[pane]).focus()
                 return
             self._res_gen += 1                   # a load still running is dropped when it lands
