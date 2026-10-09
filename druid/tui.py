@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import collections
+import math
 import os
 from datetime import datetime
 from pathlib import Path
@@ -148,6 +149,52 @@ def sort_rows(rows: list, sort: "tuple | None", keys: dict) -> list:
 OV_COLS = [SortCol("group", "\ngroup"), SortCol("HGs", "\nHGs", True),
            *(SortCol(None, f"{OV_SEP}\n{OV_SEP}") if st is None
              else SortCol(st, f"{OV_TOP.get(st, '')}\n{st}", True) for st in OV_COLUMNS)]
+
+
+def hg_cols(unit: str) -> list:
+    """Pane 2 HGs: the selection mark is not sortable; names stay the same for both units."""
+    fam = unit == "family"
+    return [SortCol(None, " "), SortCol("id", "family" if fam else "HG"),
+            SortCol("n", "HGs" if fam else "seqs", True), SortCol("state", "state"),
+            SortCol("last", "last"), SortCol("req", "req", True), SortCol("used", "used", True)]
+
+
+def _mem_time_key(mem: str, time: str) -> tuple:
+    """(MB, minutes) of an attempt's memory / time strings, -1 where unparseable ('-')."""
+    try:
+        mb = core.parse_mem_mb(mem)
+    except ValueError:
+        mb = -1
+    return (mb, model.parse_duration_min(time) or -1)
+
+
+def _lead_float(s: str) -> float:
+    """98.2 of '98.2/97.0'; -inf for NA / empty (sorts last when descending)."""
+    try:
+        return float(s.split("/", 1)[0])
+    except ValueError:
+        return -math.inf
+
+
+RES_COLS = [SortCol("hg", "HG"), SortCol("ogs", "OGs", True), SortCol("genes", "genes", True),
+            SortCol("zero", "⚠", True)]
+RES_KEYS = {"hg": (lambda r: model.hg_sort_key(r.hg), False),     # an unreadable HG: -1
+            "ogs": (lambda r: -1 if r.error else len(r.ogs), True),
+            "genes": (lambda r: -1 if r.error else sum(len(o.genes) for o in r.ogs), True),
+            "zero": (lambda r: -1 if r.error else sum(1 for o in r.ogs if o.support == 0), True)}
+# no reference-ortholog columns in OGs: the reference is per gene (it differs within 19 % of
+# OGs) and is shown per row in `members` (Grygoriy, 09/10/2026)
+OG_COLS = [SortCol("og", "OG"), SortCol("genes", "genes", True), SortCol("spp", "spp", True),
+           SortCol("support", "support", True), SortCol("name", "name")]
+OG_KEYS = {"og": (lambda o: int(o.id.rsplit(".", 1)[1]), False),
+           "genes": (lambda o: len(o.genes), True),
+           "spp": (lambda o: len({m.species for m in o.genes}), True),
+           "support": (lambda o: -math.inf if o.support is None else o.support, True),
+           "name": (lambda o: o.name.lower(), False)}
+MEM_COLS = [SortCol("gene", "gene"), SortCol("sp", "sp"), SortCol("ref", "ref.orth"),
+            SortCol("sup", "sup", True)]
+MEM_KEYS = {"gene": (lambda p: p[1].gene, False), "sp": (lambda p: p[1].species, False),   # (i, Member)
+            "ref": (lambda p: p[1].ref, False), "sup": (lambda p: _lead_float(p[1].ref_support), True)}
 
 
 class SortTable(DataTable):
@@ -388,17 +435,17 @@ class PhyloApp(App):
             yield Static("", id="ovfoot")
         with Grid(id="hgview"):
             yield DataTable(id="stages", cursor_type="row")
-            yield DataTable(id="hgs", cursor_type="row")
+            yield SortTable(id="hgs", cursor_type="row")
             yield DataTable(id="arrays", cursor_type="row")
             yield Static("", id="detail")
         with Vertical(id="resv"):
             with Horizontal(id="results"):
-                yield DataTable(id="res", cursor_type="row")
-                yield DataTable(id="ogs", cursor_type="row")
+                yield SortTable(id="res", cursor_type="row")
+                yield SortTable(id="ogs", cursor_type="row")
                 with Vertical(id="rescol"):
                     yield Input(placeholder="filter members (enter: keep · esc: clear)",
                                 id="memfilter")
-                    yield DataTable(id="members", cursor_type="row")
+                    yield SortTable(id="members", cursor_type="row")
                     with ScrollableContainer(id="species_box"):
                         yield Static("", id="species", markup=False)
             yield Static("", id="resfoot")
@@ -408,11 +455,9 @@ class PhyloApp(App):
         self.query_one("#stages", DataTable).add_columns("stage", "done", "run", "ready", "blk", "total")
         self.query_one("#overview", SortTable).set_cols(OV_COLS)
         self._set_units(force=True)
-        self.query_one("#res", DataTable).add_columns("HG", "OGs", "genes", "⚠")
-        # no reference-ortholog columns here: the reference is per gene (it differs within 19 %
-        # of OGs) and is shown per row in `members` (Grygoriy, 09/10/2026)
-        self.query_one("#ogs", DataTable).add_columns("OG", "genes", "spp", "support", "name")
-        self.query_one("#members", DataTable).add_columns("gene", "sp", "ref.orth", "sup")
+        self.query_one("#res", SortTable).set_cols(RES_COLS)
+        self.query_one("#ogs", SortTable).set_cols(OG_COLS)
+        self.query_one("#members", SortTable).set_cols(MEM_COLS)
         self.query_one("#memfilter").display = False
         for t in self.query(SortTable):          # a header sort reorders that table, in memory
             t.on_sort = self._resorted
@@ -582,10 +627,7 @@ class PhyloApp(App):
         if unit == self._hg_unit and not force:
             return
         self._hg_unit = unit
-        t = self.query_one("#hgs", DataTable)
-        t.clear(columns=True)
-        t.add_columns(" ", "family" if unit == "family" else "HG", "HGs" if unit == "family" else "seqs",
-                      "state", "last", "req", "used")
+        self.query_one("#hgs", SortTable).set_cols(hg_cols(unit))   # sort kept (stable names)
         ar = self.query_one("#arrays", DataTable)
         ar.clear(columns=True)
         ar.add_columns("job", "stage", "ids", "done", "run",
@@ -601,7 +643,18 @@ class PhyloApp(App):
         if self.group is not None:          # search / cluster list families, the rest HGs
             key = model.fam_group_key if self.stage in core.FAMILY_STAGES else model.group_key
             rows = [r for r in rows if key(r.hg, self.by) == self.group]
-        return rows
+        return sort_rows(rows, self.query_one("#hgs", SortTable).sort, self._hg_keys())
+
+    def _hg_keys(self) -> dict:
+        """Sort keys of pane 2 HGs (the second column counts HGs per family on search/cluster)."""
+        n = ((lambda r: self.hg_count.get(r.hg, 0)) if self.stage in core.FAMILY_STAGES
+             else (lambda r: self.nseq.get(r.hg, 0)))
+        return {"id": (lambda r: model.hg_sort_key(r.hg), False), "n": (n, True),
+                "state": (lambda r: r.state, False),
+                "last": (lambda r: model.bump_reason(r.last) if r.last else "", False),
+                "req": (lambda r: _mem_time_key(r.last.mem, r.last.time) if r.last else (-2, -2), True),
+                "used": (lambda r: _mem_time_key(r.last.peak_rss, r.last.realtime) if r.last
+                         else (-2, -2), True)}
 
     # ---- overview ---------------------------------------------------------------------------
     def _show_view(self) -> None:
@@ -789,6 +842,14 @@ class PhyloApp(App):
         """A table's sort changed (header enter / s, or s on a cell): reorder it in memory."""
         if t.id == "overview":
             self._fill_overview(self.ov_rows)
+        elif t.id == "hgs":
+            self._fill_hgs()                     # keeps the cursor on the same HG
+        elif t.id == "res":
+            self._fill_res(self._key_at_cursor(t))
+        elif t.id == "ogs":
+            self._fill_ogs(keep=self._key_at_cursor(t))
+        elif t.id == "members":
+            self._fill_members()
 
     def action_hide(self) -> None:
         col = self._ov_column() if self.view == "overview" else None
@@ -1048,7 +1109,7 @@ class PhyloApp(App):
         """Results table: the loaded HGs whose id contains the `/` filter (in memory)."""
         t = self.query_one("#res", DataTable)
         q = self._flt["res"].lower()
-        rows = [r for r in self.res_rows if q in r.hg.lower()]
+        rows = sort_rows([r for r in self.res_rows if q in r.hg.lower()], t.sort, RES_KEYS)
         t.clear()
         for r in rows:
             if r.error:
@@ -1096,21 +1157,25 @@ class PhyloApp(App):
         key = self._key_at_cursor(self.query_one("#ogs", DataTable))
         return next((o for o in r.ogs if o.id == key), None)
 
-    def _fill_ogs(self) -> None:
-        """OG table of the HG under the Results cursor (in memory), then its members/species."""
+    def _fill_ogs(self, keep: "str | None" = None) -> None:
+        """OG table of the HG under the Results cursor (in memory), then its members/species.
+        The cursor goes to OG `keep` when shown (a re-sort), else to the first row."""
         r = self._cur_res()
-        t = self.query_one("#ogs", DataTable)
+        t = self.query_one("#ogs", SortTable)
         t.clear()
         t.border_title = f"OGs · {r.hg if r else '–'} · {self.res_source or '…'}{self._ftag('ogs')}"
         q = self._flt["ogs"].lower()
-        for og in ([o for o in r.ogs if q in o.id.lower() or q in o.name.lower()] if r else []):
+        ogs = [o for o in r.ogs if q in o.id.lower() or q in o.name.lower()] if r else []
+        ogs = sort_rows(ogs, t.sort, OG_KEYS)
+        for og in ogs:
             sup = ("–" if og.support is None else "0.0 ⚠" if og.support == 0
                    else f"{og.support:.1f}")
             t.add_row(_short_og(og.id), str(len(og.genes)),
                       str(len({m.species for m in og.genes})), sup, escape(_trunc(og.name)),
                       key=og.id)
-        if t.row_count:
-            t.move_cursor(row=0)
+        keys = [o.id for o in ogs]
+        if keys:
+            t.move_cursor(row=keys.index(keep) if keep in keys else 0)
         self._show_og()
 
     def _show_og(self) -> None:
@@ -1140,13 +1205,13 @@ class PhyloApp(App):
         """Annotation rows of the highlighted OG, filtered by the `/` box (case-insensitive
         substring on any column)."""
         og = self._cur_og()
-        t = self.query_one("#members", DataTable)
+        t = self.query_one("#members", SortTable)
         t.clear()
         q = self._flt["members"].lower()
         self.query_one("#members").border_title = (
             (f"members · {_short_og(og.id)} {escape(og.name)}" if og else "members")
             + self._ftag("members"))
-        for i, m in enumerate(og.genes if og else []):
+        for i, m in sort_rows(list(enumerate(og.genes if og else [])), t.sort, MEM_KEYS):
             cells = (m.gene, m.species, m.ref, m.ref_support)
             if q and not any(q in c.lower() for c in cells):
                 continue

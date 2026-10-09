@@ -2192,3 +2192,107 @@ def test_header_keys_touch_no_files_or_slurm(cli, monkeypatch):
             await _key(pilot, "up", "left", "right", "enter", "s", "down")
             assert app.ov_sort == ("tree", True)
     _run(go())
+
+
+def test_hgs_pane_header_sort_skips_mark_and_survives_refresh_and_unit(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+    app.filter = "actionable"                    # tfs.A.HG11 ready (3 seqs), tfs.C_x.HG1 failed (600)
+
+    async def go():
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            t = app.query_one("#hgs")
+            t.focus()
+            t.move_cursor(row=0)
+            await pilot.pause()
+            await _key(pilot, "up")
+            assert t.header and _hcur(app, "#hgs") == 1             # HG: the mark is skipped
+            await _key(pilot, "left")
+            assert _hcur(app, "#hgs") == 1
+            await _key(pilot, "right", "enter")                      # seqs: numbers descending
+            assert [r.hg for r in app.visible()] == ["tfs.C_x.HG1", "tfs.A.HG11"]
+            assert _heads(app, "#hgs")[2] == "seqs ▼"
+            await _key(pilot, "enter")
+            assert [r.hg for r in app.visible()] == ["tfs.A.HG11", "tfs.C_x.HG1"]
+            assert _heads(app, "#hgs")[2] == "seqs ▲"
+            await _key(pilot, "down", "space")                       # rows again: row 0 selected
+            assert not t.header and app.selected == {"tfs.A.HG11"}
+            app.load_now()
+            await pilot.pause()
+            assert [r.hg for r in app.visible()] == ["tfs.A.HG11", "tfs.C_x.HG1"]
+            app.open_group("ALL", "search")                          # family unit: same column
+            await pilot.pause()
+            assert _heads(app, "#hgs")[1:3] == ["family", "HGs ▲"]
+    _run(go())
+
+
+def test_results_panes_header_sort_independently(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            await _key(pilot, "up", "right", "enter", "enter")      # Results: OGs ascending
+            assert _tcol(app, "#res") == ["tfs.A.HG11", "tfs.A.HG1"]
+            assert _heads(app, "#res") == ["HG", "OGs ▲", "genes", "⚠"]
+            await _key(pilot, "down")
+            assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG11"
+            await _key(pilot, "up")                                  # cursor back on HG1 ...
+            app.query_one("#res").move_cursor(row=1)
+            await pilot.pause()
+            assert app.query_one("#ogs").border_title.startswith("OGs · tfs.A.HG1 ")
+            await _key(pilot, "tab", "up", "right", "right", "right", "enter")   # OGs: support
+            assert _tcol(app, "#ogs") == ["HG1.0", "HG1.1"]
+            assert _heads(app, "#ogs")[3] == "support ▼"
+            await _key(pilot, "enter")                               # reversed: cursor stays on OG
+            assert _tcol(app, "#ogs") == ["HG1.1", "HG1.0"]
+            assert app._key_at_cursor(app.query_one("#ogs")) == "tfs.A.HG1.0"
+            assert app.query_one("#members").border_title == "members · HG1.0 T/Tbx19"
+            await _key(pilot, "down")                                # first row: HG1.1
+            assert app.query_one("#members").border_title == "members · HG1.1 like:Eomes/Tbr1"
+            await _key(pilot, "tab", "up", "right", "enter")        # members: sp, text ascending
+            assert _member_genes(app) == ["Hsap_ENSP2", "Nvec_v1_g3"]
+            await _key(pilot, "enter")
+            assert _member_genes(app) == ["Nvec_v1_g3", "Hsap_ENSP2"]
+            assert _heads(app, "#res")[1] == "OGs ▲"                 # each pane its own sort
+            assert app.query_one("#res").sort == ("ogs", True)
+            assert app.query_one("#ogs").sort == ("support", True)
+            assert app.query_one("#members").sort == ("sp", True)
+            await pilot.press("p")                                   # new source: sorts kept
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.res_source == "possvm_prev" and _heads(app, "#res")[1] == "OGs ▲"
+    _run(go())
+
+
+def test_header_mode_never_captures_filter_typing(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            await _key(pilot, "tab", "tab", "up")                    # members header mode
+            m = app.query_one("#members")
+            assert m.header
+            await _key(pilot, "slash", "s", "q", "R", "p")           # all text for the box
+            inp = app.query_one("#memfilter")
+            assert inp.value == "sqRp" and app.focused is inp
+            assert m.sort is None and not m.header and app.view == "results"
+            assert app.res_source == "possvm"
+    _run(go())
+
+
+def test_header_sort_on_empty_results_pane(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "cal")                   # a group with no HGs
+            assert app.query_one("#res").row_count == 0
+            await _key(pilot, "up", "enter", "down")
+            assert app.query_one("#res").sort == ("hg", False) and app.view == "results"
+    _run(go())
