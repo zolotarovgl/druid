@@ -1092,8 +1092,7 @@ def test_o_on_overview_opens_results_for_that_group(cli):
             assert app.query_one("#res").border_title == "Results · tfs"
             assert _cells(app, "#res", 0) == ["tfs.A.HG1", "2", "5", "1"]
             assert app.query_one("#ogs").border_title == "OGs · tfs.A.HG1 · possvm"
-            assert _cells(app, "#ogs", 0) == ["HG1.0", "3", "2", "78.4", "98.2/98.2", "T/Tbx19",
-                                              "T/Tbx19"]
+            assert _cells(app, "#ogs", 0) == ["HG1.0", "3", "2", "78.4", "T/Tbx19"]   # no ref columns
             assert _cells(app, "#ogs", 1)[3] == "0.0 ⚠"
             assert app.query_one("#members").border_title == "members · HG1.0 T/Tbx19"
             assert _cells(app, "#members", 2) == ["Hsap_ENSP1", "Hsap", "T/Tbx19", "98.2/98.2"]
@@ -1129,7 +1128,7 @@ def test_o_on_hg_highlights_it_and_esc_returns_to_hg_view(cli):
             assert app.view == "results" and app.res_group == "tfs"
             assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG11"
             assert app.query_one("#ogs").border_title == "OGs · tfs.A.HG11 · possvm"
-            assert (_cells(app, "#ogs", 0)[0], _cells(app, "#ogs", 0)[6]) == ("HG11.0", "Tbx20")
+            assert (_cells(app, "#ogs", 0)[0], _cells(app, "#ogs", 0)[4]) == ("HG11.0", "Tbx20")
             await _press(pilot, "escape")
             assert app.view == "hgs" and app._cursor_hg() == "tfs.A.HG11"
             assert app.focused is app.query_one("#hgs")
@@ -1234,7 +1233,7 @@ def test_p_switches_source_and_recomputes_results(cli):
             assert app.res_source == "possvm_prev"
             assert [r.hg for r in app.res_rows] == ["tfs.A.HG1"] and app.res_missing == 2
             assert app.query_one("#ogs").border_title == "OGs · tfs.A.HG1 · possvm_prev"
-            assert (_cells(app, "#ogs", 0)[0], _cells(app, "#ogs", 0)[6]) == ("HG1.0", "like:Tbx2/Tbx3")
+            assert (_cells(app, "#ogs", 0)[0], _cells(app, "#ogs", 0)[4]) == ("HG1.0", "like:Tbx2/Tbx3")
             assert app._species_text.splitlines() == [
                 "Ctenophora  1/2 spp  1 gene", "  Mlei 1",
                 "absent: Chordata, unknown",
@@ -1345,7 +1344,7 @@ def test_results_without_species_files_still_lists_ogs(cli):
         app = tui.PhyloApp(_cfg(), refresh_s=3600)
         async with app.run_test() as pilot:
             await _open_results(app, pilot, "tfs")
-            assert (_cells(app, "#ogs", 0)[0], _cells(app, "#ogs", 0)[6]) == ("HG1.0", "T/Tbx19")
+            assert (_cells(app, "#ogs", 0)[0], _cells(app, "#ogs", 0)[4]) == ("HG1.0", "T/Tbx19")
             assert len(_member_genes(app)) == 3
             lines = app._species_text.splitlines()
             assert lines[0].startswith(f"species tree {tree}: ")
@@ -1470,10 +1469,10 @@ def test_long_og_name_truncated_and_support_visible(cli):
             await _open_results(app, pilot, "tfs")
             await _press(pilot, "down")
             cells = _cells(app, "#ogs", 0)
-            assert cells[3] == "0.0 ⚠" and cells[6] == name[:24] + "…" and cells[5] == name[:24] + "…"
+            assert cells[3] == "0.0 ⚠" and cells[4] == name[:24] + "…" and len(cells) == 5
             t = app.query_one("#ogs")
-            head = sum(c.get_render_width(t) for c in list(t.columns.values())[:5])
-            assert head <= t.size.width                  # OG, genes, spp, support, ref sup visible
+            head = sum(c.get_render_width(t) for c in list(t.columns.values())[:4])
+            assert head <= t.size.width                  # OG, genes, spp, support visible
             assert app.query_one("#members").border_title == f"members · HG11.0 {name}"
     _run(go())
 
@@ -1778,7 +1777,7 @@ def test_long_ref_support_is_truncated_in_ogs_and_members(cli):
         async with app.run_test() as pilot:
             await _open_results(app, pilot, "tfs")
             og = _cells(app, "#ogs", 0)
-            assert len(og[4]) <= 13, len(og[4])
+            assert len(og) == 5                          # OGs carry no reference columns
             mem = _cells(app, "#members", 0)
             assert len(mem[2]) <= 25 and len(mem[3]) <= 13, (len(mem[2]), len(mem[3]))
     _run(go())

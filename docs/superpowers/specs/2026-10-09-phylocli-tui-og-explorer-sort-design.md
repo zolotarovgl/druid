@@ -35,7 +35,9 @@ the window it was opened from (cursor kept). (`R` stays "refresh".)
   not listed (the footer says how many). Moving here changes `OGs`.
 - **Pane `OGs`** — one row per orthogroup of the highlighted HG, sorted by gene count descending:
   short OG id (`HG1.0`), name (the part after `:`), gene count, species count,
-  `orthogroup_support`, `reference_ortholog`, `reference_support`. Support exactly `0` → `0.0 ⚠`
+  `orthogroup_support` (no reference-ortholog columns: the reference is per gene — it differs
+  within 1,671 of 8,996 possvm OGs, measured 09/10/2026 — so it is shown per row in `members`;
+  Grygoriy, 09/10/2026). Support exactly `0` → `0.0 ⚠`
   (GeneRax / I93 bug case; footer explains); `-1` and other numbers shown as read; `NA` → `–`.
   Moving here changes `members` and `species`.
 - **Pane `members`** — the annotation-file rows of the highlighted OG: gene, species (gene-id

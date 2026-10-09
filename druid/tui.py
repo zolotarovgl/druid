@@ -237,8 +237,9 @@ class PhyloApp(App):
         self.query_one("#stages", DataTable).add_columns("stage", "done", "run", "ready", "blk", "total")
         self._set_units(force=True)
         self.query_one("#res", DataTable).add_columns("HG", "OGs", "genes", "⚠")
-        self.query_one("#ogs", DataTable).add_columns("OG", "genes", "spp", "support", "ref sup",
-                                                       "ref", "name")
+        # no reference-ortholog columns here: the reference is per gene (it differs within 19 %
+        # of OGs) and is shown per row in `members` (Grygoriy, 09/10/2026)
+        self.query_one("#ogs", DataTable).add_columns("OG", "genes", "spp", "support", "name")
         self.query_one("#members", DataTable).add_columns("gene", "sp", "ref.orth", "sup")
         self.query_one("#memfilter").display = False
         for wid, title in PANE_TITLES.items():   # names in the top-left border, to refer to them
@@ -836,8 +837,8 @@ class PhyloApp(App):
             sup = ("–" if og.support is None else "0.0 ⚠" if og.support == 0
                    else f"{og.support:.1f}")
             t.add_row(_short_og(og.id), str(len(og.genes)),
-                      str(len({m.species for m in og.genes})), sup, escape(_trunc(og.ref_support, 12)),
-                      escape(_trunc(og.ref)), escape(_trunc(og.name)), key=og.id)
+                      str(len({m.species for m in og.genes})), sup, escape(_trunc(og.name)),
+                      key=og.id)
         if t.row_count:
             t.move_cursor(row=0)
         self._show_og()
