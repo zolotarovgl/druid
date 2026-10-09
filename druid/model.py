@@ -368,9 +368,10 @@ def bump(att, res: core.Res) -> core.Res:
     return base
 
 
-# search: main.py hmmsearch -> helper/hmmsearch.py runs hmmfetch, hmmsearch, bedtools;
+# search: main.py hmmsearch -> helper/hmmsearch.py runs hmmfetch, hmmsearch, bedtools and
+# `samtools faidx` (line 136, check=True: the .fai feeds bedtools slop -g);
 # cluster: main.py cluster -> helper/functions.py cluster runs diamond, mcl; cluster.sh: samtools.
-TOOLS = {"search": ["hmmsearch", "hmmfetch", "bedtools"], "cluster": ["samtools", "diamond", "mcl"],
+TOOLS = {"search": ["hmmsearch", "hmmfetch", "bedtools", "samtools"], "cluster": ["samtools", "diamond", "mcl"],
          "align": ["mafft", "clipkit"], "tree": ["iqtree2"], "generax": ["generax", "mpirun"],
          "gxsup": ["iqtree2"], "possvm": [], "possvm_prev": []}
 MAX_ARRAY = 1000  # SLURM MaxArraySize default 1001 -> indices 0..1000

@@ -489,7 +489,7 @@ def test_select_family_duplicates_proceed(cli, results_tree, tmp_path):
 def test_preflight_family_tools_and_files(cli, results_tree, monkeypatch, tmp_path):
     cfg, _ = results_tree
     monkeypatch.setenv("PATH", str(_state["bin"]))
-    assert "not on PATH: hmmsearch hmmfetch bedtools" in model.preflight("search", cfg)
+    assert "not on PATH: hmmsearch hmmfetch bedtools samtools" in model.preflight("search", cfg)
     assert "not on PATH: samtools diamond mcl" in model.preflight("cluster", cfg)
     step1_tools()
     assert model.preflight("search", cfg) is None and model.preflight("cluster", cfg) is None
