@@ -1,6 +1,7 @@
 """phylocli/tui.py (Textual pilot tests; skipped when Textual is not installed)."""
 import asyncio
 import os
+import re
 import time
 
 import pytest
@@ -111,6 +112,7 @@ def test_resubmit_dry_run_then_confirm(cli, monkeypatch):
             await pilot.press("enter")
             await _settle(app, pilot)
             assert "dry run" in scr._shown
+            assert re.search(r"· \d+ cpus · ", scr._shown)   # the separator keeps its space
             assert len(_calls()) == n0                      # dry run submits nothing
             await pilot.press("y")
             await _settle(app, pilot)
@@ -532,6 +534,12 @@ def _counting_attempts(monkeypatch):
         calls["n"] += 1
         return real(*a, **k)
     monkeypatch.setattr(history, "attempts", counted)
+    real_f = history.family_attempts
+
+    def counted_f(*a, **k):
+        calls["n"] += 1
+        return real_f(*a, **k)
+    monkeypatch.setattr(history, "family_attempts", counted_f)
     return calls
 
 
@@ -925,4 +933,62 @@ def test_panels_grey_while_history_loads(cli, monkeypatch):
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert not hv.has_class("loading") and hv.styles.opacity == 1
+    _run(go())
+
+
+def test_hg_rows_family_ids_from_caller_and_guarded_fallback(cli, monkeypatch):
+    cfg = _cfg()
+    fams = core.family_ids(cfg)
+    assert fams
+    calls = {"n": 0}
+    real = core.family_ids
+
+    def counted(*a, **k):
+        calls["n"] += 1
+        return real(*a, **k)
+    monkeypatch.setattr(core, "family_ids", counted)
+    rows = tui.model.hg_rows(cfg, "search", fams=fams)
+    assert calls["n"] == 0 and {r.hg for r in rows} == fams      # no second parse of the file
+
+    def boom(*a, **k):
+        raise OSError("unreadable genefam")
+    monkeypatch.setattr(core, "family_ids", boom)
+    assert tui.model.hg_rows(cfg, "search") == []                # fallback is guarded
+
+
+def test_unreadable_genefam_does_not_fail_hg_view_collect(cli, monkeypatch):
+    def boom(*a, **k):
+        raise OSError("unreadable genefam")
+    monkeypatch.setattr(core, "family_ids", boom)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600, start="hgs")
+        async with app.run_test() as pilot:
+            app.load_now()                                       # raised before the fix
+            await pilot.pause()
+            assert app.by_stage["align"]
+            assert app.by_stage["search"] == []
+            assert "unreadable genefam" in app._banner_text
+    _run(go())
+
+
+def test_hg_view_headers_follow_the_unit(cli):
+    def heads(app, wid):
+        return [str(c.label) for c in app.query_one(wid).columns.values()]
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.open_group("ALL", "search")
+            await pilot.pause()
+            app.load_now()
+            await pilot.pause()
+            assert heads(app, "#hgs")[1:3] == ["family", "HGs"]
+            assert "families" in heads(app, "#arrays")
+            app.open_group("ALL", "align")
+            await pilot.pause()
+            assert heads(app, "#hgs")[1:3] == ["HG", "seqs"]
+            assert "HGs" in heads(app, "#arrays") and "families" not in heads(app, "#arrays")
     _run(go())

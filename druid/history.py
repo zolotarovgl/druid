@@ -339,12 +339,18 @@ def attempts(cfg: core.Config, hg: str | None = None, warn=None) -> list[Attempt
     return sorted(out, key=lambda a: (a.submitted, a.attempt, a.run))
 
 
-def family_attempts(cfg: core.Config, fam: str | None = None, warn=None) -> list[Attempt]:
+def family_attempts(cfg: core.Config, fam: str | None = None, warn=None,
+                    fams: set | None = None) -> list[Attempt]:
     """Every recorded search / cluster attempt, for one family if given, oldest first: step1.nf
     runs (processes SEARCH / CLUSTER, tag = <pref>.<family>) + phylocli runs of those stages.
-    Kept apart from attempts() so `status HG` never starts nextflow for step1 runs."""
+    Kept apart from attempts() so `status HG` never starts nextflow for step1 runs.
+    `fams`: family ids from a caller that already has them (else read; unreadable file: none)."""
     warn = warn or (lambda _msg: None)
-    fams = core.family_ids(cfg, strict=False)
+    if fams is None:
+        try:
+            fams = core.family_ids(cfg, strict=False)
+        except (OSError, ValueError):
+            fams = set()
     out = (_nextflow_attempts(cfg, fam, fams, warn, script="step1.nf")
            + _phylocli_attempts(fam, core.FAMILY_STAGES))
     return sorted(out, key=lambda a: (a.submitted, a.attempt, a.run))

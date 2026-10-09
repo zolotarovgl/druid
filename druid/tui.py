@@ -102,6 +102,8 @@ class PhyloApp(App):
         self._ov_inputs: tuple = (set(), {}, set(), {})    # exp, HG states, families, family states
         self.hg_count: dict[str, int] = {}                 # family id -> expected HGs
         self._banner_text = ""
+        self._hg_unit: "str | None" = None                 # unit the #hgs / #arrays headers show
+        self._array_rows: list = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -118,9 +120,7 @@ class PhyloApp(App):
 
     def on_mount(self) -> None:
         self.query_one("#stages", DataTable).add_columns("stage", "done", "run", "ready", "blk", "total")
-        self.query_one("#hgs", DataTable).add_columns(" ", "HG", "seqs", "state", "last", "req", "used")
-        self.query_one("#arrays", DataTable).add_columns("job", "stage", "HGs", "done", "run",
-                                                          "pend", "fail")
+        self._set_units(force=True)
         for wid, title in PANE_TITLES.items():   # names in the top-left border, to refer to them
             self.query_one(wid).border_title = title
         self._show_view()
@@ -154,12 +154,12 @@ class PhyloApp(App):
                 if not self.nseq.get(hg):
                     self.nseq[hg] = core.nseq(self.cfg, hg)
             atts = history.attempts(self.cfg)
-            fatts = history.family_attempts(self.cfg)
+            fatts = history.family_attempts(self.cfg, fams=fams)
             # every applicable stage from ONE attempts read, ONE done scan, ONE squeue call, so
             # that stage changes and the detail panel need no subprocess on a key press
             by_stage = {st: (model.hg_rows(self.cfg, st, exp,
                                            fatts if st in core.FAMILY_STAGES else atts,
-                                           done_map, lv)
+                                           done_map, lv, fams=fams)
                              if core.applicable(self.cfg, st) else [])
                         for st in TUI_STAGES}
             arrays, sacct_known = model.array_rows()
@@ -219,16 +219,38 @@ class PhyloApp(App):
         self.selected &= {r.hg for r in self.rows if r.state not in ("done", "running")}
         snap = hg
         self._fill_stages()
+        self._array_rows = snap["arrays"]
+        self._fill_arrays()
+        self._fill_hgs()
+
+    def _fill_arrays(self) -> None:
         ar = self.query_one("#arrays", DataTable)
         keep_row = ar.cursor_row
         ar.clear()
-        for a in snap["arrays"]:
+        for a in self._array_rows:
             c = a.counts
             ar.add_row(a.job, a.stage, str(a.n), str(c["done"]), str(c["running"]),
                        str(c["pending"]), str(c["failed"]), key=a.job)
-        if snap["arrays"]:
-            ar.move_cursor(row=min(keep_row, len(snap["arrays"]) - 1))
-        self._fill_hgs()
+        if self._array_rows:
+            ar.move_cursor(row=min(keep_row, len(self._array_rows) - 1))
+
+    def _set_units(self, force: bool = False) -> None:
+        """Column labels of #hgs / #arrays follow the open stage: family stages list families
+        (second column: the family's HG count), the others HGs (second column: seqs)."""
+        unit = "family" if self.stage in core.FAMILY_STAGES else "HG"
+        if unit == self._hg_unit and not force:
+            return
+        self._hg_unit = unit
+        t = self.query_one("#hgs", DataTable)
+        t.clear(columns=True)
+        t.add_columns(" ", "family" if unit == "family" else "HG", "HGs" if unit == "family" else "seqs",
+                      "state", "last", "req", "used")
+        ar = self.query_one("#arrays", DataTable)
+        ar.clear(columns=True)
+        ar.add_columns("job", "stage", "families" if unit == "family" else "HGs", "done", "run",
+                       "pend", "fail")
+        if not force:
+            self._fill_arrays()
 
     def visible(self) -> list:
         if self.filter == "actionable":
@@ -383,8 +405,9 @@ class PhyloApp(App):
     def _fill_hgs(self, keep: "str | None" = None) -> None:
         """Rebuild the HG table, keeping the cursor on the same HG (clear() resets it to row 0).
         `keep` overrides which HG to stay on (default: the one under the cursor now)."""
-        t = self.query_one("#hgs", DataTable)
         keep = keep if keep is not None else self._cursor_hg()
+        self._set_units()
+        t = self.query_one("#hgs", DataTable)
         t.clear()
         fam_stage = self.stage in core.FAMILY_STAGES
         for r in self.visible():
@@ -664,7 +687,7 @@ class ResubmitScreen(ModalScreen):
                 return
             lines = ["[cyan]dry run[/] — nothing submitted yet; y to submit"] + [escape(n) for n in p.notes]
             for k, (res, ids_) in enumerate(p.groups):
-                lines.append(f"array {k}: {len(ids_)} {core.unit(self.stage)} ·{res.cpus} cpus · {fmt_mem(res.mem_mb)}"
+                lines.append(f"array {k}: {len(ids_)} {core.unit(self.stage)} · {res.cpus} cpus · {fmt_mem(res.mem_mb)}"
                              f" · {fmt_time(res.time_min)} · {res.qos}")
         except Exception as e:             # never let a worker kill the app
             self._post(self._finish, f"[red]{escape(str(e))}[/]")

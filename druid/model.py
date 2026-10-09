@@ -248,19 +248,27 @@ def _state_rows(ids, done, busy, ready, latest) -> list[HGRow]:
 
 def hg_rows(cfg: core.Config, stage: str, exp: set[str] | None = None,
             atts: list | None = None, done_map: dict | None = None,
-            live_map: dict | None = None) -> list[HGRow]:
+            live_map: dict | None = None, fams: set | None = None) -> list[HGRow]:
     """One row per expected HG for `stage`. failed = inputs present, not done, not queued,
     and the latest attempt at this stage ended in a FAILED_STATES state.
     `done_map` / `live_map` (stage -> ids) let a caller that builds several stages compute
     them once; when omitted they are computed here (squeue is called).
     search / cluster: one row per family (`hg` = family id); `exp` and `done_map` are not used,
-    and `atts` should be history.family_attempts() (the default)."""
+    and `atts` should be history.family_attempts() (the default). `fams`: the family ids from
+    a caller that already has them (otherwise read here; an unreadable genefam file gives none)."""
     if stage in core.FAMILY_STAGES:
-        fams = core.family_ids(cfg, strict=False)
+        if fams is None:
+            try:
+                fams = core.family_ids(cfg, strict=False)
+            except (OSError, ValueError):
+                fams = set()
         done = core.family_done(cfg, fams)[stage]
         busy = (live_map if live_map is not None else (live(set()) or {})).get(stage, set())
-        ready = core.ready_set(cfg, stage, fams - done - busy)
-        latest = _latest_for(history.family_attempts(cfg) if atts is None else atts, stage)
+        todo = fams - done - busy
+        # search is ready whenever the family has a row, and todo is a subset of fams
+        ready = todo if stage == "search" else core.ready_set(cfg, stage, todo)
+        latest = _latest_for(history.family_attempts(cfg, fams=fams) if atts is None else atts,
+                           stage)
         return _state_rows(fams, done, busy, ready, latest)
     exp = core.expected(cfg) if exp is None else exp
     done = (done_map if done_map is not None
