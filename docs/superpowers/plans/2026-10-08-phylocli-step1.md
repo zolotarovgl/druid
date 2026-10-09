@@ -3061,7 +3061,7 @@ Expected: identical domains, identical HG membership, and the same HG FASTAs as 
 
 Array tasks import `phylocli/*.py` when they start, so a file-by-file copy can hand a task that starts mid-copy a mix of old and new modules. Swap the whole directory in one `mv` instead.
 
-1. Preconditions: `git -C $WT status` clean and the plan's last commit is HEAD; `squeue --me -h -o "%i %j"` shows no `phylo-*` task about to start, or accept that queued tasks pick up the new tree (they read their run's `config.yaml`, which old code also wrote); **no step1.nf run active**: `tail -1 $V3/.nextflow/history` does not end a step1.nf line with status `-`, and `squeue --me` shows no `nf-SEARCH_*` / `nf-CLUSTER_*` job.
+1. Preconditions: `git -C $WT status` clean and the plan's last commit is HEAD; `squeue --me -h -o "%i %j"` shows no `phylo-*` task about to start, or accept that queued tasks pick up the new tree (they read their run's `config.yaml`, which old code also wrote); **no step1.nf run active**: NO step1.nf line of `$V3/.nextflow/history` has status `-` (`awk -F'\t' '$7 ~ /step1.nf/ && $4 == "-"' $V3/.nextflow/history` prints nothing; not just `tail -1`), and `squeue --me` shows no `nf-SEARCH_*` / `nf-CLUSTER_*` task and no step1 driver job (`submit_nf.sh` / `nextflow`).
 2. Stage the new tree next to the old one, committed files only:
    ```bash
    D=<yyyymmdd of the copy>; S=<controller scratchpad>/deploy-$D
@@ -3074,10 +3074,11 @@ Array tasks import `phylocli/*.py` when they start, so a file-by-file copy can h
    mv phylocli/runs phylocli.new/runs && mv phylocli/history phylocli.new/history
    mv phylocli phylocli.old-$D && mv phylocli.new phylocli
    ```
-   (`runs/` is moved, not copied: `jobs.tsv` paths of running arrays resolve through the run dir name, `common.ids_path`.) Rollback: the same two `mv`s the other way round, moving `runs/` / `history/` back.
+   (`runs/` is moved, not copied: `jobs.tsv` paths of running arrays resolve through the run dir name, `common.ids_path`.) Rollback: the same two `mv`s the other way round, moving `runs/` / `history/` back, AND `cp step1.nf.bak-$D step1.nf` (step 4 replaces it). Do NOT delete `phylocli.old-$D` blindly: it holds the `backup-*.tar.gz` files; move those out first if it is ever removed.
 4. `cp step1.nf step1.nf.bak-$D` (spec names `step1.nf.bak-20261004`; use the actual date), then `cp $S/step1.nf step1.nf` and `cp $S/workflow/{report_status,drop_small_hgs}.py workflow/` (only after step 1's "no step1.nf run active" check). `nextflow.config` is unchanged and not copied.
-5. On the login node in v3: `nextflow run step1.nf -preview` (expect every family "skip (already complete)" except the cluster-ready ones), `phylocli/phylo missing` (expect the family rows, `warning: duplicate family ids ... (2): neu.Synapsin slc.SLC44; the last row of each is used ...` and `warning: family name CSD is listed under 2 prefixes (rbp, tfs); ...`), `phylocli/phylo missing cluster` (expect `adh.immunoglobin` — `sig.Pkinase` was clustered by the 09/10/2026 00:17 step1.nf run; re-measure first — large families; 300 MB / 10 min will likely need `--mem/--time`).
-6. Tell Grygoriy: the duplicate rows and the `CSD` name collision stay warnings until `data/gene_families_searchinfo.csv` is fixed (out of scope here); `rbp.CSD`'s "no hits" in `results/search/` is false (its hits are in `tfs.CSD.*`).
+5. A bare `-preview` in v3 starts a Nextflow session that breaks a later bare `-resume`, so run any preview from a scratch launch dir with absolute paths and the real genefam file (nextflow.config's default `genefam_info` is an 85-byte `genefam.csv`): `mkdir -p $S/preview && cd $S/preview && nextflow run $V3/step1.nf -preview --genefam_info $V3/data/gene_families_searchinfo.csv` (plus the other absolute-path params step1.nf needs; expect every family "skip (already complete)" except the cluster-ready ones), then in v3 `phylocli/phylo missing` (expect the family rows, `warning: duplicate family ids ... (2): neu.Synapsin slc.SLC44; the last row of each is used ...` and `warning: family name CSD is listed under 2 prefixes (rbp, tfs); ...`), `phylocli/phylo missing cluster` (expect `adh.immunoglobin` — `sig.Pkinase` was clustered by the 09/10/2026 00:17 step1.nf run; re-measure first — large families; 300 MB / 10 min will likely need `--mem/--time`).
+6. Pre-warm the step1 history cache once, so the first TUI/status call is not slow: `phylocli/phylo status slc.SLC25`.
+7. Tell Grygoriy: the duplicate rows and the `CSD` name collision stay warnings until `data/gene_families_searchinfo.csv` is fixed (out of scope here); `rbp.CSD`'s "no hits" in `results/search/` is false (its hits are in `tfs.CSD.*`).
 
 ---
 

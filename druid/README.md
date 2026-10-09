@@ -84,7 +84,7 @@ printed for every stage whose latest attempt did not complete. `--history` lists
 (Nextflow attempt number in `att`). `--ids` / `--fam` cannot be combined with an HG.
 
 Sources (code: `history.py`):
-- **Nextflow**: every `step2.nf` run in `<nextflow_dir>/.nextflow/history` (config key
+- **Nextflow**: every `step2.nf` run (and, for the search / cluster rows, every `step1.nf` run) in `<nextflow_dir>/.nextflow/history` (config key
   `nextflow_dir`, default = project root), read with `nextflow -log <temp file> log <run> -f ...`
   run in that directory (the temp `-log` file keeps `.nextflow.log` from being written into the
   project; `NXF_VER` defaults to 25.04.2). One attempt per task try; CACHED rows are skipped.
@@ -102,6 +102,10 @@ Sources (code: `history.py`):
 
 ## Rules
 
+- Never run `step1.nf` while `phylo-search` / `phylo-cluster` arrays are queued or running, and never
+  submit search / cluster while a `step1.nf` run is active: both publish to `search/` and
+  `clusters/`, so two clusterings of one family can mix. `submit search|cluster` prints a warning
+  on stderr when a `step1.nf` run looks active (history status `-`); it still proceeds.
 - Output for the stage already exists -> error, nothing submitted (no `--force`), always.
 - Unknown HG id, or stage not applicable (`generax`/`gxsup`/`possvm_prev` with
   `run_generax: false`) -> error, nothing submitted.
@@ -164,7 +168,14 @@ Nextflow on a fresh id list. The original is `step2.nf.bak-20260930` (restore wi
 
 `step1.nf` `SEARCH` / `CLUSTER` call `phylocli/stages/search.sh` / `cluster.sh` (09/10/2026;
 original: `step1.nf.bak-<date of the copy>`). step1.nf decides completeness from the published
-outputs, not the resume cache, so the changed script text costs no rerun.
+outputs, not the resume cache: done families are skipped, but every task hash changes (the script text
+is part of it), so families with hits and no `_cluster.tsv` get SEARCH rerun once. Nextflow hashes the
+script text, not the contents of `search.sh` / `cluster.sh`, so later edits to those scripts do not
+invalidate `-resume`.
+
+A bare `nextflow run ... -resume` resumes the LATEST session, including one created by `-preview`.
+After any preview pass the session id explicitly (e.g. `-resume e063a93b-76ce-4625-b8bf-5d1bee9f91bb`
+for v3 step2).
 
 ## Typical loop
 

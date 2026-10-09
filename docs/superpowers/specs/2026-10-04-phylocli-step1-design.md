@@ -135,7 +135,7 @@ resources. Builds on `workflow/train.R` (quantile regression on Nextflow traces)
   function as the CLI summary rows); the `HGs` column stays the HG count (step2's unit) and the
   footer adds the family count; a group with families but no HG yet gets a row (0 HGs), because
   a newly added family is exactly what `search` is for and would otherwise be invisible.
-- Tools: search = hmmsearch, hmmfetch, bedtools (helper/hmmsearch.py); cluster = samtools,
+- Tools: search = hmmsearch, hmmfetch, bedtools, samtools (helper/hmmsearch.py); cluster = samtools,
   diamond, mcl. step1.nf CLUSTER's HG-FASTA output is `optional: true`.
 - The 18 SLC families already have search + cluster outputs in v3 (04/10/2026), so the real
   check compares against those instead of "nothing (new)".
