@@ -209,8 +209,8 @@ def test_status_hg_table(hist):
     assert r.exit_code == 0, r.output
     lines = r.output.splitlines()
     assert lines[0].split()[:3] == [HG, "(3", "seqs)"]
-    rows = {l.split()[0]: l for l in lines if l.split() and l.split()[0] in core.STAGES}
-    assert list(rows) == core.STAGES
+    rows = {l.split()[0]: l for l in lines if l.split() and l.split()[0] in core.HG_STAGES}
+    assert list(rows) == core.HG_STAGES
     assert "done" in rows["align"] and "nextflow" in rows["align"]
     assert "ready" in rows["generax"] and "phylocli" in rows["generax"]
     assert "out of memory" in rows["generax"] and "1.2 GB" in rows["generax"]

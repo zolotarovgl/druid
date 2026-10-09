@@ -30,6 +30,15 @@ PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
                "#arrays": "3 Arrays", "#detail": "4 Detail"}
 STATE_STYLE = {"done": "green", "running": "cyan", "ready": "yellow", "failed": "red",
                "blocked": "bright_black"}
+# Stages the TUI shows (overview columns, stages panel, HG-view data). HG stages only until
+# the step1 TUI task widens it to core.STAGES (search/cluster in front).
+TUI_STAGES = core.HG_STAGES
+
+
+def ov_column(stage: str) -> int:
+    """Overview column of `stage` (after the group and HGs columns). Task 6 adds the step1/step2
+    separator column; tests and code index the overview only through this."""
+    return 2 + TUI_STAGES.index(stage)
 
 
 class PhyloApp(App):
@@ -66,7 +75,7 @@ class PhyloApp(App):
         self.cfg = cfg
         self.raw = raw if raw is not None else load_raw()
         self.refresh_s = refresh_s
-        self.stage = core.STAGES[0]
+        self.stage = core.HG_STAGES[0]   # opens on align; search/cluster sit before it
         self.filter = FILTERS[0]
         self._auto_filter = False
         self.selected: set[str] = set()
@@ -126,7 +135,7 @@ class PhyloApp(App):
             # that stage changes and the detail panel need no subprocess on a key press
             by_stage = {st: (model.hg_rows(self.cfg, st, exp, atts, done_map, lv)
                              if core.applicable(self.cfg, st) else [])
-                        for st in core.STAGES}
+                        for st in TUI_STAGES}
             arrays, sacct_known = model.array_rows()
             snap["hg"] = dict(atts=atts, by_stage=by_stage, arrays=arrays,
                               sacct_known=sacct_known)
@@ -214,11 +223,11 @@ class PhyloApp(App):
         keep = self._key_at_cursor(t)
         col = t.cursor_column
         if not t.columns:
-            t.add_columns("group", "HGs", *core.STAGES)
+            t.add_columns("group", "HGs", *TUI_STAGES)
         t.clear()
         for r in rows:
             cells = []
-            for st in core.STAGES:
+            for st in TUI_STAGES:
                 c = r.per_stage.get(st)
                 if c is None:
                     cells.append("n/a")
@@ -261,15 +270,15 @@ class PhyloApp(App):
         st = self.query_one("#stages", DataTable)
         keep_stage = self.stage
         st.clear()
-        for name in core.STAGES:
+        for name in TUI_STAGES:
             c = row.per_stage.get(name)
             if c is None:
                 st.add_row(name, "n/a", "", "", "", "", key=name)
             else:
                 st.add_row(name, str(c[0]), str(c[1]), str(c[2]), str(c[3]), str(row.total),
                            key=name)
-        if keep_stage in core.STAGES:
-            st.move_cursor(row=core.STAGES.index(keep_stage))
+        if keep_stage in TUI_STAGES:
+            st.move_cursor(row=TUI_STAGES.index(keep_stage))
 
     def _auto_pick_filter(self) -> None:
         """While the filter is still the automatic one, pick the first filter (FILTERS order)
@@ -293,7 +302,7 @@ class PhyloApp(App):
             self.stage = stage
             st = self.query_one("#stages", DataTable)
             if st.row_count:
-                st.move_cursor(row=core.STAGES.index(stage))
+                st.move_cursor(row=TUI_STAGES.index(stage))
         self.rows = self.by_stage.get(self.stage, [])
         self._auto_filter = True
         self._auto_pick_filter()
@@ -327,7 +336,7 @@ class PhyloApp(App):
         if event.data_table.id != "overview" or self.view != "overview":
             return
         col = event.coordinate.column
-        stage = core.STAGES[col - 2] if col >= 2 else None
+        stage = TUI_STAGES[col - 2] if col >= 2 else None
         self.open_group(event.cell_key.row_key.value, stage)
 
     def on_data_table_cell_highlighted(self, event: DataTable.CellHighlighted) -> None:
@@ -367,7 +376,7 @@ class PhyloApp(App):
             return
         latest = history.latest_by_stage([a for a in self.atts if a.hg == hg])
         lines = [f"[b]{hg}[/]  {self.nseq.get(hg, 0)} seqs", ""]
-        for st in core.STAGES:
+        for st in core.HG_STAGES:
             rs = next((r for r in self.by_stage.get(st, []) if r.hg == hg), None)
             s_ = rs.state if rs else "n/a"
             a = latest.get(st)

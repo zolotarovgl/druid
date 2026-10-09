@@ -94,6 +94,14 @@ def count_distinct(path, stop=1):
     return len(seen)
 
 
+def passes(path, min_seqs=2, min_distinct=1):
+    """True when step2 runs this HG FASTA: >= min_seqs sequences and >= min_distinct distinct
+    ones. The ONE size rule: expected_hgs() and step1's cluster stage (drop_small_hgs.py) both
+    call it, so step1 and step2 can never disagree on which HGs exist."""
+    return (count_seqs(path, stop=min_seqs) >= min_seqs
+            and count_distinct(path, stop=min_distinct) >= min_distinct)
+
+
 def expected_hgs(outdir, ids_file=None, min_seqs=2, min_distinct=1):
     """Expected HG ids: the stripped non-blank lines of ids_file, else clusters/*.fasta with
     >= min_seqs seqs and >= min_distinct distinct ones (phylocli passes params.min_seqs and
@@ -104,8 +112,7 @@ def expected_hgs(outdir, ids_file=None, min_seqs=2, min_distinct=1):
     cdir = os.path.join(outdir, "clusters")
     return {f[:-6] for f in nonempty_files(cdir)
             if f.endswith(".fasta") and ".HG" in f
-            and count_seqs(os.path.join(cdir, f), stop=min_seqs) >= min_seqs
-            and count_distinct(os.path.join(cdir, f), stop=min_distinct) >= min_distinct}
+            and passes(os.path.join(cdir, f), min_seqs, min_distinct)}
 
 
 def done_by_stage(outdir, expected):

@@ -578,8 +578,8 @@ def test_open_group_restricts_hgs_and_esc_returns(cli, monkeypatch):
             await pilot.pause()
             await pilot.press("f")
             await pilot.pause()
-            app.query_one("#overview").move_cursor(row=1, column=3)    # tfs.A
-            col0 = 3
+            col0 = tui.ov_column("tree")                            # tfs.A x tree (= 3 before step1)
+            app.query_one("#overview").move_cursor(row=1, column=col0)
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
@@ -613,7 +613,7 @@ def test_enter_on_stage_cell_opens_that_stage_with_failed_filter(cli, monkeypatc
             app.load_now()
             await pilot.pause()
             ov = app.query_one("#overview")
-            ov.move_cursor(row=0, column=2 + core.STAGES.index("align"))   # ALL x align
+            ov.move_cursor(row=0, column=tui.ov_column("align"))   # ALL x align
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
@@ -691,7 +691,7 @@ def test_stages_panel_shows_group_counts(cli):
             await pilot.pause()
             rows = {r.group: r for r in app.ov_rows}
             t = app.query_one("#stages")
-            i = core.STAGES.index("align")
+            i = tui.TUI_STAGES.index("align")
             cells = [str(t.get_cell_at((i, c))) for c in range(1, 6)]
             c = rows["tfs.A"].per_stage["align"]
             assert cells == [str(c[0]), str(c[1]), str(c[2]), str(c[3]), str(rows["tfs.A"].total)]
@@ -757,7 +757,7 @@ def test_open_group_without_failures_picks_first_nonempty_filter(cli):
             app.load_now()
             await pilot.pause()
             ov = app.query_one("#overview")
-            ov.move_cursor(row=0, column=2 + core.STAGES.index("align"))   # ALL x align
+            ov.move_cursor(row=0, column=tui.ov_column("align"))   # ALL x align
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()

@@ -167,7 +167,7 @@ def stage_rows(cfg: core.Config, exp: set[str]):
     known = lv is not None
     lv = lv or {}
     rows = []
-    for st in core.STAGES:
+    for st in core.HG_STAGES:
         if not core.applicable(cfg, st):
             rows.append(StageRow(st, False))
             continue
@@ -237,7 +237,7 @@ def hg_detail(cfg: core.Config, hg: str, atts: list | None = None) -> HGDetail:
     done = core.report_status.done_by_stage(str(cfg.outdir), exp)
     lv = live(exp) or {}
     states = {}
-    for st in core.STAGES:
+    for st in core.HG_STAGES:
         if not core.applicable(cfg, st):
             states[st] = "n/a"
         elif hg in done[st]:
@@ -538,7 +538,7 @@ def stage_states(cfg: core.Config, exp: set[str], done: dict, lv: dict) -> dict:
     """stage -> hg -> 0 done / 1 running / 2 ready / 3 blocked, for applicable stages only.
     The expensive part (ready_set lists directories); computed once per refresh."""
     state: dict[str, dict[str, int]] = {}
-    for st in core.STAGES:
+    for st in core.HG_STAGES:
         if not core.applicable(cfg, st):
             continue
         d = done.get(st, set())

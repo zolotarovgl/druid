@@ -287,7 +287,7 @@ def _phylocli_attempts(hg: str | None) -> list[Attempt]:
     subs = []     # (run dir, stage, submitted, job id, ids list, array k)
     for f in sorted(runs_dir().glob("*/jobs.tsv")):
         m = RUN_RE.match(f.parent.name)
-        if not m or m.group(7) not in core.STAGES:
+        if not m or m.group(7) not in core.HG_STAGES:
             continue
         sub = f"{m.group(1)}-{m.group(2)}-{m.group(3)} {m.group(4)}:{m.group(5)}:{m.group(6)}"
         for line in f.read_text().splitlines():

@@ -14,9 +14,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "workflow"))
 import report_status  # noqa: E402
 
-STAGES = ["align", "tree", "possvm_prev", "generax", "gxsup", "possvm"]
-PUBLISH_DIR = {"align": "align", "tree": "gene_trees", "possvm_prev": "possvm_prev",
+FAMILY_STAGES = ["search", "cluster"]                 # unit: gene family <pref>.<family> (step1)
+HG_STAGES = ["align", "tree", "possvm_prev", "generax", "gxsup", "possvm"]   # unit: HG (step2)
+STAGES = FAMILY_STAGES + HG_STAGES
+PUBLISH_DIR = {"search": "search", "cluster": "clusters",
+               "align": "align", "tree": "gene_trees", "possvm_prev": "possvm_prev",
                "generax": "generax", "gxsup": "generax_support", "possvm": "possvm"}
+DOMAINS_SUFFIX = ".domains.fasta"
+CLUSTER_SUFFIX = "_cluster.tsv"
+
+
+def unit(stage: str) -> str:
+    """What one id of `stage` is, as printed in notes: 'families' or 'HGs'."""
+    return "families" if stage in FAMILY_STAGES else "HGs"
 PATH_PARAMS = ("REFNAMES", "SPECIES_TREE", "resources_tsv", "genefam_info", "infasta", "pfam_db",
                "hmm_dir")
 
@@ -183,6 +193,41 @@ def family_ids(cfg: Config, strict: bool = True) -> set[str]:
     return set(ids)
 
 
+def family_done(cfg: Config, families) -> dict[str, set[str]]:
+    """step1 state of these families from ONE listing each of search/ and clusters/:
+      search   <id>.domains.fasta exists (it is empty when the family has no hits)
+      no_hits  ... exists and is empty
+      hits     ... exists and is non-empty (= cluster's input is ready)
+      cluster  <id>_cluster.tsv exists, or no_hits (nothing to cluster) -- step1.nf familyIsDone"""
+    fams = set(families)
+    sizes: dict[str, int] = {}
+    sdir = cfg.outdir / "search"
+    if sdir.is_dir():
+        with os.scandir(sdir) as it:
+            for e in it:
+                fid = e.name[:-len(DOMAINS_SUFFIX)] if e.name.endswith(DOMAINS_SUFFIX) else None
+                if fid in fams:
+                    try:
+                        sizes[fid] = e.stat().st_size
+                    except OSError:
+                        pass
+    cdir = cfg.outdir / "clusters"
+    tsv: set[str] = set()
+    if cdir.is_dir():
+        tsv = {n[:-len(CLUSTER_SUFFIX)] for n in os.listdir(cdir) if n.endswith(CLUSTER_SUFFIX)} & fams
+    no_hits = {f for f, n in sizes.items() if n == 0}
+    return {"search": set(sizes), "no_hits": no_hits, "hits": set(sizes) - no_hits,
+            "cluster": tsv | no_hits}
+
+
+def hg_fasta_families(cfg: Config) -> set[str]:
+    """Families with at least one <id>.HG*.fasta in clusters/ (one listing)."""
+    cdir = cfg.outdir / "clusters"
+    if not cdir.is_dir():
+        return set()
+    return {n[:n.rindex(".HG")] for n in os.listdir(cdir) if n.endswith(".fasta") and ".HG" in n}
+
+
 def name_collisions(path) -> dict[str, tuple[list[str], str]]:
     """Family names listed under more than one prefix: name -> (prefixes in file order, prefix
     of the LAST row with that name). main.py hmmsearch keys rows by name (the last row wins) and
@@ -271,6 +316,10 @@ def resources(cfg: Config, stage: str, hg: str, table: dict, n_seqs: "int | None
         time = min(parse_time_min(v), 1440) if v else 30
     elif stage == "gxsup":
         cpus, mem, time = 2, 2048, 30
+    elif stage == "search":                       # step1.nf SEARCH, attempt 1
+        cpus, mem, time = int(cfg.params["s1_ncpu"]), 500, 5
+    elif stage == "cluster":                      # step1.nf CLUSTER, attempt 1
+        cpus, mem, time = int(cfg.params["s2_ncpu"]), 300, 10
     else:
         raise ValueError(f"unknown stage {stage!r}")
     return Res(cpus, mem, time, qos, signal)
@@ -298,6 +347,13 @@ def _possvm_tree(cfg: Config, hg: str) -> Path:
 
 def stage_inputs(cfg: Config, stage: str, hg: str) -> list[Path]:
     o = cfg.outdir
+    if stage == "search":
+        out = [Path(cfg.params["genefam_info"]), Path(cfg.params["infasta"])]
+        if cfg.params.get("hmm_dir"):
+            out.append(Path(cfg.params["hmm_dir"]))
+        return out
+    if stage == "cluster":
+        return [o / "search" / f"{hg}{DOMAINS_SUFFIX}"]
     if stage == "align":
         return [o / "clusters" / f"{hg}.fasta"]
     if stage == "tree":
@@ -322,6 +378,11 @@ def publish_patterns(stage: str, hg: str, treefile: str | None = None) -> tuple[
     names; without it the tree name is a `*` wildcard (which still needs the
     literal `<hg>.` prefix, so HG1 never matches HG11 files).
     """
+    if stage == "search":
+        return ([f"{hg}.domains.csv", f"{hg}.domains_ummerged.csv", f"{hg}.genes.list"],
+                f"{hg}{DOMAINS_SUFFIX}")
+    if stage == "cluster":
+        return [f"{hg}.HG*.fasta"], f"{hg}{CLUSTER_SUFFIX}"
     if stage == "align":
         return [], f"{hg}.aln.fasta"
     if stage == "tree":
@@ -342,7 +403,9 @@ def publish_patterns(stage: str, hg: str, treefile: str | None = None) -> tuple[
 
 
 def inputs_ready(cfg: Config, stage: str, hg: str) -> bool:
-    """True if every input file the stage reads for this HG exists."""
+    """True if every input file the stage reads for this HG exists (families: see ready_set)."""
+    if stage in FAMILY_STAGES:
+        return hg in ready_set(cfg, stage, [hg])
     return all(p.exists() for p in stage_inputs(cfg, stage, hg))
 
 
@@ -358,6 +421,11 @@ def filter_fam(hgs, fam: str | None) -> set[str]:
 def ready_set(cfg: Config, stage: str, hgs) -> set[str]:
     """HGs whose stage inputs all exist, like inputs_ready() but with one directory listing
     per input directory instead of one stat per file (fast on network mounts)."""
+    if stage == "search":            # ready whenever the family has a row in the genefam file
+        fams = family_ids(cfg, strict=False)
+        return {f for f in hgs if f in fams}
+    if stage == "cluster":           # ready when its domains FASTA exists and is non-empty
+        return family_done(cfg, hgs)["hits"]
     listings: dict[Path, set[str]] = {}
 
     def present(p: Path) -> bool:
@@ -374,12 +442,26 @@ def ready_set(cfg: Config, stage: str, hgs) -> set[str]:
 
 def validate(cfg: Config, stage: str, hgs: list[str], queued: set[str]) -> dict[str, list[str]]:
     errs = {k: [] for k in ("not_applicable", "unknown", "output_exists", "input_missing", "queued")}
-    exp = expected(cfg)
+    family = stage in FAMILY_STAGES
+    exp = family_ids(cfg) if family else expected(cfg)          # family: FamilyError if no genefam file
     known = []
     for hg in hgs:
         (known if hg in exp else errs["unknown"]).append(hg)
     if not applicable(cfg, stage):
         errs["not_applicable"] = list(known)
+    elif family:
+        done = family_done(cfg, exp)[stage]
+        if stage == "cluster":
+            # HG FASTAs without a _cluster.tsv: publishing would mix two clusterings
+            done = done | hg_fasta_families(cfg)
+        ready = ready_set(cfg, stage, known)
+        for hg in known:
+            if hg in done:
+                errs["output_exists"].append(hg)
+            if hg not in ready:
+                errs["input_missing"].append(hg)
+            if hg in queued:
+                errs["queued"].append(hg)
     else:
         done = report_status.done_by_stage(str(cfg.outdir), exp)[stage]
         for hg in known:

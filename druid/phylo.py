@@ -59,8 +59,8 @@ _category = model.category
 
 
 def _check_stage(stage: str) -> str:
-    if stage not in core.STAGES:
-        raise typer.BadParameter(f"stage must be one of {', '.join(core.STAGES)}")
+    if stage not in core.HG_STAGES:
+        raise typer.BadParameter(f"stage must be one of {', '.join(core.HG_STAGES)}")
     return stage
 
 
@@ -178,7 +178,7 @@ def _hg_status(cfg: core.Config, hg: str, show_history: bool):
     latest = history.latest_by_stage(atts)
     for col in ("stage", "state", "source", "run", "status (reason)", "requested", "used"):
         t.add_column(col)
-    for st in core.STAGES:
+    for st in core.HG_STAGES:
         if not core.applicable(cfg, st):
             state = "n/a"
         elif hg in done[st]:
@@ -195,7 +195,7 @@ def _hg_status(cfg: core.Config, hg: str, show_history: bool):
         else:
             t.add_row(st, state, a.source, a.run, _status_cell(a), _requested(a), _used(a))
     con.print(t)
-    for st in core.STAGES:
+    for st in core.HG_STAGES:
         a = latest.get(st)
         if a is not None and a.status != "COMPLETED":
             con.print(f"log ({st}): {escape(a.log)}", soft_wrap=True)
