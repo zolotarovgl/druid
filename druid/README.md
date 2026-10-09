@@ -201,6 +201,12 @@ the stage column and `enter` opens the HG panels for that row at that stage (fil
 `esc` returns to the overview. The overview reads output files and squeue only; the slow
 attempt history is read only once an HG view is open.
 
+`s` sorts the overview by the highlighted column — a stage: most ready/failed first, ties by
+running (on search/cluster: families); `group`: by name; `HGs`: by size — and `s` again
+reverses. `h` shows only the rows with something to do (ready, failed or running) at the
+highlighted stage (on search/cluster: families); `h` again shows all.
+`ALL` stays on top, the pane title shows the state, and both survive refreshes and `c`/`f`.
+
 `o` opens the **Results** window for the overview row under the cursor (`ALL` included); in the
 HG view, for the highlighted HG's category/family (that HG highlighted) or, on search/cluster,
 for the highlighted family's HGs. Four panes, `tab` between them: **Results** (the group's HGs

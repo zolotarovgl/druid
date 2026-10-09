@@ -1549,3 +1549,218 @@ def test_results_load_posts_progress_and_stops_when_cancelled(cli):
             app._res_progress(4, 150, 1915)                    # stale generation: ignored
             assert "150/1915" not in app._res_foot
     _run(go())
+
+
+# ---- overview sort / hide ---------------------------------------------------------------------
+def _sorted_fixture():
+    """tfs.C_x.HG1 gets its alignment: at `tree` tfs.C_x has 1 ready, tfs.A 0 (1 done,
+    1 blocked); at `align` tfs.A has 1 ready, tfs.C_x is all done."""
+    (_cfg().outdir / "align/tfs.C_x.HG1.aln.fasta").write_text(">s\nAA\n")
+
+
+def _shown(app):
+    return [r.group for r in app.ov_shown]
+
+
+def _pair(app):
+    """Order of the two fixture families among the shown rows (robust to extra groups)."""
+    return [g for g in _shown(app) if g in ("tfs.A", "tfs.C_x")]
+
+
+def _col(app, name):
+    """Overview column of `name`: group 0, HGs 1, a stage through step1's ov_column."""
+    return {"group": 0, "HGs": 1}.get(name) if name in ("group", "HGs") else tui.ov_column(name)
+
+
+def _to_col(app, name, row=0):
+    app.query_one("#overview").move_cursor(row=row, column=_col(app, name))
+
+
+async def _family_overview(app, pilot):
+    app.load_now()
+    await pilot.pause()
+    await pilot.press("f")
+    await pilot.pause()
+
+
+async def _key(pilot, *keys):
+    for k in keys:
+        await pilot.press(k)
+        await pilot.pause()
+
+
+def test_ov_order_ties_on_running_then_name_na_last():
+    G = tui.model.GroupRow
+    rows = [G("ALL", 9, {"tree": (0, 3, 3, 0)}),
+            G("b", 3, {"tree": (0, 2, 1, 0)}), G("a", 3, {"tree": (0, 0, 1, 2)}),
+            G("c", 2, {"tree": None}), G("d", 1, {"tree": (0, 2, 1, 0)})]
+
+    def order(sort, hide=None):
+        return [r.group for r in tui.ov_order(rows, sort, hide)]
+    assert order(("tree", False)) == ["ALL", "b", "d", "a", "c"]
+    assert order(("tree", True)) == ["ALL", "c", "a", "b", "d"]
+    assert order(("HGs", False)) == ["ALL", "a", "b", "c", "d"]
+    assert order(("HGs", True)) == ["ALL", "d", "c", "a", "b"]
+    assert order(("group", True)) == ["ALL", "d", "c", "b", "a"]
+    assert order(None, "tree") == ["ALL", "b", "a", "d"]
+    assert order(None) == ["ALL", "b", "a", "c", "d"]
+
+
+def test_s_sorts_by_stage_then_reverses(cli):
+    _sorted_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            assert _pair(app) == ["tfs.A", "tfs.C_x"]
+            _to_col(app, "tree")
+            await _key(pilot, "s")
+            assert _shown(app)[0] == "ALL" and _pair(app) == ["tfs.C_x", "tfs.A"]
+            assert app.query_one("#overview").border_title == "Overview · sort: tree ▼"
+            await _key(pilot, "s")
+            assert _shown(app)[0] == "ALL" and _pair(app) == ["tfs.A", "tfs.C_x"]
+            assert app.query_one("#overview").border_title == "Overview · sort: tree ▲"
+    _run(go())
+
+
+def test_s_on_group_and_hgs_columns(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            _to_col(app, "HGs")
+            await _key(pilot, "s")
+            assert _pair(app) == ["tfs.A", "tfs.C_x"]               # 2 HGs before 1
+            await _key(pilot, "s")
+            assert _pair(app) == ["tfs.C_x", "tfs.A"]
+            _to_col(app, "group")
+            await _key(pilot, "s")                                  # new column: fresh, by name
+            assert _pair(app) == ["tfs.A", "tfs.C_x"]
+            assert app.query_one("#overview").border_title == "Overview · sort: group ▼"
+            await _key(pilot, "s")
+            assert _pair(app) == ["tfs.C_x", "tfs.A"] and _shown(app)[0] == "ALL"
+    _run(go())
+
+
+def test_h_hides_rows_with_nothing_to_do_and_keeps_all(cli):
+    _sorted_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            _to_col(app, "tree")
+            await _key(pilot, "h")
+            assert _shown(app)[0] == "ALL" and _pair(app) == ["tfs.C_x"]
+            assert app.query_one("#overview").border_title == "Overview · only actionable at tree"
+            assert "tfs.A" in [r.group for r in app.ov_rows]        # ov_rows untouched
+            _to_col(app, "align")
+            await _key(pilot, "h")                                  # another stage: switch
+            assert _pair(app) == ["tfs.A"]
+            await _key(pilot, "h")                                  # same stage: show all
+            assert _pair(app) == ["tfs.A", "tfs.C_x"]
+            assert app.query_one("#overview").border_title == "Overview"
+            _to_col(app, "HGs")
+            await _key(pilot, "h")                                  # not a stage column
+            assert app.ov_hide is None and _pair(app) == ["tfs.A", "tfs.C_x"]
+    _run(go())
+
+
+def test_sort_and_hide_survive_refresh_and_regroup(cli):
+    _sorted_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            _to_col(app, "tree")
+            await _key(pilot, "s", "h")
+            assert _pair(app) == ["tfs.C_x"]
+            app.load_now()
+            await pilot.pause()
+            assert _pair(app) == ["tfs.C_x"]
+            assert (app.ov_sort, app.ov_hide) == (("tree", False), "tree")
+            await _key(pilot, "c")
+            assert app.by == "category" and _shown(app)[0] == "ALL" and "tfs" in _shown(app)
+            await _key(pilot, "f")
+            assert _pair(app) == ["tfs.C_x"]
+            assert app.query_one("#overview").border_title == \
+                "Overview · sort: tree ▼ · only actionable at tree"
+    _run(go())
+
+
+def test_s_and_h_touch_no_files_or_slurm(cli, monkeypatch):
+    _sorted_fixture()
+
+    def boom(*a, **k):
+        raise AssertionError("file or SLURM access on s/h")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            await app.workers.wait_for_complete()
+            monkeypatch.setattr(core, "ready_set", boom)
+            monkeypatch.setattr(core.report_status, "done_by_stage", boom)
+            monkeypatch.setattr(tui.model, "_slurm", boom)
+            assert app.check_action("sort", ()) and app.check_action("hide", ())
+            _to_col(app, "tree")
+            await _key(pilot, "s", "h")
+            assert _pair(app) == ["tfs.C_x"]
+            app.open_group("ALL")
+            await pilot.pause()
+            assert not app.check_action("sort", ()) and not app.check_action("hide", ())
+    _run(go())
+
+
+def test_enter_on_sorted_overview_opens_row_under_cursor(cli):
+    _sorted_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            _to_col(app, "tree")
+            await _key(pilot, "s")
+            ov = app.query_one("#overview")
+            row = _shown(app).index("tfs.C_x")
+            _to_col(app, "tree", row=row)
+            await pilot.pause()
+            await _key(pilot, "enter")
+            assert app.view == "hgs" and app.group == "tfs.C_x" and app.stage == "tree"
+            await _key(pilot, "escape")
+            assert app.view == "overview" and _shown(app)[ov.cursor_row] == "tfs.C_x"
+            _to_col(app, "tree", row=_shown(app).index("tfs.A"))   # hide the row under the cursor
+            await _key(pilot, "h")
+            assert "tfs.A" not in _shown(app)
+            assert app._key_at_cursor(ov) in _shown(app)
+    _run(go())
+
+
+def test_s_h_on_family_stage_count_families_and_skip_separator(cli):
+    """search counts FAMILIES: tfs.A's family is searched (done), tfs.C_x's is not (ready)."""
+    (_cfg().outdir / "search").mkdir(exist_ok=True)
+    (_cfg().outdir / "search/tfs.A.domains.fasta").write_text(">x\nAA\n")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            rows = {r.group: r for r in app.ov_rows}
+            assert rows["tfs.A"].per_stage["search"] == (1, 0, 0, 0)
+            assert rows["tfs.C_x"].per_stage["search"] == (0, 0, 1, 0)
+            _to_col(app, "search")
+            await _key(pilot, "s")
+            assert _pair(app) == ["tfs.C_x", "tfs.A"]
+            assert app.query_one("#overview").border_title == "Overview · sort: search ▼"
+            await _key(pilot, "h")
+            assert _shown(app)[0] == "ALL" and _pair(app) == ["tfs.C_x"]
+            sep = tui.ov_column("align") - 1                        # the │ column
+            assert tui.stage_at_column(sep) is None
+            app.query_one("#overview").move_cursor(row=0, column=sep)
+            await pilot.pause()
+            await _key(pilot, "s", "h")                             # no-ops on the separator
+            assert (app.ov_sort, app.ov_hide) == (("search", False), "search")
+            assert _pair(app) == ["tfs.C_x"]
+    _run(go())

@@ -98,6 +98,30 @@ def species_lines(stats: list, outside: list, width: int = 60) -> list[str]:
     return out
 
 
+def _todo_at(r, stage: str) -> tuple:
+    """(ready incl. failed, running) of an overview row at a stage; (-1, -1) when n/a."""
+    c = r.per_stage.get(stage)
+    return (c[2], c[1]) if c else (-1, -1)
+
+
+def ov_order(rows: list, sort: "tuple | None", hide: "str | None") -> list:
+    """Overview rows as shown: ALL pinned first; `hide` (a stage name) drops rows with nothing
+    to do there (ready/failed + running = 0, or n/a); `sort` = (column name, reversed).
+    Column names, not indices, so columns added later sort and hide the same way."""
+    head = [r for r in rows if r.group == "ALL"]
+    rest = [r for r in rows if r.group != "ALL"]
+    if hide is not None:
+        rest = [r for r in rest if sum(_todo_at(r, hide)) > 0]
+    if sort is not None:
+        col, rev = sort
+        rest.sort(key=lambda r: r.group, reverse=(col == "group" and rev))
+        if col == "HGs":
+            rest.sort(key=lambda r: r.total, reverse=not rev)
+        elif col != "group":
+            rest.sort(key=lambda r: _todo_at(r, col), reverse=not rev)
+    return head + rest
+
+
 class PhyloApp(App):
     TITLE = "phylocli"
     CSS = """
@@ -127,6 +151,8 @@ class PhyloApp(App):
         Binding("escape", "back", "back"),
         Binding("c", "by_category", "category"),
         Binding("f", "cycle_filter", "filter / family"),
+        Binding("s", "sort", "sort"),
+        Binding("h", "hide", "only actionable"),
         Binding("space", "toggle", "select"),
         Binding("a", "select_all", "select all"),
         Binding("r", "resubmit", "resubmit"),
@@ -179,6 +205,9 @@ class PhyloApp(App):
         self._sp_note = ""                      # why the universe / phyla could not be read
         self._hg_unit: "str | None" = None                 # unit the #hgs / #arrays headers show
         self._array_rows: list = []
+        self.ov_sort: "tuple | None" = None     # (column name, reversed); s
+        self.ov_hide: "str | None" = None       # stage name; h
+        self.ov_shown: list = []                # ov_rows as displayed (sorted / filtered)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -364,8 +393,9 @@ class PhyloApp(App):
         self.query_one({"overview": "#overview", "hgs": "#hgs", "results": "#res"}[self.view]).focus()
 
     def _fill_overview(self, rows: list) -> None:
-        self.ov_rows = rows
-        t = self.query_one("#overview", DataTable)
+        self.ov_rows = rows                      # as computed; ov_shown is what the table shows
+        self.ov_shown = ov_order(rows, self.ov_sort, self.ov_hide)
+        t =self.query_one("#overview", DataTable)
         keep = self._key_at_cursor(t)
         col = t.cursor_column
         if col >= 2 and stage_at_column(col) is None:      # never restore onto the separator
@@ -375,7 +405,7 @@ class PhyloApp(App):
                           *(Text(f"{OV_SEP}\n{OV_SEP}") if st is None
                             else Text(f"{OV_TOP.get(st, '')}\n{st}") for st in OV_COLUMNS))
         t.clear()
-        for r in rows:
+        for r in self.ov_shown:
             cells = []
             for st in OV_COLUMNS:
                 if st is None:
@@ -389,9 +419,27 @@ class PhyloApp(App):
                 cells.append("".join(f"[{fg}]{ch * k}[/]"
                                      for (ch, fg), k in zip(self.OV_GLYPHS, n) if k))
             t.add_row(r.group, str(r.total), *cells, key=r.group)
-        keys = [r.group for r in rows]
+        keys = [r.group for r in self.ov_shown]
         t.move_cursor(row=keys.index(keep) if keep in keys else 0, column=col)
+        t.border_title = self._ov_title()
         self._overview_footer()
+
+    def _ov_title(self) -> str:
+        parts = ["Overview"]
+        if self.ov_sort is not None:
+            parts.append(f"sort: {self.ov_sort[0]} {'▲' if self.ov_sort[1] else '▼'}")
+        if self.ov_hide is not None:
+            parts.append(f"only actionable at {self.ov_hide}")
+        return " · ".join(parts)
+
+    def _ov_column(self) -> "str | None":
+        """What the highlighted overview column sorts by: "group", "HGs", a stage name, or None
+        on the │ separator. Stage columns go through stage_at_column (step1's one mapping)."""
+        t = self.query_one("#overview", DataTable)
+        if not t.columns:
+            return None
+        col = t.cursor_column
+        return ("group", "HGs")[col] if col < 2 else stage_at_column(col)
 
     def _overview_footer(self) -> None:
         key = self._key_at_cursor(self.query_one("#overview", DataTable))
@@ -403,7 +451,7 @@ class PhyloApp(App):
             f"[b]{escape(r.group)}[/] {r.total} HGs · {r.n_fams} families · "
             "done/running/ready/blocked: " + " · ".join(parts)
             + "\n█ done ▒ running ▓ ready/failed ░ blocked · search/cluster count families · "
-              "enter: open · o: results · c/f: category/family"
+              "enter: open · o: results · c/f: category/family · s: sort · h: only actionable"
             + " · default view: failed+ready")
 
     def _regroup(self) -> None:
@@ -471,7 +519,7 @@ class PhyloApp(App):
 
     def check_action(self, action: str, parameters: tuple) -> "bool | None":
         """Footer shows only the keys of the current view."""
-        if action in ("by_category",):
+        if action in ("by_category", "sort", "hide"):
             return self.view == "overview"
         if action in ("toggle", "select_all", "resubmit", "log"):
             return self.view == "hgs"
@@ -506,6 +554,22 @@ class PhyloApp(App):
         if self.view == "overview":
             self.by = "category"
             self._regroup()
+
+    def action_sort(self) -> None:
+        col = self._ov_column() if self.view == "overview" else None
+        if col is None:                          # no columns yet, or the │ separator
+            return
+        same = self.ov_sort is not None and self.ov_sort[0] == col
+        self.ov_sort = (col, not self.ov_sort[1] if same else False)
+        self._fill_overview(self.ov_rows)        # in memory only
+
+    def action_hide(self) -> None:
+        col = self._ov_column() if self.view == "overview" else None
+        if col in (None, "group", "HGs"):        # not a stage column (incl. the │ separator)
+            self.notify("h: move to a stage column first", severity="warning")
+            return
+        self.ov_hide = None if self.ov_hide == col else col
+        self._fill_overview(self.ov_rows)        # in memory only
 
     def on_data_table_cell_selected(self, event: DataTable.CellSelected) -> None:
         if event.data_table.id != "overview" or self.view != "overview":
