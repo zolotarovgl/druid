@@ -67,8 +67,9 @@ def _check_stage(stage: str) -> str:
 FAM_HELP = "restrict to a category (tfs) or a family (tfs.T-box), matched on whole id parts"
 
 # written when `phylo tui` exits: mouse reporting off (1000/1002/1003/1006), leave the
-# alternate screen, show the cursor, clear the screen and home the cursor
-TERM_RESET = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1049l\x1b[?25h\x1b[2J\x1b[H"
+# alternate screen, show the cursor, clear the screen AND the scrollback (3J: terminals or
+# tmux/screen without an alternate screen otherwise keep the last TUI frame), home the cursor
+TERM_RESET = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1049l\x1b[?25h\x1b[2J\x1b[3J\x1b[H"
 
 
 def _selected(cfg: core.Config, ids: Path | None, fam: str | None = None) -> set[str]:
