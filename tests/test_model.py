@@ -278,3 +278,163 @@ def test_group_rows_family_sum_to_all(cli):
         if allc is None:
             continue
         assert tuple(sum(r.per_stage[st][i] for r in rows[1:]) for i in range(4)) == allc
+
+
+# ---- ortholog groups (Results window) --------------------------------------------------------
+from pathlib import Path  # noqa: E402
+
+OG_HEAD = "gene\torthogroup\torthogroup_support\treference_ortholog\treference_support\n"
+SP4 = "((Mlei:1,Bova:1)Cteno:1,(Hsap:1,Nvec:1)Para:1);\n"       # 4 tips; internal names ignored
+SPINFO = ("Mlei\tMnemiopsis leidyi\tCtenophora\n"
+          "Bova\tBeroe ovata\tCtenophora\n"
+          "Hsap\tHomo sapiens\tChordata\t\n"                    # trailing tab, as Lpol in v3
+          "Nvec\tNematostella vectensis\n"                      # no phylum column, as Dicjap
+          "\n"
+          "Zzz\tZz zz\tPorifera\n")                             # not a tip of the species tree
+POSSVM_HG1 = [("Mlei_v05_G1", "tfs.A.HG1.0:T/Tbx19", "78.4", "T/Tbx19", "98.2/98.2"),
+              ("Mlei_v05_G2", "tfs.A.HG1.0:T/Tbx19", "78.4", "T/Tbx19", "98.2/98.2"),
+              ("Hsap_ENSP1", "tfs.A.HG1.0:T/Tbx19", "78.4", "T/Tbx19", "98.2/98.2"),
+              ("Hsap_ENSP2", "tfs.A.HG1.1:like:Eomes/Tbr1", "0.0", "NA", "NA"),
+              ("Nvec_v1_g3", "tfs.A.HG1.1:like:Eomes/Tbr1", "0.0", "NA", "NA")]
+POSSVM_HG11 = [("Bova_x1", "tfs.A.HG11.0:Tbx20", "85.0", "Tbx20", "90.0"),
+               ("Mlei_v05_G9", "tfs.A.HG11.0:Tbx20", "85.0", "Tbx20", "90.0")]
+PREV_HG1 = [("Mlei_v05_G1", "tfs.A.HG1.0:like:Tbx2/Tbx3", "98.0", "NA", "NA"),
+            ("Zzz_q1", "tfs.A.HG1.0:like:Tbx2/Tbx3", "98.0", "NA", "NA")]
+
+
+def og_csv(rows) -> str:
+    return OG_HEAD + "".join("\t".join(r) + "\n" for r in rows)
+
+
+def write_results(cfg) -> None:
+    """POSSVM output for tfs.A.HG1 (possvm + possvm_prev) and tfs.A.HG11 (possvm only), the
+    4-tip species tree and species_info.tsv next to it.  tfs.C_x.HG1 keeps no output."""
+    o = cfg.outdir
+    (o / "possvm/tfs.A.HG1.generax.support.tree.ortholog_groups.csv").write_text(og_csv(POSSVM_HG1))
+    (o / "possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv").write_text(og_csv(POSSVM_HG11))
+    (o / "possvm_prev/tfs.A.HG1.treefile.ortholog_groups.csv").write_text(og_csv(PREV_HG1))
+    tree = Path(cfg.params["SPECIES_TREE"])
+    tree.write_text(SP4)
+    (tree.parent / "species_info.tsv").write_text(SPINFO)
+
+
+def test_read_ogs_parses_and_sorts(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    ogs = model.read_ogs(cfg, "tfs.A.HG1", "possvm")
+    assert [(o.id, o.name, len(o.genes), o.support, o.ref, o.ref_support) for o in ogs] == [
+        ("tfs.A.HG1.0", "T/Tbx19", 3, 78.4, "T/Tbx19", "98.2/98.2"),
+        ("tfs.A.HG1.1", "like:Eomes/Tbr1", 2, 0.0, "NA", "NA")]
+    assert [m.gene for m in ogs[0].genes] == ["Mlei_v05_G1", "Mlei_v05_G2", "Hsap_ENSP1"]
+    assert ogs[1].genes[0] == model.Member("Hsap_ENSP2", "Hsap", "NA", "NA")
+    # tfs.A.HG1 must not pick up tfs.A.HG11's file (HG1 is a prefix of HG11)
+    assert [o.id for o in model.read_ogs(cfg, "tfs.A.HG11", "possvm")] == ["tfs.A.HG11.0"]
+    assert [o.name for o in model.read_ogs(cfg, "tfs.A.HG1", "possvm_prev")] == ["like:Tbx2/Tbx3"]
+
+
+def test_read_ogs_none_when_missing_or_empty(cli):
+    cfg = _cfg()
+    assert model.read_ogs(cfg, "tfs.C_x.HG1", "possvm") is None
+    assert model.read_ogs(cfg, "tfs.A.HG11", "possvm") is None     # fixture file is empty = not done
+    assert model.read_ogs(cfg, "tfs.A.HG1", "no_such_dir") is None
+
+
+def test_read_ogs_two_files_is_error(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    (cfg.outdir / "possvm/tfs.A.HG1.generax.tree.ortholog_groups.csv").write_text(og_csv(POSSVM_HG1))
+    with pytest.raises(model.ModelError) as e:
+        model.read_ogs(cfg, "tfs.A.HG1", "possvm")
+    assert "tfs.A.HG1.generax.tree.ortholog_groups.csv" in str(e.value)
+    assert "tfs.A.HG1.generax.support.tree.ortholog_groups.csv" in str(e.value)
+
+
+def test_read_ogs_bad_rows_name_file_and_line(cli):
+    cfg = _cfg()
+    with pytest.raises(model.ModelError, match=r":1: not a POSSVM"):  # fixture file holds "x\n"
+        model.read_ogs(cfg, "tfs.A.HG1", "possvm_prev")
+    p = cfg.outdir / "possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv"
+    p.write_text(OG_HEAD + "Mlei_v05_G9\ttfs.A.HG11.0:Tbx20\t85.0\tTbx20\t90.0\nbroken row\n")
+    with pytest.raises(model.ModelError, match=r"ortholog_groups\.csv:3: cannot parse row"):
+        model.read_ogs(cfg, "tfs.A.HG11", "possvm")
+    p.write_text(OG_HEAD + "Mlei_v05_G9\ttfs.A.HG11.0:Tbx20\tlots\tTbx20\t90.0\n")
+    with pytest.raises(model.ModelError, match=r":2: bad orthogroup_support 'lots'"):
+        model.read_ogs(cfg, "tfs.A.HG11", "possvm")
+    p.write_text(OG_HEAD + "Mlei_v05_G9\ttfs.B.HG2.0:Tbx20\t85.0\tTbx20\t90.0\n")   # wrong HG
+    with pytest.raises(model.ModelError, match=r":2: cannot parse row"):
+        model.read_ogs(cfg, "tfs.A.HG11", "possvm")
+
+
+def test_read_ogs_negative_and_na_support(cli):
+    cfg = _cfg()
+    p = cfg.outdir / "possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv"
+    p.write_text(og_csv([("Mlei_v05_G9", "tfs.A.HG11.1:Tbx20", "-1", "Tbx20", "95.3"),
+                         ("Hsap_E1", "tfs.A.HG11.0:like:Tbx1", "NA", "NA", "NA")]))
+    ogs = model.read_ogs(cfg, "tfs.A.HG11", "possvm")
+    assert [(o.id, o.support) for o in ogs] == [("tfs.A.HG11.0", None), ("tfs.A.HG11.1", -1.0)]
+
+
+def test_species_of():
+    assert model.species_of("Mlei_v05_G009201") == "Mlei"
+    assert model.species_of("Mertsp_Mesp_sb563561") == "Mertsp"
+    assert model.species_of("nounderscore") == "nounderscore"
+
+
+def test_group_ogs_lists_hgs_with_output_one_listing(cli, monkeypatch):
+    cfg = _cfg()
+    write_results(cfg)
+    (cfg.outdir / "possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv").write_text(
+        OG_HEAD + "bad\n")
+    calls = []
+    real = core.report_status.nonempty_files
+    monkeypatch.setattr(core.report_status, "nonempty_files", lambda d: calls.append(d) or real(d))
+    rows, missing = model.group_ogs(cfg, ["tfs.C_x.HG1", "tfs.A.HG11", "tfs.A.HG1"], "possvm")
+    assert [r.hg for r in rows] == ["tfs.A.HG1", "tfs.A.HG11"] and missing == 1
+    assert len(rows[0].ogs) == 2 and rows[0].error == ""
+    assert rows[1].ogs == [] and ":2: cannot parse row" in rows[1].error
+    assert len(calls) == 1                                   # one listing for all HGs
+    assert sorted(["tfs.A.HG2", "tfs.A.HG10", "tfs.A.HG1"], key=model.hg_sort_key) == \
+        ["tfs.A.HG1", "tfs.A.HG2", "tfs.A.HG10"]
+
+
+def test_default_source(cli):
+    import shutil
+    cfg = _cfg()
+    assert model.default_source(cfg) == "possvm"
+    shutil.rmtree(cfg.outdir / "possvm")
+    assert model.default_source(cfg) == "possvm_prev"
+
+
+def test_species_universe_reads_tip_names(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    assert model.species_universe(cfg) == ["Mlei", "Bova", "Hsap", "Nvec"]
+    Path(cfg.params["SPECIES_TREE"]).write_text("((A:1,(B:0.5,C:2)x.y:1)Clade_1:1,D);\n")
+    assert model.species_universe(cfg) == ["A", "B", "C", "D"]          # clade names skipped
+    Path(cfg.params["SPECIES_TREE"]).unlink()
+    with pytest.raises(FileNotFoundError):
+        model.species_universe(cfg)
+
+
+def test_phyla_from_species_info(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    assert model.species_info_path(cfg) == Path(cfg.params["SPECIES_TREE"]).parent / "species_info.tsv"
+    assert model.phyla(cfg) == {"Mlei": "Ctenophora", "Bova": "Ctenophora", "Hsap": "Chordata",
+                                "Nvec": "unknown", "Zzz": "Porifera"}
+
+
+def test_og_species_stats_per_phylum(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    uni, ph = model.species_universe(cfg), model.phyla(cfg)
+    og = model.read_ogs(cfg, "tfs.A.HG1", "possvm")[0]            # Mlei 2, Hsap 1
+    rows = model.og_species_stats(og, uni, ph)
+    assert [(r.phylum, r.covered, r.total, r.n_genes, r.species) for r in rows] == [
+        ("Ctenophora", 1, 2, 2, [("Mlei", 2)]),
+        ("Chordata", 1, 1, 1, [("Hsap", 1)]),
+        ("unknown", 0, 1, 0, [])]                                  # absent phyla last
+    assert model.og_outside(og, uni) == []
+    prev = model.read_ogs(cfg, "tfs.A.HG1", "possvm_prev")[0]     # Mlei 1, Zzz 1
+    assert model.og_outside(prev, uni) == [("Zzz", 1)]            # in species_info, not a tip
+    assert [r.phylum for r in model.og_species_stats(prev, uni, {})] == ["unknown"]

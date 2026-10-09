@@ -706,3 +706,173 @@ def group_rows(cfg: core.Config, exp: set[str], by: str = "category",
     names = sorted(set(groups) | set(fgroups), key=lambda g: (-len(groups.get(g, ())), g))
     rows = [row("ALL", exp, fams)] + [row(g, groups.get(g, []), fgroups.get(g, [])) for g in names]
     return rows, known
+
+
+# ---- POSSVM ortholog groups (TUI Results window) ---------------------------------------------
+OG_SUFFIX = ".ortholog_groups.csv"
+OG_HEADER = ["gene", "orthogroup", "orthogroup_support", "reference_ortholog", "reference_support"]
+
+
+@dataclass
+class Member:
+    gene: str
+    species: str               # species_of(gene)
+    ref: str                   # this row's reference_ortholog (as written, NA included)
+    ref_support: str           # this row's reference_support (as written)
+
+
+@dataclass
+class OG:
+    id: str                    # <hg>.<n>, e.g. tfs.T-box.HG1.0
+    name: str                  # after the first ':', e.g. like:Tbx2/Tbx3
+    genes: list                # [Member], file order
+    support: "float | None"    # orthogroup_support; None for NA / empty
+    ref: str                   # reference_ortholog of the OG's first row
+    ref_support: str
+
+
+@dataclass
+class HGOgs:
+    hg: str
+    ogs: list                  # [OG]; [] when error is set
+    error: str = ""
+
+
+@dataclass
+class PhylumRow:
+    phylum: str
+    covered: int               # species of this phylum with >= 1 member
+    total: int                 # species of this phylum in the universe
+    n_genes: int
+    species: list              # [(code, n)] with n > 0, n desc
+
+
+def species_of(gene: str) -> str:
+    """Species code = the gene id up to the first '_' (Mlei_v05_G1 -> Mlei)."""
+    return gene.split("_", 1)[0]
+
+
+def read_ogs(cfg: core.Config, hg: str, source: str, names: set[str] | None = None):
+    """The ortholog groups of one HG, largest first, from
+    <outdir>/<source>/<hg>.<tree name>.ortholog_groups.csv.  None when there is no non-empty
+    such file (report_status counts an empty one as not done).  `names` = the directory's
+    non-empty file names, so that group_ogs lists the directory once for many HGs."""
+    d = cfg.outdir / source
+    if names is None:
+        names = core.report_status.nonempty_files(str(d))
+    files = sorted(n for n in names if n.startswith(hg + ".") and n.endswith(OG_SUFFIX))
+    if not files:
+        return None
+    if len(files) > 1:
+        raise ModelError(f"{hg}: {len(files)} ortholog_groups.csv files in {d}: {', '.join(files)}")
+    path = d / files[0]
+    by: dict[str, OG] = {}
+    with open(path, errors="replace") as fh:
+        for ln, line in enumerate(fh, 1):
+            line = line.rstrip("\r\n")
+            if ln == 1:
+                if line.split("\t") != OG_HEADER:
+                    raise ModelError(f"{path}:1: not a POSSVM ortholog_groups.csv header: {line[:80]!r}")
+                continue
+            if not line.strip():
+                continue
+            f = line.split("\t")
+            og_id, sep, name = f[1].partition(":") if len(f) == 5 else ("", "", "")
+            n = og_id[len(hg) + 1:] if og_id.startswith(hg + ".") else ""
+            if len(f) != 5 or not sep or not n.isdigit():
+                raise ModelError(f"{path}:{ln}: cannot parse row {line[:120]!r}")
+            try:
+                sup = None if f[2] in ("", "NA") else float(f[2])
+            except ValueError:
+                raise ModelError(f"{path}:{ln}: bad orthogroup_support {f[2]!r}") from None
+            og = by.get(og_id)
+            if og is None:
+                og = by[og_id] = OG(og_id, name, [], sup, f[3], f[4])
+            og.genes.append(Member(f[0], species_of(f[0]), f[3], f[4]))
+    return sorted(by.values(), key=lambda o: (-len(o.genes), int(o.id.rsplit(".", 1)[1])))
+
+
+def hg_sort_key(hg: str) -> tuple:
+    """Family, then the HG number as a number (HG2 before HG10)."""
+    fam, _, last = hg.rpartition(".")
+    m = re.fullmatch(r"HG(\d+)", last)
+    return (fam, int(m.group(1)) if m else -1, last)
+
+
+def group_ogs(cfg: core.Config, hgs, source: str) -> tuple[list[HGOgs], int]:
+    """(one HGOgs per HG with output, sorted by HG id; number of HGs without output).
+    Lists <outdir>/<source>/ once (NFS); an unreadable file becomes that HG's error."""
+    names = core.report_status.nonempty_files(str(cfg.outdir / source))
+    rows: list[HGOgs] = []
+    missing = 0
+    for hg in sorted(hgs, key=hg_sort_key):
+        try:
+            ogs = read_ogs(cfg, hg, source, names)
+        except ModelError as e:
+            rows.append(HGOgs(hg, [], str(e)))
+            continue
+        if ogs is None:
+            missing += 1
+        else:
+            rows.append(HGOgs(hg, ogs))
+    return rows, missing
+
+
+def default_source(cfg: core.Config) -> str:
+    """possvm/ (post-GeneRax) when it exists, else possvm_prev/ (raw IQ-TREE)."""
+    return "possvm" if (cfg.outdir / "possvm").is_dir() else "possvm_prev"
+
+
+_NEWICK_TIP = re.compile(r"[(,]\s*([^\s():,;\[\]]+)")    # a name right after '(' or ',' = a tip
+
+
+def species_universe(cfg: core.Config) -> list[str]:
+    """Tip names of params.SPECIES_TREE in newick order (names after ')' are clades: skipped).
+    Only the names are read: no tree parsing, no ete3."""
+    text = Path(cfg.params["SPECIES_TREE"]).read_text()
+    return list(dict.fromkeys(_NEWICK_TIP.findall(text)))
+
+
+def species_info_path(cfg: core.Config) -> Path:
+    """params.species_info if set (relative = to the repo root), else species_info.tsv next to
+    the species tree (data/species_info.tsv)."""
+    p = cfg.params.get("species_info")
+    if p:
+        return Path(p) if Path(p).is_absolute() else core.ROOT / p
+    return Path(cfg.params.get("SPECIES_TREE", "")).parent / "species_info.tsv"
+
+
+def phyla(cfg: core.Config) -> dict[str, str]:
+    """species code -> phylum from species_info.tsv (code, Latin name, phylum; tab-separated).
+    A row without a phylum (2 columns, or an empty 3rd) gives "unknown"."""
+    out: dict[str, str] = {}
+    with open(species_info_path(cfg), errors="replace") as fh:
+        for line in fh:
+            f = line.rstrip("\r\n").split("\t")
+            code = f[0].strip()
+            if not code or code.startswith("#"):
+                continue
+            out[code] = (f[2].strip() if len(f) > 2 else "") or "unknown"
+    return out
+
+
+def og_species_stats(og: OG, universe, phyla: dict) -> list[PhylumRow]:
+    """Per phylum of the universe: species covered / total and member genes; phyla with
+    members first (n_genes desc, then name), then the absent ones (by name)."""
+    counts = collections.Counter(m.species for m in og.genes)
+    groups: dict[str, list[str]] = collections.defaultdict(list)
+    for sp in universe:
+        groups[phyla.get(sp) or "unknown"].append(sp)
+    rows = []
+    for ph, sps in groups.items():
+        present = sorted(((sp, counts[sp]) for sp in sps if counts[sp]), key=lambda x: (-x[1], x[0]))
+        rows.append(PhylumRow(ph, len(present), len(sps), sum(n for _, n in present), present))
+    return (sorted((r for r in rows if r.covered), key=lambda r: (-r.n_genes, r.phylum))
+            + sorted((r for r in rows if not r.covered), key=lambda r: r.phylum))
+
+
+def og_outside(og: OG, universe) -> list[tuple[str, int]]:
+    """Member species that are not tips of the species tree, with their gene counts."""
+    u = set(universe)
+    c = collections.Counter(m.species for m in og.genes if m.species not in u)
+    return sorted(c.items(), key=lambda x: (-x[1], x[0]))
