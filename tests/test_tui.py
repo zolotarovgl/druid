@@ -1,5 +1,6 @@
 """phylocli/tui.py (Textual pilot tests; skipped when Textual is not installed)."""
 import asyncio
+import collections
 import os
 import re
 import time
@@ -451,7 +452,7 @@ def test_no_fasta_reads_after_load(cli, monkeypatch):
             await pilot.pause()
             calls = []
             monkeypatch.setattr(core, "nseq", lambda cfg, hg: calls.append(hg) or 0)
-            await pilot.press("f", "f", "f", "f", "down", "up", "space", "a", "f", "f")
+            await pilot.press("f", "f", "f", "f", "down", "space", "a", "f", "f")
             await pilot.press("r")
             await pilot.pause()
             assert isinstance(app.screen, tui.ResubmitScreen)
@@ -2351,3 +2352,128 @@ def test_results_filter_during_load_keeps_cursor(cli, monkeypatch):
             assert _tcol(app, "#res") == ["tfs.A.HG1", "tfs.A.HG11"]
             assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG11"
     _run(go())
+
+
+# ---- review fixes of the header sorting (Tasks 1-2) -------------------------------------------
+def _rendered_header(app, wid, rows=1):
+    """The header as Textual DRAWS it (render_line), not the column labels."""
+    t = app.query_one(wid)
+    return "\n".join(t.render_line(y).text for y in range(rows))
+
+
+def _widths(app, wid):
+    t = app.query_one(wid)
+    return [c.get_render_width(t) for c in t.ordered_columns]
+
+
+def test_rendered_header_shows_the_arrow_and_widths_do_not_move(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(240, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            before = _widths(app, "#res")
+            assert "OGs ▲" not in _rendered_header(app, "#res")
+            await _key(pilot, "up", "right", "enter")                # OGs: numbers, descending
+            assert "OGs ▼" in _rendered_header(app, "#res")
+            await _key(pilot, "enter")
+            assert "OGs ▲" in _rendered_header(app, "#res")
+            assert _widths(app, "#res") == before                    # the arrow was pre-sized
+            await _key(pilot, "right", "enter")                      # genes: the arrow moves
+            out = _rendered_header(app, "#res")
+            assert "genes ▼" in out and "OGs ▲" not in out
+    _run(go())
+
+
+def test_sorting_hgs_keeps_the_cursor_on_the_same_hg(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+    app.filter = "actionable"                    # tfs.A.HG11 (3 seqs), tfs.C_x.HG1 (600)
+
+    async def go():
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            t = app.query_one("#hgs")
+            t.focus()
+            t.move_cursor(row=0)
+            await pilot.pause()
+            first = app._cursor_hg()
+            await _key(pilot, "up", "right", "enter")                # seqs descending: C_x first
+            assert [r.hg for r in app.visible()][0] != first
+            assert app._cursor_hg() == first and t.cursor_row == 1
+    _run(go())
+
+
+def test_sorting_res_keeps_the_og_cursor(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            ogs = app.query_one("#ogs")
+            await _key(pilot, "tab", "down")                         # OGs: HG1.1
+            assert app._key_at_cursor(ogs) == "tfs.A.HG1.1"
+            await _key(pilot, "shift+tab", "up", "right", "enter", "enter")   # Results: OGs asc
+            assert _tcol(app, "#res") == ["tfs.A.HG11", "tfs.A.HG1"]
+            assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG1"
+            assert app._key_at_cursor(ogs) == "tfs.A.HG1.1"
+    _run(go())
+
+
+def test_row_keys_do_nothing_in_header_mode(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+    app.filter = "actionable"
+
+    async def go():
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            t = app.query_one("#hgs")
+            t.focus()
+            t.move_cursor(row=0)
+            await pilot.pause()
+            await _key(pilot, "up")
+            assert t.header
+            n = len(app.screen_stack)
+            await _key(pilot, "space", "a", "r", "l", "o")
+            assert app.selected == set() and t.header and len(app.screen_stack) == n
+            assert app.view == "hgs"
+            await _key(pilot, "down", "space")                       # rows again: works
+            assert not t.header and len(app.selected) == 1
+    _run(go())
+
+
+def test_o_does_nothing_in_the_overview_header(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            ov = app.query_one("#overview")
+            ov.move_cursor(row=0, column=2)
+            await pilot.pause()
+            await _key(pilot, "up")
+            assert ov.header
+            await _key(pilot, "o")
+            assert app.view == "overview"
+    _run(go())
+
+
+def test_nan_sorts_last_and_never_breaks_sorted():
+    nan = float("nan")
+    assert tui._lead_float("nan") == -float("inf") and tui._lead_float("nan/3") == -float("inf")
+    assert tui._lead_float("98.2/97.0") == 98.2
+    O = collections.namedtuple("O", "support")
+    key = tui.OG_KEYS["support"][0]
+    assert key(O(nan)) == -float("inf") and key(O(None)) == -float("inf")
+    rows = [O(1.0), O(nan), O(3.0), O(None), O(2.0)]
+    out = tui.sort_rows(rows, ("support", False), tui.OG_KEYS)      # descending first
+    assert [o.support for o in out[:3]] == [3.0, 2.0, 1.0]
+    M = collections.namedtuple("M", "ref_support")
+    mrows = [(0, M("5.0")), (1, M("nan")), (2, M("9.0")), (3, M("-")), (4, M("7.0"))]
+    out = tui.sort_rows(mrows, ("sup", False), tui.MEM_KEYS)
+    assert [i for i, _ in out[:3]] == [2, 4, 0]

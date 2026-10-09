@@ -8,8 +8,8 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from rich.cells import cell_len
 from rich.markup import escape
+from rich.measure import Measurement
 from rich.text import Text
 from textual import work
 from textual.actions import SkipAction
@@ -169,11 +169,16 @@ def _mem_time_key(mem: str, time: str) -> tuple:
 
 
 def _lead_float(s: str) -> float:
-    """98.2 of '98.2/97.0'; -inf for NA / empty (sorts last when descending)."""
+    """98.2 of '98.2/97.0'; -inf for NA / empty / nan (sorts last when descending)."""
     try:
-        return float(s.split("/", 1)[0])
+        return _finite(float(s.split("/", 1)[0]))
     except ValueError:
         return -math.inf
+
+
+def _finite(x: "float | None") -> float:
+    """A sort key: None and NaN (which breaks `sorted`) become -inf."""
+    return -math.inf if x is None or x != x else x
 
 
 RES_COLS = [SortCol("hg", "HG"), SortCol("ogs", "OGs", True), SortCol("genes", "genes", True),
@@ -189,12 +194,21 @@ OG_COLS = [SortCol("og", "OG"), SortCol("genes", "genes", True), SortCol("spp", 
 OG_KEYS = {"og": (lambda o: int(o.id.rsplit(".", 1)[1]), False),
            "genes": (lambda o: len(o.genes), True),
            "spp": (lambda o: len({m.species for m in o.genes}), True),
-           "support": (lambda o: -math.inf if o.support is None else o.support, True),
+           "support": (lambda o: _finite(o.support), True),
            "name": (lambda o: o.name.lower(), False)}
 MEM_COLS = [SortCol("gene", "gene"), SortCol("sp", "sp"), SortCol("ref", "ref.orth"),
             SortCol("sup", "sup", True)]
 MEM_KEYS = {"gene": (lambda p: p[1].gene, False), "sp": (lambda p: p[1].species, False),   # (i, Member)
             "ref": (lambda p: p[1].ref, False), "sup": (lambda p: _lead_float(p[1].ref_support), True)}
+
+
+class _HeadText(Text):
+    """A sortable column's label: it measures 2 cells wider than its text, room for ' ▲'/' ▼',
+    so sorting never changes a column's width (rich's public __rich_measure__ protocol)."""
+
+    def __rich_measure__(self, console, options):
+        m = super().__rich_measure__(console, options)
+        return Measurement(m.minimum + 2, m.maximum + 2)
 
 
 class SortTable(DataTable):
@@ -205,8 +219,8 @@ class SortTable(DataTable):
     The table owns its sort (`sort` = (column name, reversed) or None, kept across refills) and
     its header labels (▲/▼ after the sorted column, the header cursor reversed); the app orders
     the rows in its fill functions and is told of a new sort by `on_sort(table)`.
-    Textual 8.2.8's DataTable has no header cursor: the cursor actions are overridden here, and
-    `_clear_caches` (private) is the only way to re-render a relabelled header."""
+    Textual 8.2.8's DataTable has no header cursor: the cursor actions are overridden here, and a
+    relabelled header is re-rendered through the public notify_style_update()."""
     BINDINGS = [Binding("s", "sort_here", "sort", show=False)]
 
     def __init__(self, *args, **kwargs):
@@ -230,16 +244,17 @@ class SortTable(DataTable):
         text = c.label
         if self.sort is not None and c.name is not None and self.sort[0] == c.name:
             text += " " + sort_arrow(c.numeric, self.sort[1])
-        return Text(text, style="reverse" if self.header and i == self.hcol else "")
+        style = "reverse" if self.header and i == self.hcol else ""
+        return _HeadText(text, style=style) if c.name is not None else Text(text, style=style)
 
     def relabel(self) -> None:
+        """Show the current sort / header cursor in the labels.  The width never changes (a
+        sortable label measures 2 cells more than its text, see _HeadText), so only the caches
+        of the rendered header have to go: notify_style_update() is the public method that
+        clears them and refreshes (checked on Textual 8.2.8, see README)."""
         for i, col in enumerate(self.ordered_columns[:len(self.cols)]):
             col.label = self._label(i)
-            col.content_width = max(col.content_width,
-                                    *(cell_len(x) for x in col.label.plain.split("\n")))
-        self._clear_caches()
-        self._require_update_dimensions = True
-        self.refresh()
+        self.notify_style_update()
 
     def _selectable(self) -> list:
         return [i for i, c in enumerate(self.cols) if c.name is not None]
@@ -788,6 +803,10 @@ class PhyloApp(App):
         """Footer shows only the keys of the current view."""
         if action in ("by_category", "sort", "hide"):
             return self.view == "overview"
+        f = self.focused
+        if action in ("toggle", "select_all", "resubmit", "log", "open_results") \
+                and isinstance(f, SortTable) and f.header:
+            return False                         # header mode: the hidden row-0 cursor is not a target
         if action in ("toggle", "select_all", "resubmit", "log"):
             return self.view == "hgs"
         if action == "back":
@@ -843,7 +862,7 @@ class PhyloApp(App):
         if t.id == "overview":
             self._fill_overview(self.ov_rows)
         elif t.id == "hgs":
-            self._fill_hgs()                     # keeps the cursor on the same HG
+            self._fill_hgs(keep=self._key_at_cursor(t))   # the cursor stays on the same HG
         elif t.id == "res":
             self._fill_res(self._key_at_cursor(t))
         elif t.id == "ogs":
