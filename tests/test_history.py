@@ -277,3 +277,74 @@ def test_nextflow_log_timeout_skips_run(hist, monkeypatch):
     assert time.time() - t0 < 8
     assert not _by(atts, source="nextflow")
     assert any("timed out" in w for w in warned)
+
+
+# ---- finished-array cache ------------------------------------------------------------------
+
+def _count_sacct(monkeypatch):
+    calls = []
+    real = history._sacct
+
+    def spy(ids):
+        calls.append(list(ids))
+        return real(ids)
+    monkeypatch.setattr(history, "_sacct", spy)
+    return calls
+
+
+def _with_running(monkeypatch):
+    _run(_state["runs"], "20261001-000000_tree", "tree", "888", [HG], _sbatch(1, "100M", 10))
+    monkeypatch.setenv("FAKE_SACCT", SACCT + "888_0|RUNNING||00:00:05|0:0\\n")
+
+
+def test_finished_arrays_cached_running_requeried(hist, monkeypatch):
+    _cli, cfg, _c, _t = hist
+    _with_running(monkeypatch)
+    calls = _count_sacct(monkeypatch)
+    first = history._phylocli_attempts(None)
+    assert sorted(calls[0]) == ["555", "777", "888"]
+    assert (history.history_dir() / "phylocli_arrays.json").is_file()
+    second = history._phylocli_attempts(None)
+    assert calls[1] == ["888"]                        # only the running array is queried again
+    assert first == second
+
+
+def test_cache_identical_with_and_without(hist, monkeypatch):
+    _cli, cfg, _c, _t = hist
+    _with_running(monkeypatch)
+    history._phylocli_attempts(None)                  # fill
+    cached = history._phylocli_attempts(None)
+    (history.history_dir() / "phylocli_arrays.json").unlink()
+    assert history._phylocli_attempts(None) == cached
+    assert history._phylocli_attempts(HG) == [a for a in cached if a.hg == HG]
+
+
+def test_changed_ids_file_invalidates(hist, monkeypatch):
+    _cli, cfg, _c, _t = hist
+    history._phylocli_attempts(None)
+    calls = _count_sacct(monkeypatch)
+    history._phylocli_attempts(None)
+    assert [c for c in calls if c] == []              # everything cached, no sacct job queried
+    ids = _state["runs"] / "20260901-000000_tree" / "ids_0.txt"
+    ids.write_text("tfs.Z.HG9\n")
+    atts = history._phylocli_attempts(None)
+    assert [c for c in calls if c] == [["555"]]
+    assert [a.hg for a in atts if a.run == "20260901-000000_tree"] == ["tfs.Z.HG9"]
+
+
+def test_vanished_run_dir_dropped(hist):
+    import json, shutil
+    _cli, cfg, _c, _t = hist
+    history._phylocli_attempts(None)
+    shutil.rmtree(_state["runs"] / "20260901-000000_tree")
+    history._phylocli_attempts(None)
+    data = json.loads((history.history_dir() / "phylocli_arrays.json").read_text())
+    assert not any("20260901-000000_tree" in k for k in json.dumps(data).split('"'))
+
+
+def test_no_cache_without_sacct(hist):
+    _cli, cfg, _c, _t = hist
+    (_state["bin"] / "sacct").unlink()
+    atts = history._phylocli_attempts(None)
+    assert atts and all(a.status == "unknown" for a in atts)
+    assert not (history.history_dir() / "phylocli_arrays.json").exists()

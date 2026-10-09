@@ -8,6 +8,7 @@ gives state and used resources.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -285,10 +286,42 @@ def _sbatch_request(path: Path) -> tuple[str, str, str]:
             fmt_time(int(time.group(1))) if time else "-")
 
 
+ARRAY_CACHE = "phylocli_arrays.json"
+_REC_KEYS = ("state", "elapsed", "exit", "rss")
+
+
+def _terminal(state: str) -> bool:
+    return state == "COMPLETED" or state in FAILED_STATES
+
+
+def _load_array_cache(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_array_cache(path: Path, data: dict):
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(data))
+        os.replace(tmp, path)
+    except OSError:
+        pass        # the cache is an optimisation; never fail a refresh over it
+
+
 def _phylocli_attempts(hg: str | None, stages=None) -> list[Attempt]:
+    """Attempts of phylocli's own submissions. Arrays whose every task is terminal in sacct are
+    cached (history dir, phylocli_arrays.json, keyed run dir|job id) and never queried again."""
     stages = core.HG_STAGES if stages is None else stages
-    subs = []     # (run dir, stage, submitted, job id, ids list, array k)
+    cache_path = history_dir() / ARRAY_CACHE
+    cache = _load_array_cache(cache_path)
+    subs = []     # (run dir, stage, submitted, job id, ids list, array k, key, ids stamp, line, entry)
+    live = set()
     for f in sorted(runs_dir().glob("*/jobs.tsv")):
+        live.add(f.parent.name)
         m = RUN_RE.match(f.parent.name)
         if not m or m.group(7) not in stages:
             continue
@@ -299,25 +332,49 @@ def _phylocli_attempts(hg: str | None, stages=None) -> list[Attempt]:
             jid, ids = line.split("\t", 1)
             idf = ids_path(f.parent, ids.strip())
             try:
-                hgs = [l.strip() for l in idf.read_text().splitlines()]
+                st = idf.stat()
             except OSError:
                 continue
+            stamp = [str(idf), st.st_mtime_ns, st.st_size]
+            key = f"{f.parent.name}|{jid.strip()}"
+            entry = cache.get(key)
+            if isinstance(entry, dict) and entry.get("line") == line.strip() \
+                    and entry.get("ids") == stamp:
+                hgs = entry["hgs"]
+            else:
+                entry = None
+                try:
+                    hgs = [l.strip() for l in idf.read_text().splitlines()]
+                except OSError:
+                    continue
             if hg and hg not in hgs:
                 continue
             k = re.fullmatch(r"ids_(\d+)\.txt", idf.name)
-            subs.append((f.parent, m.group(7), sub, jid.strip(), hgs, k.group(1) if k else None))
-    states = _sacct(sorted({s[3] for s in subs}))
+            subs.append((f.parent, m.group(7), sub, jid.strip(), hgs, k.group(1) if k else None,
+                         key, stamp, line.strip(), entry))
+    states = _sacct(sorted({s[3] for s in subs if s[9] is None}))
+    fresh = {}
     out = []
-    for run, stage, sub, jid, hgs, k in subs:
-        cpus, mem, time = (_sbatch_request(run / f"array_{k}.sbatch") if k is not None
-                           else ("-", "-", "-"))
+    for run, stage, sub, jid, hgs, k, key, stamp, line, entry in subs:
+        if entry is not None:
+            cpus, mem, time = entry["req"]
+            recs = [dict(zip(_REC_KEYS, t)) for t in entry["tasks"]]
+        else:
+            cpus, mem, time = (_sbatch_request(run / f"array_{k}.sbatch") if k is not None
+                               else ("-", "-", "-"))
+            recs = [states.get((jid, i)) if states is not None else None
+                    for i in range(len(hgs))]
+            if states is not None and recs and all(r is not None and _terminal(r["state"])
+                                                   for r in recs):
+                fresh[key] = {"line": line, "ids": stamp, "hgs": hgs, "req": [cpus, mem, time],
+                              "tasks": [[r[x] for x in _REC_KEYS] for r in recs]}
         for i, h in enumerate(hgs):
             if hg and h != hg:
                 continue
-            if states is None:
+            if entry is None and states is None:
                 status, exit_, rss, el = "unknown", "-", "-", "-"
             else:
-                rec = states.get((jid, i))
+                rec = recs[i]
                 if rec is None:
                     status, exit_, rss, el = "PENDING", "-", "-", "-"
                 else:
@@ -327,6 +384,10 @@ def _phylocli_attempts(hg: str | None, stages=None) -> list[Attempt]:
                     el = fmt_elapsed(rec["elapsed"]) if rec["elapsed"] else "-"
             out.append(Attempt(h, stage, "phylocli", run.name, sub, 1, status, exit_, cpus, mem,
                                time, rss, el, str(run / "logs" / f"{stage}_{jid}_{i}.err")))
+    merged = {k: v for k, v in cache.items() if k.split("|", 1)[0] in live}
+    merged.update(fresh)
+    if fresh or merged.keys() != cache.keys():
+        _write_array_cache(cache_path, merged)
     return out
 
 
