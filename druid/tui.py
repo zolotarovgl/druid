@@ -7,9 +7,11 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
+from rich.cells import cell_len
 from rich.markup import escape
 from rich.text import Text
 from textual import work
+from textual.actions import SkipAction
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, ScrollableContainer, Vertical, VerticalScroll
@@ -122,6 +124,164 @@ def ov_order(rows: list, sort: "tuple | None", hide: "str | None") -> list:
     return head + rest
 
 
+# ---- header sorting (every listed table) ------------------------------------------------------
+# A column of a SortTable: `name` keys the sort state (None = not selectable: the │ separator,
+# the selection mark); `label` is the header text ("\n" for the overview's two-row header);
+# `numeric` columns sort descending first, the others ascending first.
+SortCol = collections.namedtuple("SortCol", "name label numeric", defaults=(False,))
+
+
+def sort_arrow(numeric: bool, rev: bool) -> str:
+    """The direction a sorted column is shown in: ▼ descending, ▲ ascending."""
+    return "▼" if numeric != rev else "▲"
+
+
+def sort_rows(rows: list, sort: "tuple | None", keys: dict) -> list:
+    """`rows` in the order of `sort` = (column name, reversed); `keys` = {name: (key, numeric)}.
+    Stable (ties keep the incoming order); None or a name not in `keys` = unchanged."""
+    if sort is None or sort[0] not in keys:
+        return list(rows)
+    key, numeric = keys[sort[0]]
+    return sorted(rows, key=key, reverse=numeric != sort[1])
+
+
+OV_COLS = [SortCol("group", "\ngroup"), SortCol("HGs", "\nHGs", True),
+           *(SortCol(None, f"{OV_SEP}\n{OV_SEP}") if st is None
+             else SortCol(st, f"{OV_TOP.get(st, '')}\n{st}", True) for st in OV_COLUMNS)]
+
+
+class SortTable(DataTable):
+    """A DataTable with a header cursor (Grygoriy, 09/10/2026): ↑ on the first row enters the
+    header, ←/→ move between column names (skipping unnamed columns), enter or s sorts by that
+    column (again: reversed), ↓ returns to the first row.  Outside the header, s on a cell table
+    sorts by the cursor's column (the overview's s), on a row table it falls through.
+    The table owns its sort (`sort` = (column name, reversed) or None, kept across refills) and
+    its header labels (▲/▼ after the sorted column, the header cursor reversed); the app orders
+    the rows in its fill functions and is told of a new sort by `on_sort(table)`.
+    Textual 8.2.8's DataTable has no header cursor: the cursor actions are overridden here, and
+    `_clear_caches` (private) is the only way to re-render a relabelled header."""
+    BINDINGS = [Binding("s", "sort_here", "sort", show=False)]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cols: list = []
+        self.sort: "tuple | None" = None
+        self.header = False                     # header mode
+        self.hcol = 0                           # header cursor column
+        self.on_sort = None                     # callable(table), set by the app
+
+    def set_cols(self, cols: list) -> None:
+        """Replace the columns (and drop the rows); the sort is kept, by column name."""
+        self.clear(columns=True)
+        self.cols = list(cols)
+        if self.header:
+            self.hcol = self._near(min(self.hcol, len(self.cols) - 1))
+        self.add_columns(*(self._label(i) for i in range(len(self.cols))))
+
+    def _label(self, i: int) -> Text:
+        c = self.cols[i]
+        text = c.label
+        if self.sort is not None and c.name is not None and self.sort[0] == c.name:
+            text += " " + sort_arrow(c.numeric, self.sort[1])
+        return Text(text, style="reverse" if self.header and i == self.hcol else "")
+
+    def relabel(self) -> None:
+        for i, col in enumerate(self.ordered_columns[:len(self.cols)]):
+            col.label = self._label(i)
+            col.content_width = max(col.content_width,
+                                    *(cell_len(x) for x in col.label.plain.split("\n")))
+        self._clear_caches()
+        self._require_update_dimensions = True
+        self.refresh()
+
+    def _selectable(self) -> list:
+        return [i for i, c in enumerate(self.cols) if c.name is not None]
+
+    def _near(self, i: int) -> int:
+        """Column i when selectable, else the next selectable one right of it, else left."""
+        sel = self._selectable()
+        right = [j for j in sel if j >= i]
+        return right[0] if right else (sel[-1] if sel else 0)
+
+    def enter_header(self) -> None:
+        self.header = True
+        self.hcol = self._near(self.cursor_column if self.cursor_type == "cell" else 0)
+        self.show_cursor = False
+        self.relabel()
+
+    def leave_header(self, to_row: bool = True) -> None:
+        self.header = False
+        self.show_cursor = True
+        if to_row and self.row_count:
+            self.move_cursor(row=0, column=self.hcol if self.cursor_type == "cell" else None)
+        self.relabel()
+
+    def _step(self, d: int) -> None:
+        nxt = [j for j in self._selectable() if (j - self.hcol) * d > 0]
+        if not nxt:
+            return
+        self.hcol = nxt[0] if d > 0 else nxt[-1]
+        if self.cursor_type == "cell":           # keep the column in view on the wide overview
+            self.move_cursor(column=self.hcol)
+        self.relabel()
+
+    def sort_by(self, i: int) -> None:
+        """Sort by column i: a new column starts in its default direction, the same column
+        reverses; an unnamed column (│) does nothing."""
+        if not 0 <= i < len(self.cols) or self.cols[i].name is None:
+            return
+        name = self.cols[i].name
+        same = self.sort is not None and self.sort[0] == name
+        self.sort = (name, not self.sort[1] if same else False)
+        self.relabel()
+        if self.on_sort is not None:
+            self.on_sort(self)
+
+    def action_cursor_up(self) -> None:
+        if self.header:
+            return
+        if self.cursor_row <= 0 and self._selectable():
+            self.enter_header()
+            return
+        super().action_cursor_up()
+
+    def action_cursor_down(self) -> None:
+        if self.header:
+            self.leave_header()
+            return
+        super().action_cursor_down()
+
+    def action_cursor_left(self) -> None:
+        if self.header:
+            self._step(-1)
+            return
+        super().action_cursor_left()
+
+    def action_cursor_right(self) -> None:
+        if self.header:
+            self._step(1)
+            return
+        super().action_cursor_right()
+
+    def action_select_cursor(self) -> None:
+        if self.header:                          # enter in the header sorts, never opens
+            self.sort_by(self.hcol)
+            return
+        super().action_select_cursor()
+
+    def action_sort_here(self) -> None:
+        if self.header:
+            self.sort_by(self.hcol)
+        elif self.cursor_type == "cell":
+            self.sort_by(self.cursor_column)
+        else:
+            raise SkipAction()
+
+    def on_blur(self) -> None:
+        if self.header:                          # tab away: the header cursor goes too
+            self.leave_header(to_row=False)
+
+
 class PhyloApp(App):
     TITLE = "phylocli"
     CSS = """
@@ -213,7 +373,6 @@ class PhyloApp(App):
         self._sp_note = ""                      # why the universe / phyla could not be read
         self._hg_unit: "str | None" = None                 # unit the #hgs / #arrays headers show
         self._array_rows: list = []
-        self.ov_sort: "tuple | None" = None     # (column name, reversed); s
         self.ov_hide: "str | None" = None       # stage name; h
         self.ov_shown: list = []                # ov_rows as displayed (sorted / filtered)
 
@@ -225,7 +384,7 @@ class PhyloApp(App):
                 yield Static("", id="help")
                 yield Static("", id="status")
         with Vertical(id="ov"):
-            yield DataTable(id="overview", cursor_type="cell", header_height=2)   # step1/step2 header
+            yield SortTable(id="overview", cursor_type="cell", header_height=2)   # step1/step2 header
             yield Static("", id="ovfoot")
         with Grid(id="hgview"):
             yield DataTable(id="stages", cursor_type="row")
@@ -247,6 +406,7 @@ class PhyloApp(App):
 
     def on_mount(self) -> None:
         self.query_one("#stages", DataTable).add_columns("stage", "done", "run", "ready", "blk", "total")
+        self.query_one("#overview", SortTable).set_cols(OV_COLS)
         self._set_units(force=True)
         self.query_one("#res", DataTable).add_columns("HG", "OGs", "genes", "⚠")
         # no reference-ortholog columns here: the reference is per gene (it differs within 19 %
@@ -254,6 +414,8 @@ class PhyloApp(App):
         self.query_one("#ogs", DataTable).add_columns("OG", "genes", "spp", "support", "name")
         self.query_one("#members", DataTable).add_columns("gene", "sp", "ref.orth", "sup")
         self.query_one("#memfilter").display = False
+        for t in self.query(SortTable):          # a header sort reorders that table, in memory
+            t.on_sort = self._resorted
         for wid, title in PANE_TITLES.items():   # names in the top-left border, to refer to them
             self.query_one(wid).border_title = title
         self._show_view()
@@ -458,10 +620,6 @@ class PhyloApp(App):
         col = t.cursor_column
         if col >= 2 and stage_at_column(col) is None:      # never restore onto the separator
             col += 1
-        if not t.columns:
-            t.add_columns(Text("\ngroup"), Text("\nHGs"),
-                          *(Text(f"{OV_SEP}\n{OV_SEP}") if st is None
-                            else Text(f"{OV_TOP.get(st, '')}\n{st}") for st in OV_COLUMNS))
         t.clear()
         for r in self.ov_shown:
             cells = []
@@ -486,7 +644,8 @@ class PhyloApp(App):
     def _ov_title(self) -> str:
         parts = ["Overview"]
         if self.ov_sort is not None:
-            parts.append(f"sort: {self.ov_sort[0]} {'▲' if self.ov_sort[1] else '▼'}")
+            col, rev = self.ov_sort                # the same arrow as the column header
+            parts.append(f"sort: {col} {sort_arrow(col != 'group', rev)}")
         if self.ov_hide is not None:
             parts.append(f"only actionable at {self.ov_hide}")
         return " · ".join(parts)
@@ -615,13 +774,21 @@ class PhyloApp(App):
             self.by = "category"
             self._regroup()
 
+    @property
+    def ov_sort(self) -> "tuple | None":
+        """The overview's sort = its table's header sort: one state for s and the header."""
+        return self.query_one("#overview", SortTable).sort
+
     def action_sort(self) -> None:
-        col = self._ov_column() if self.view == "overview" else None
-        if col is None:                          # no columns yet, or the │ separator
-            return
-        same = self.ov_sort is not None and self.ov_sort[0] == col
-        self.ov_sort = (col, not self.ov_sort[1] if same else False)
-        self._fill_overview(self.ov_rows)        # in memory only
+        """s with the overview table not focused (focused, the table's own s handles it)."""
+        if self.view == "overview":
+            t = self.query_one("#overview", SortTable)
+            t.sort_by(t.cursor_column)           # no-op on the │ separator
+
+    def _resorted(self, t: "SortTable") -> None:
+        """A table's sort changed (header enter / s, or s on a cell): reorder it in memory."""
+        if t.id == "overview":
+            self._fill_overview(self.ov_rows)
 
     def action_hide(self) -> None:
         col = self._ov_column() if self.view == "overview" else None

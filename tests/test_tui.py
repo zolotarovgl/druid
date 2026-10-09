@@ -1731,7 +1731,7 @@ def test_s_on_group_and_hgs_columns(cli):
             _to_col(app, "group")
             await _key(pilot, "s")                                  # new column: fresh, by name
             assert _pair(app) == ["tfs.A", "tfs.C_x"]
-            assert app.query_one("#overview").border_title == "Overview · sort: group ▼"
+            assert app.query_one("#overview").border_title == "Overview · sort: group ▲"
             await _key(pilot, "s")
             assert _pair(app) == ["tfs.C_x", "tfs.A"] and _shown(app)[0] == "ALL"
     _run(go())
@@ -2067,4 +2067,128 @@ def test_warning_is_notified_once_per_session(cli, monkeypatch):
             app.load_now()                                       # next refresh: same message
             await pilot.pause()
             assert n() == 1
+    _run(go())
+
+
+# ---- header sorting ---------------------------------------------------------------------------
+def _heads(app, wid):
+    """Header labels of a table as shown (the overview's are two-row: 'step2 ·\\nalign')."""
+    return [c.label.plain for c in app.query_one(wid).ordered_columns]
+
+
+def _hcur(app, wid):
+    """Index of the reversed header label (the header cursor), None outside header mode."""
+    hits = [i for i, c in enumerate(app.query_one(wid).ordered_columns) if "reverse" in str(c.label.style)]
+    return hits[0] if hits else None
+
+
+def test_sort_rows_and_arrow():
+    keys = {"n": (lambda r: r[1], True), "name": (lambda r: r[0], False)}
+    rows = [("b", 1), ("a", 3), ("c", 1)]
+    assert tui.sort_rows(rows, ("n", False), keys) == [("a", 3), ("b", 1), ("c", 1)]   # ties keep order
+    assert tui.sort_rows(rows, ("n", True), keys) == [("b", 1), ("c", 1), ("a", 3)]
+    assert tui.sort_rows(rows, ("name", False), keys) == [("a", 3), ("b", 1), ("c", 1)]
+    assert tui.sort_rows(rows, None, keys) == rows and tui.sort_rows(rows, ("x", False), keys) == rows
+    assert (tui.sort_arrow(True, False), tui.sort_arrow(True, True)) == ("▼", "▲")
+    assert (tui.sort_arrow(False, False), tui.sort_arrow(False, True)) == ("▲", "▼")
+
+
+def test_up_on_first_row_enters_overview_header_and_down_leaves(cli):
+    _sorted_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            ov = app.query_one("#overview")
+            _to_col(app, "tree", row=1)
+            await _key(pilot, "up")
+            assert not ov.header and ov.cursor_row == 0
+            await _key(pilot, "up")                                  # row 0: into the header
+            assert ov.header and _hcur(app, "#overview") == tui.ov_column("tree")
+            await _key(pilot, "right")
+            assert _hcur(app, "#overview") == tui.ov_column("tree") + 1
+            await _key(pilot, "down")                                # back to the first row
+            assert not ov.header and _hcur(app, "#overview") is None
+            assert ov.cursor_row == 0 and ov.cursor_column == tui.ov_column("tree") + 1
+    _run(go())
+
+
+def test_header_enter_and_s_sort_with_arrow_and_same_state_as_cell_s(cli):
+    _sorted_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            ov = app.query_one("#overview")
+            _to_col(app, "tree")
+            await _key(pilot, "up", "enter")                         # header: sort, never open
+            assert app.view == "overview" and ov.header
+            assert app.ov_sort == ("tree", False) and _pair(app) == ["tfs.C_x", "tfs.A"]
+            assert _heads(app, "#overview")[tui.ov_column("tree")] == "HGs\ntree ▼"
+            await _key(pilot, "s")                                   # s in the header: reverse
+            assert app.ov_sort == ("tree", True) and _pair(app) == ["tfs.A", "tfs.C_x"]
+            assert _heads(app, "#overview")[tui.ov_column("tree")] == "HGs\ntree ▲"
+            await _key(pilot, "down", "s")                           # s on a cell: the same sort
+            assert app.ov_sort == ("tree", False) and ov.cursor_row == 0
+            assert app.query_one("#overview").border_title == "Overview · sort: tree ▼"
+            _to_col(app, "group")
+            await _key(pilot, "up", "enter")                         # text: ascending first
+            assert app.ov_sort == ("group", False) and _heads(app, "#overview")[0] == "\ngroup ▲"
+            assert _heads(app, "#overview")[tui.ov_column("tree")] == "HGs\ntree"   # one arrow
+            assert _shown(app)[0] == "ALL"                           # ALL stays pinned
+    _run(go())
+
+
+def test_header_skips_separator_and_sort_survives_refresh(cli):
+    _sorted_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            ov = app.query_one("#overview")
+            sep = tui.ov_column("align") - 1
+            ov.move_cursor(row=0, column=sep - 1)
+            await pilot.pause()
+            await _key(pilot, "up", "right")                         # cluster -> align, not │
+            assert _hcur(app, "#overview") == tui.ov_column("align")
+            await _key(pilot, "left")
+            assert _hcur(app, "#overview") == sep - 1
+            ov.move_cursor(row=0, column=sep)
+            await _key(pilot, "down")
+            ov.move_cursor(row=0, column=sep)
+            await pilot.pause()
+            await _key(pilot, "up")                                  # from │: next column right
+            assert _hcur(app, "#overview") == tui.ov_column("align")
+            await _key(pilot, "enter")
+            app.load_now()
+            await pilot.pause()
+            assert app.ov_sort == ("align", False)
+            assert _heads(app, "#overview")[tui.ov_column("align")].endswith("align ▼")
+            assert _hcur(app, "#overview") == tui.ov_column("align")   # still in header mode
+            await _key(pilot, "c")                                   # regroup: sort kept
+            assert app.ov_sort == ("align", False) and _shown(app)[0] == "ALL"
+    _run(go())
+
+
+def test_header_keys_touch_no_files_or_slurm(cli, monkeypatch):
+    _sorted_fixture()
+
+    def boom(*a, **k):
+        raise AssertionError("file or SLURM access on a header key")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            await app.workers.wait_for_complete()
+            monkeypatch.setattr(core, "ready_set", boom)
+            monkeypatch.setattr(core.report_status, "done_by_stage", boom)
+            monkeypatch.setattr(core.report_status, "nonempty_files", boom)
+            monkeypatch.setattr(tui.model, "_slurm", boom)
+            _to_col(app, "tree")
+            await _key(pilot, "up", "left", "right", "enter", "s", "down")
+            assert app.ov_sort == ("tree", True)
     _run(go())
