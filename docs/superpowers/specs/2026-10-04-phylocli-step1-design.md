@@ -14,7 +14,17 @@ same commands, safety rules and status views as the step2 stages, without Nextfl
 - Family id = `<pref>.<family>` where `family` = column 1 and `pref` = LAST column of the genefam
   row (exactly what `step1.nf` uses: `cols[0]`, `cols[-1]`), e.g. `slc.SLC25`. Blank lines skipped;
   trailing tabs tolerated (the file has rows with an 8th empty field: take the last NON-EMPTY field).
-- Duplicate family ids in the genefam file are an error listing them (currently `slc.SLC44`).
+- Duplicate family ids in the genefam file are a **warning** naming them, never an error (amended
+  09/10/2026, Grygoriy; currently `slc.SLC44` and `neu.Synapsin`): the `status`/`missing`
+  summaries, the TUI banner and every family command (`missing search|cluster`,
+  `submit search|cluster`, `status FAMILY`) print it and proceed. Each id counts once; the LAST row
+  is the one used, as in `main.py hmmsearch` (keys rows by name, last row wins) and step1.nf.
+- A family NAME listed under two prefixes (currently `CSD`: `rbp`, `tfs`) is a **warning** too
+  (amended 09/10/2026, Grygoriy): `main.py hmmsearch` keys rows by name, so `rbp.CSD`'s hits are
+  written as `tfs.CSD.*` and `rbp.CSD` is published empty ("no hits"), as step1.nf does.
+  `search` keeps that result and prints a `WARNING` saying so; the summaries, the TUI banner and
+  `submit search` print `warning: family name CSD is listed under 2 prefixes (rbp, tfs); hmmsearch
+  keys rows by name, so rbp.CSD's hits are written as tfs.CSD.* and rbp.CSD looks like "no hits"`.
 - HG ids (`<pref>.<family>.HGn`) remain the unit of the six step2 stages.
 
 ## Stages
@@ -70,6 +80,8 @@ rows (family ids). `--mem/--time/--cpus` overrides apply as for HG stages.
   number of families), plus the cluster "no hits" count; `hg_rows(cfg, stage)` returns family
   rows for `search`/`cluster` (same `HGRow` shape, `hg` = family id) so the CLI and the TUI
   share one code path. `select`/`plan` accept family ids for these stages.
+- **Overview separates step1 from step2** (amended 09/10/2026): search/cluster columns sit under a
+  `step1 · families` header, the HG stages under `step2 · HGs`, with a `│` separator between them.
 - **TUI** (amended 08/10/2026): `search` and `cluster` appear first in the stages panel; the
   list panel shows families for them (filters, select, resubmit, log work unchanged); the detail
   panel shows the family's two stages and its HG count.
