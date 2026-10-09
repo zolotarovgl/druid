@@ -39,6 +39,7 @@ class PhyloApp(App):
     #overview { height: 1fr; border: round $primary; }
     #ovfoot { height: auto; }
     #hgview { height: 1fr; }
+    #hgview DataTable:focus, #overview:focus { border: round orange; }
     """
     BINDINGS = [
         Binding("escape", "back", "overview"),

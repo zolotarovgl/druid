@@ -798,3 +798,20 @@ def test_tui_command_runs_without_mouse(cli, monkeypatch):
     monkeypatch.setattr(tui.PhyloApp, "run", lambda self, **kw: seen.update(kw))
     assert cli(["tui"]).exit_code == 0
     assert seen.get("mouse") is False
+
+
+def test_active_pane_border_is_orange(cli):
+    from textual.color import Color
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600, start="hgs")
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            for pane in ("#stages", "#hgs", "#arrays"):
+                app.query_one(pane).focus()
+                await pilot.pause()
+                for other in ("#stages", "#hgs", "#arrays"):
+                    colour = app.query_one(other).styles.border.top[1]
+                    assert (colour == Color.parse("orange")) == (other == pane), (pane, other)
+    _run(go())
