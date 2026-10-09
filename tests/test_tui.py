@@ -2009,3 +2009,23 @@ def test_esc_outside_box_clears_all_filters_then_leaves(cli):
             await _press(pilot, "escape")                               # 2nd esc: leaves
             assert app.view != "results"
     _run(go())
+
+
+def test_logo_is_18_lines_of_19_cells_and_only_on_the_first_screen(cli):
+    from rich.text import Text
+    from phylocli import logo
+    lines = logo.render_logo()
+    assert len(lines) == 18
+    assert {Text.from_markup(l).cell_len for l in lines} == {19}
+    assert "white" not in "".join(lines)                          # ⬜ is transparent
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(150, 40)) as pilot:
+            app.load_now()
+            await pilot.pause()
+            assert app.query_one("#logo").display and app.query_one("#ov").display
+            app.open_group("tfs")
+            await pilot.pause()
+            assert not app.query_one("#ov").display                # HG view: no logo
+    _run(go())

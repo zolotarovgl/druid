@@ -17,7 +17,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 from textual.worker import get_current_worker
 
-from phylocli import core, history, model
+from phylocli import core, history, logo, model
 from phylocli.common import fmt_mem, fmt_time
 
 
@@ -129,6 +129,8 @@ class PhyloApp(App):
     #hgview DataTable, #detail { border: round $primary; height: 100%; }
     #banner { height: auto; color: $warning; }
     #ov { height: 1fr; }
+    #logo { width: 21; height: auto; padding: 1 1 0 1; }
+    #ovmain { width: 1fr; height: 1fr; }
     #overview { height: 1fr; border: round $primary; }
     #ovfoot { height: auto; }
     #hgview { height: 1fr; }
@@ -213,9 +215,11 @@ class PhyloApp(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield Static("", id="banner")
-        with Vertical(id="ov"):
-            yield DataTable(id="overview", cursor_type="cell", header_height=2)   # step1/step2 header
-            yield Static("", id="ovfoot")
+        with Horizontal(id="ov"):
+            yield Static("\n".join(logo.render_logo()), id="logo")    # first screen only
+            with Vertical(id="ovmain"):
+                yield DataTable(id="overview", cursor_type="cell", header_height=2)   # step1/step2 header
+                yield Static("", id="ovfoot")
         with Grid(id="hgview"):
             yield DataTable(id="stages", cursor_type="row")
             yield DataTable(id="hgs", cursor_type="row")
