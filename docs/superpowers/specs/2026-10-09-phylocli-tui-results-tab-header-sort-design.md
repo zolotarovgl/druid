@@ -69,6 +69,20 @@ Grygoriy, 09/10/2026: "in the results, when in ALL tab / should filter the HGs."
   `OGs` re-points `members`/`species` at the first matching OG.
 - Typing in the box never triggers app keys (as today for `members`).
 
+## Part D — species pane coloured by coverage
+
+Grygoriy, 09/10/2026: species-pane counts coloured red → green by coverage. In the Results
+window's `species` pane each phylum line's `k/m spp` is coloured on a red → yellow → green scale
+by `k/m` (0 → red, 1 → green; thresholds at thirds); absent phyla stay dim. Colour only, no change
+to the numbers; markup applied to the computed text (the species text itself stays escaped).
+
+## Part E — overview numbers left of narrower bars
+
+Grygoriy, 09/10/2026: "numbers left of the progress bars, with narrower bars". In the Jobs tab each
+stage cell is `<done>/<total>` right-aligned, then a bar of 6 cells (`OV_BAR` 10 → 6), e.g.
+`1800/2014 █████░`; units are families for search/cluster, HGs otherwise. The footer's per-stage
+counts stay. Sorting/hiding semantics are unchanged.
+
 ## Error handling
 - Results tab read errors per HG are counted, not fatal: a footer `n HGs unreadable` and the
   per-HG error shown in the Results window, as today.
