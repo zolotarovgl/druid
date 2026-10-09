@@ -1859,3 +1859,41 @@ def test_footer_prev_hint_only_for_possvm(cli):
             assert app.res_source == "possvm_prev"
             assert "check possvm_prev" not in app._res_foot
     _run(go())
+
+
+@pytest.mark.parametrize("pane", ["#stages", "#arrays"])
+def test_selection_keys_only_act_in_hgs_pane(cli, monkeypatch, pane):
+    app = _failed_app(cli, monkeypatch)
+
+    async def go():
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.query_one(pane).focus()
+            await pilot.pause()
+            await pilot.press("space", "a", "r")
+            await pilot.pause()
+            assert not app.selected
+            assert not isinstance(app.screen, tui.ResubmitScreen)
+            msgs = [str(n.message) for n in app._notifications]
+            assert msgs.count("tab to 2 HGs to select") == 3
+            app.query_one("#hgs").focus()
+            await pilot.pause()
+            await pilot.press("a", "r")
+            await pilot.pause()
+            assert app.selected and isinstance(app.screen, tui.ResubmitScreen)
+    _run(go())
+
+
+def test_selection_keys_stay_in_footer(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+
+    async def go():
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.query_one("#stages").focus()
+            await pilot.pause()
+            for a in ("toggle", "select_all", "resubmit"):
+                assert app.check_action(a, ()) is True
+    _run(go())

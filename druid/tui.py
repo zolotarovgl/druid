@@ -672,13 +672,24 @@ class PhyloApp(App):
         self.filter = FILTERS[(FILTERS.index(self.filter) + 1) % len(FILTERS)]
         self._fill_hgs()
 
+    def _in_hgs_pane(self) -> bool:
+        """Selection keys act on the HG list only; elsewhere they warn and do nothing."""
+        if self.focused is not None and self.focused.id == "hgs":
+            return True
+        self.notify("tab to 2 HGs to select", severity="warning")
+        return False
+
     def action_toggle(self) -> None:
+        if not self._in_hgs_pane():
+            return
         hg = self._cursor_hg()
         if hg:
             self.selected ^= {hg}
             self._fill_hgs()
 
     def action_select_all(self) -> None:
+        if not self._in_hgs_pane():
+            return
         self.selected = {r.hg for r in self.visible()}
         self._fill_hgs()
 
@@ -688,6 +699,8 @@ class PhyloApp(App):
         self.load_bg()
 
     def action_resubmit(self) -> None:
+        if not self._in_hgs_pane():
+            return
         rows = [r for r in self.rows if r.hg in self.selected]
         if not rows:
             self.notify("nothing selected (space / a)", severity="warning")
