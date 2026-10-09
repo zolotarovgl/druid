@@ -17,7 +17,8 @@ import report_status  # noqa: E402
 STAGES = ["align", "tree", "possvm_prev", "generax", "gxsup", "possvm"]
 PUBLISH_DIR = {"align": "align", "tree": "gene_trees", "possvm_prev": "possvm_prev",
                "generax": "generax", "gxsup": "generax_support", "possvm": "possvm"}
-PATH_PARAMS = ("REFNAMES", "SPECIES_TREE", "resources_tsv")
+PATH_PARAMS = ("REFNAMES", "SPECIES_TREE", "resources_tsv", "genefam_info", "infasta", "pfam_db",
+               "hmm_dir")
 
 
 @dataclass(frozen=True)
@@ -79,7 +80,7 @@ def apply_sets(raw: dict, sets: list[str]) -> list[str]:
 def config_from_raw(raw: dict) -> Config:
     params = dict(raw.get("params", {}))
     for k in PATH_PARAMS:
-        if k in params:
+        if params.get(k):                       # hmm_dir may be null
             params[k] = _abs(params[k])
     return Config(outdir=Path(_abs(raw["outdir"])), params=params,
                   partition=raw["partition"], qos=raw["qos"],
@@ -139,6 +140,86 @@ def read_ids(path) -> list[str]:
         if l and l not in seen:
             seen.add(l)
             out.append(l)
+    return out
+
+
+class FamilyError(ValueError):
+    """The genefam file is missing. (Duplicate ids and name collisions are warnings, never errors:
+    family_warnings; decided by Grygoriy 09/10/2026.)"""
+
+
+def parse_genefam(path) -> tuple[list[str], list[str]]:
+    """(family ids in file order, duplicated ids sorted) of a gene-family info file.
+
+    Family id = <pref>.<family>: family = column 1, pref = the LAST NON-EMPTY field. This is
+    step1.nf's `line.trim().split('\\t')` -> cols[-1]: trimming drops a trailing tab, so a row
+    with an empty 8th field still takes column 7. Blank lines are skipped."""
+    ids: list[str] = []
+    seen: set[str] = set()
+    dups: set[str] = set()
+    for line in Path(path).read_text(errors="replace").splitlines():
+        if not line.strip():
+            continue
+        cols = line.strip().split("\t")
+        fid = f"{cols[-1].strip()}.{cols[0].strip()}"
+        if fid in seen:
+            dups.add(fid)
+        else:
+            seen.add(fid)
+            ids.append(fid)
+    return ids, sorted(dups)
+
+
+def family_ids(cfg: Config, strict: bool = True) -> set[str]:
+    """Family ids of params.genefam_info, each once (a duplicated id is a warning, see
+    family_warnings). strict: a missing file raises FamilyError; otherwise set()."""
+    p = cfg.params.get("genefam_info")
+    path = Path(p) if p else None
+    if path is None or not path.is_file():
+        if strict:
+            raise FamilyError(f"genefam file not found: {p}")
+        return set()
+    ids, _dups = parse_genefam(path)
+    return set(ids)
+
+
+def name_collisions(path) -> dict[str, tuple[list[str], str]]:
+    """Family names listed under more than one prefix: name -> (prefixes in file order, prefix
+    of the LAST row with that name). main.py hmmsearch keys rows by name (the last row wins) and
+    names its outputs after that row's prefix, so every other prefix's id gets no hits."""
+    prefs: dict[str, list[str]] = {}
+    last: dict[str, str] = {}
+    for line in Path(path).read_text(errors="replace").splitlines():
+        if not line.strip():
+            continue
+        cols = line.strip().split("\t")
+        name, pref = cols[0].strip(), cols[-1].strip()
+        prefs.setdefault(name, [])
+        if pref not in prefs[name]:
+            prefs[name].append(pref)
+        last[name] = pref
+    return {n: (ps, last[n]) for n, ps in prefs.items() if len(ps) > 1}
+
+
+def family_warnings(cfg: Config, collisions: bool = True) -> list[str]:
+    """Warnings about the genefam file -- never errors (decided by Grygoriy 09/10/2026): duplicate
+    ids (the last row is used, as main.py and step1.nf do) and, with `collisions`, family names
+    listed under several prefixes. [] when there is no genefam file."""
+    p = cfg.params.get("genefam_info")
+    if not p or not Path(p).is_file():
+        return []
+    out = []
+    _ids, dups = parse_genefam(p)
+    if dups:
+        out.append(f"warning: duplicate family ids in {p} ({len(dups)}): {' '.join(dups)}; "
+                   "the last row of each is used (main.py hmmsearch keys rows by name, the last "
+                   "row wins)")
+    if collisions:
+        for name, (prefs, used) in sorted(name_collisions(p).items()):
+            lost = " and ".join(f"{q}.{name}" for q in prefs if q != used)
+            out.append(f"warning: family name {name} is listed under {len(prefs)} prefixes "
+                       f"({', '.join(prefs)}); hmmsearch keys rows by name, so {lost}'s hits are "
+                       f"written as {used}.{name}.* and {lost} looks like \"no hits\"")
     return out
 
 

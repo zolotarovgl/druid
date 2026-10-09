@@ -12,6 +12,12 @@ from phylocli import core  # noqa: E402
 
 HEADER = "id aln_mem aln_time gr_mem gr_time gr_watcher_mem gr_watcher_time phy_mem phy_time pvm_mem pvm_time"
 ROW = "tfs.A.HG11 800.MB 45.min 3100.MB 120.min 3100.MB 180.min 800.MB 1140.min 800.MB 9.min"
+GENEFAM = ("A\tPF_A\t1.1\t3\tGA\tTF\ttfs\n"
+           "B\tPF_B\t1.1\t3\tGA\tTF\ttfs\n"
+           "\n"
+           "C_x\tPF_C\t1.1\t3\tGA\tTF\ttfs\n"
+           "NEW\tPF_N\t1.1\t3\tGA\tslc\tslc\n"
+           "Trail\tPF_T\t1.1\t3\tGA\tcalcium\tcal\t\n")    # trailing tab, like Carb_anhydrase / Slc26
 
 
 def _w(p, text):
@@ -34,6 +40,9 @@ def results_tree(tmp_path):
     _w(root / "resources.tsv", HEADER.replace(" ", "\t") + "\n" + ROW.replace(" ", "\t") + "\n")
     _w(root / "refnames.csv", "a,b\n")
     _w(root / "species.newick", "(a,b);\n")
+    _w(root / "gene_families_searchinfo.csv", GENEFAM)
+    _w(root / "input.fasta", ">p1\nMKV\n")
+    _w(root / "Pfam-A.hmm", "HMMER3/f\n")
     cfg_file = root / "config.yaml"
     base = yaml.safe_load((ROOT / "phylocli/config.yaml").read_text())
     base["outdir"] = str(out)
@@ -42,6 +51,9 @@ def results_tree(tmp_path):
     base["params"].update(resources_tsv=str(root / "resources.tsv"),
                           REFNAMES=str(root / "refnames.csv"),
                           SPECIES_TREE=str(root / "species.newick"),
+                          genefam_info=str(root / "gene_families_searchinfo.csv"),
+                          infasta=str(root / "input.fasta"),
+                          pfam_db=str(root / "Pfam-A.hmm"),
                           min_seqs=2, min_distinct=1)  # fixture HGs: 3 identical seqs
     cfg_file.write_text(yaml.safe_dump(base))
     return core.load_config(cfg_file), root

@@ -1,4 +1,4 @@
-# Parameters the step2 stages read. Values = v3 nextflow.config params + the `precise`
+# Parameters the step1 and step2 stages read. Values = v3 nextflow.config params + the `precise`
 # profile + the last successful step2 run (24/09/2026: -profile slurm,precise --run_generax).
 outdir: results
 # nextflow_dir: .   # optional: where .nextflow/ (run history, read by `status HG`) lives; default = project root
@@ -19,3 +19,13 @@ params:
   resources_tsv: resources.tsv
   min_seqs: 5          # skip HGs with fewer seqs (= nextflow.config params.min_seqs; IQ-TREE needs >= 4 to bootstrap)
   min_distinct: 4      # ... and HGs with fewer distinct seqs (= nextflow.config params.min_distinct)
+  # step1 (search, cluster): = nextflow.config params + the 24/09/2026 step1 run
+  genefam_info: data/gene_families_searchinfo.csv   # family rows; the job reads a copy taken at submit
+  infasta: data/input.fasta
+  pfam_db: /users/asebe/xgraubove/data/pfam/Pfam-A.hmm
+  hmm_dir: null        # optional dir of custom <name>.hmm models (never written: search.sh copies it)
+  domain_expand: 30
+  s1_ncpu: 4           # search cpus
+  s2_ncpu: 4           # cluster cpus
+  max_n: 2000          # recluster HGs larger than this
+  s2_inflation: 1.1    # MCL inflation
