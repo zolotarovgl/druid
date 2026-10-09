@@ -66,6 +66,10 @@ def _check_stage(stage: str) -> str:
 
 FAM_HELP = "restrict to a category (tfs) or a family (tfs.T-box), matched on whole id parts"
 
+# written when `phylo tui` exits: mouse reporting off (1000/1002/1003/1006), leave the
+# alternate screen, show the cursor, clear the screen and home the cursor
+TERM_RESET = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1049l\x1b[?25h\x1b[2J\x1b[H"
+
 
 def _selected(cfg: core.Config, ids: Path | None, fam: str | None = None) -> set[str]:
     exp = core.expected(cfg)
@@ -458,7 +462,13 @@ def tui(refresh: int = typer.Option(30, "--refresh", min=5, help="seconds betwee
         if (e.name or "").startswith("textual"):
             _fail("textual not installed: pip install textual", 1)
         raise
-    tui_mod.PhyloApp(_cfg(), refresh_s=refresh, raw=tui_mod.load_raw()).run(mouse=False)
+    try:
+        tui_mod.PhyloApp(_cfg(), refresh_s=refresh, raw=tui_mod.load_raw()).run(mouse=False)
+    finally:
+        # Leave a clean terminal however the app ended (q, Ctrl-C, crash): mouse reporting
+        # off, main screen, cursor shown, then clear (else e.g. "35;98;12M" leaks into the shell).
+        sys.stdout.write(TERM_RESET)
+        sys.stdout.flush()
 
 
 def _job_tasks(job_id: str, failed: bool, running: bool):

@@ -824,6 +824,21 @@ def test_tui_command_runs_without_mouse(cli, monkeypatch):
     assert seen.get("mouse") is False
 
 
+@pytest.mark.parametrize("how", ["quit", "ctrl-c", "crash"])
+def test_tui_command_resets_terminal_on_exit(cli, monkeypatch, how):
+    from phylocli import phylo
+
+    def run(self, **kw):
+        if how == "ctrl-c":
+            raise KeyboardInterrupt
+        if how == "crash":
+            raise RuntimeError("boom")
+    monkeypatch.setattr(tui.PhyloApp, "run", run)
+    r = cli(["tui"])
+    assert r.output.endswith(phylo.TERM_RESET)
+    assert (r.exit_code == 0) == (how == "quit")
+
+
 def test_active_pane_border_is_orange(cli):
     from textual.color import Color
 
