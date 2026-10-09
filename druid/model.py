@@ -884,3 +884,34 @@ def og_outside(og: OG, universe) -> list[tuple[str, int]]:
     u = set(universe)
     c = collections.Counter(m.species for m in og.genes if m.species not in u)
     return sorted(c.items(), key=lambda x: (-x[1], x[0]))
+
+
+# ---- Results tab (TUI first screen) ----------------------------------------------------------
+@dataclass
+class OGGroupRow:
+    group: str
+    hgs: int                   # expected HGs of the group
+    with_output: int           # HGs with a non-empty ortholog_groups.csv (unreadable included)
+    ogs: int
+    genes: int
+    zero: int                  # OGs with orthogroup_support exactly 0
+    unreadable: int            # HGs whose file could not be parsed (HGOgs.error)
+
+
+def og_group_rows(groups, exp, by: str, rows) -> list[OGGroupRow]:
+    """One row per group name (ALL = every expected HG; else group_key(hg, by) == name), in
+    the order given, summed over `rows` ([HGOgs] of any HGs; others count as without output).
+    Pure: no file access."""
+    by_hg = {r.hg: r for r in rows}
+    members: dict[str, list[str]] = collections.defaultdict(list)
+    for hg in exp:
+        members[group_key(hg, by)].append(hg)
+    out = []
+    for g in groups:
+        hgs = list(exp) if g == "ALL" else members.get(g, [])
+        rs = [by_hg[h] for h in hgs if h in by_hg]
+        ok = [r for r in rs if not r.error]
+        ogs = [o for r in ok for o in r.ogs]
+        out.append(OGGroupRow(g, len(hgs), len(rs), len(ogs), sum(len(o.genes) for o in ogs),
+                              sum(1 for o in ogs if o.support == 0), len(rs) - len(ok)))
+    return out

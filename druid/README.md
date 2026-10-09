@@ -192,7 +192,8 @@ Check `phylocli/runs/<ts>_<stage>/logs/*.err` for any HG that is still missing a
 ## phylo tui
 
 Full-screen view (Textual, optional: `pip install textual` in the `phylo` env; needs
-textual >= 8.2, < 9, tested on 8.2.8: the header cursor and sort arrows rely on its DataTable internals).
+textual >= 8.2, < 9, tested on 8.2.8: the header cursor and sort arrows use only DataTable's public API, re-rendering
+a relabelled header through `notify_style_update()`).
 
     phylocli/phylo tui [--refresh 30]
 

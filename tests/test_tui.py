@@ -2477,3 +2477,247 @@ def test_nan_sorts_last_and_never_breaks_sorted():
     mrows = [(0, M("5.0")), (1, M("nan")), (2, M("9.0")), (3, M("-")), (4, M("7.0"))]
     out = tui.sort_rows(mrows, ("sup", False), tui.MEM_KEYS)
     assert [i for i, _ in out[:3]] == [2, 4, 0]
+
+
+# ---- Results tab (first screen) ---------------------------------------------------------------
+def _count_group_ogs(monkeypatch):
+    calls = []
+    real = tui.model.group_ogs
+
+    def counted(cfg, hgs, source, **k):
+        calls.append((len(list(hgs)), source))
+        return real(cfg, hgs, source, **k)
+    monkeypatch.setattr(tui.model, "group_ogs", counted)
+    return calls
+
+
+async def _results_tab(app, pilot):
+    """First screen, after the first refresh -> tab -> wait for the one read."""
+    app.load_now()
+    await pilot.pause()
+    await pilot.press("tab")
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+
+
+def _rt(app):
+    return [(r.group, r.hgs, r.with_output, r.ogs, r.genes, r.zero) for r in app.rt_shown]
+
+
+def test_tab_switches_jobs_and_results_tabs(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            assert app._tab_text == "[Jobs] │ Results" and app.focused is app.query_one("#overview")
+            await pilot.press("tab")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.tab == "results" and app._tab_text == "Jobs │ [Results]"
+            assert app.focused is app.query_one("#rtab") and not app.query_one("#overview").display
+            assert [r.group for r in app.rt_shown] == [r.group for r in app.ov_rows]   # same groups
+            assert _rt(app)[:2] == [("ALL", 3, 2, 3, 7, 1), ("tfs", 3, 2, 3, 7, 1)]
+            assert _rt(app)[2][1:] == (0, 0, 0, 0, 0)
+            assert app.query_one("#rtab").border_title == "Results · possvm"
+            assert app.check_action("toggle_source", ()) and app.check_action("sort", ())
+            await _key(pilot, "shift+tab")
+            assert app.tab == "jobs" and app.focused is app.query_one("#overview")
+            assert not app.check_action("toggle_source", ())
+            await _key(pilot, "f", "tab")                            # by family: kept across tabs
+            assert app.by == "family" and app.tab == "results"
+            assert ("tfs.A", 2, 2, 3, 7, 1) in _rt(app) and ("tfs.C_x", 1, 0, 0, 0, 0) in _rt(app)
+    _run(go())
+
+
+def test_results_tab_reads_once_and_window_reuses_it(cli, monkeypatch):
+    write_results(_cfg())
+    calls = _count_group_ogs(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            assert calls == [(3, "possvm")]
+            rt = app.query_one("#rtab")
+            rt.move_cursor(row=[r.group for r in app.rt_shown].index("tfs"), column=3)
+            await pilot.pause()
+            await pilot.press("enter")                               # opens the Results window
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.view == "results" and app.res_group == "tfs"
+            assert [r.hg for r in app.res_rows] == ["tfs.A.HG1", "tfs.A.HG11"]
+            win = [_cells(app, "#res", i) for i in range(app.query_one("#res").row_count)]
+            tab = next(r for r in app.rt_rows if r.group == "tfs")
+            assert (tab.with_output, tab.hgs) == (len(app.res_rows), len(app.res_rows) + app.res_missing)
+            assert (tab.ogs, tab.genes, tab.zero) == tuple(sum(int(c[i]) for c in win) for i in (1, 2, 3))
+            assert calls == [(3, "possvm")]                          # no second read
+            await _key(pilot, "escape")
+            assert app.view == "overview" and app.tab == "results" and app.focused is rt
+            assert app._key_at_cursor(rt) == "tfs" and rt.cursor_column == 3
+            await _key(pilot, "tab", "o")                            # Jobs tab o: cache reused too
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.view == "results" and calls == [(3, "possvm")]
+            await _key(pilot, "escape", "tab")
+            assert app.tab == "results" and calls == [(3, "possvm")]   # switching never re-reads
+    _run(go())
+
+
+def test_results_tab_p_switches_source_and_R_rereads(cli, monkeypatch):
+    write_results(_cfg())
+    calls = _count_group_ogs(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            await pilot.press("p")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.rt_source == "possvm_prev" and calls[-1] == (3, "possvm_prev")
+            assert _rt(app)[0] == ("ALL", 3, 1, 1, 2, 0)
+            assert app.query_one("#rtab").border_title == "Results · possvm_prev"
+            await pilot.press("enter")                               # window opens on prev, cached
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.res_source == "possvm_prev" and len(calls) == 2
+            await _key(pilot, "escape")
+            await pilot.press("R")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert len(calls) == 3 and app.rt_source == "possvm_prev"
+    _run(go())
+
+
+def test_results_tab_sort_hide_and_header_keep_all_pinned(cli, monkeypatch):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            rt = app.query_one("#rtab")
+            rt.move_cursor(row=1, column=3)                          # OGs
+            await pilot.pause()
+            await _key(pilot, "h")
+            assert [r[0] for r in _rt(app)] == ["ALL", "tfs"]
+            assert rt.border_title == "Results · possvm · only ogs > 0"
+            await _key(pilot, "h")
+            assert len(_rt(app)) == 4
+            rt.move_cursor(row=0, column=0)
+            await pilot.pause()
+            await _key(pilot, "h")                                   # group: not a count
+            assert app.rt_hide is None
+            await _key(pilot, "s")                                   # s on a cell: group ▲
+            assert rt.sort == ("group", False) and [r[0] for r in _rt(app)] == ["ALL", "cal", "slc", "tfs"]
+            await _key(pilot, "up", "right", "right", "right", "enter")   # header: OGs ▼
+            assert rt.sort == ("ogs", False) and _heads(app, "#rtab")[3] == "OGs ▼"
+            assert [r[0] for r in _rt(app)][:2] == ["ALL", "tfs"]
+            app.load_now()                                           # refresh: sort kept, no read
+            await pilot.pause()
+            assert rt.sort == ("ogs", False) and [r[0] for r in _rt(app)][:2] == ["ALL", "tfs"]
+    _run(go())
+
+
+def test_results_tab_waits_for_first_refresh_and_shows_progress(cli, monkeypatch):
+    write_results(_cfg())
+    calls = _count_group_ogs(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await app.workers.wait_for_complete()
+            app._ov_inputs = (set(), {}, set(), {})                  # as before the first refresh
+            await pilot.press("tab")
+            await pilot.pause()
+            assert app.tab == "results" and calls == [] and app._og_cache is None
+            app.load_now()                                           # first data: the read starts
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert len(calls) == 1 and app._og_cache is not None
+            app.query_one("#rtab").add_class("loading")
+            app._rt_progress(app._rt_gen, 100, 1915)
+            assert "loading 100/1915…" in app._rt_foot
+            app._rt_progress(app._rt_gen - 1, 150, 1915)              # stale generation: ignored
+            assert "150/1915" not in app._rt_foot
+    _run(go())
+
+
+def test_results_tab_counts_unreadable_hgs(cli):
+    write_results(_cfg())
+    (_cfg().outdir / "possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv").write_text(
+        OG_HEAD + "broken\n")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            assert _rt(app)[0] == ("ALL", 3, 2, 2, 5, 1)
+            assert "1 HG unreadable" in app._rt_foot
+    _run(go())
+
+
+def test_results_tab_keys_touch_no_files_or_slurm(cli, monkeypatch):
+    write_results(_cfg())
+
+    def boom(*a, **k):
+        raise AssertionError("file or SLURM access on a Results tab key")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            monkeypatch.setattr(core, "ready_set", boom)
+            monkeypatch.setattr(core.report_status, "done_by_stage", boom)
+            monkeypatch.setattr(core.report_status, "nonempty_files", boom)
+            monkeypatch.setattr(tui.model, "read_ogs", boom)
+            monkeypatch.setattr(tui.model, "_slurm", boom)
+            app.query_one("#rtab").move_cursor(row=0, column=3)
+            await _key(pilot, "s", "h", "h", "up", "right", "enter", "down", "f", "c",
+                       "shift+tab", "tab")
+            assert app.tab == "results" and app.query_one("#rtab").sort == ("genes", False)
+    _run(go())
+
+
+def test_switching_tab_leaves_header_mode(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            ov, rt = app.query_one("#overview"), app.query_one("#rtab")
+            await _key(pilot, "up")
+            assert rt.header
+            await _key(pilot, "shift+tab")                           # Jobs tab: its table in row mode
+            assert app.tab == "jobs" and not rt.header and not ov.header and rt.show_cursor
+            await _key(pilot, "up")
+            assert ov.header
+            await _key(pilot, "tab")
+            assert app.tab == "results" and not ov.header and not rt.header and ov.show_cursor
+            assert _hcur(app, "#overview") is None and _hcur(app, "#rtab") is None
+    _run(go())
+
+
+def test_set_cols_sizes_a_sorted_column_like_a_resort(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(240, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            t = app.query_one("#res")
+            t.on_sort = None                                         # no row refill: labels only
+            t.sort = None
+            t.set_cols(tui.RES_COLS)
+            t.sort_by(1)                                             # plain re-sort: OGs ▼, pre-sized
+            await pilot.pause()
+            assert t.sort == ("ogs", False)
+            after_sort = _widths(app, "#res")
+            t.set_cols(tui.RES_COLS)                                 # refill with the sort kept
+            await pilot.pause()
+            assert _widths(app, "#res") == after_sort
+    _run(go())

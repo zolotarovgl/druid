@@ -438,3 +438,17 @@ def test_og_species_stats_per_phylum(cli):
     prev = model.read_ogs(cfg, "tfs.A.HG1", "possvm_prev")[0]     # Mlei 1, Zzz 1
     assert model.og_outside(prev, uni) == [("Zzz", 1)]            # in species_info, not a tip
     assert [r.phylum for r in model.og_species_stats(prev, uni, {})] == ["unknown"]
+
+
+def test_og_group_rows_sums_per_group(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    exp = {"tfs.A.HG1", "tfs.A.HG11", "tfs.C_x.HG1"}
+    rows, missing = model.group_ogs(cfg, exp, "possvm")
+    rows.append(model.HGOgs("tfs.C_x.HG1", [], "bad.csv:2: cannot parse row"))
+    out = model.og_group_rows(["ALL", "tfs", "cal"], exp, "category", rows)
+    assert [(r.group, r.hgs, r.with_output, r.ogs, r.genes, r.zero, r.unreadable) for r in out] == [
+        ("ALL", 3, 3, 3, 7, 1, 1), ("tfs", 3, 3, 3, 7, 1, 1), ("cal", 0, 0, 0, 0, 0, 0)]
+    fam = model.og_group_rows(["tfs.A", "tfs.C_x"], exp, "family", rows[:2])
+    assert [(r.group, r.hgs, r.with_output, r.ogs) for r in fam] == [("tfs.A", 2, 2, 3),
+                                                                     ("tfs.C_x", 1, 0, 0)]

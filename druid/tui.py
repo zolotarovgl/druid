@@ -31,7 +31,7 @@ def load_raw() -> dict:
 
 FILTERS = ("actionable", "failed", "ready", "running", "blocked", "done")
 ACTIONABLE = ("failed", "ready")      # the "actionable" filter shows failed + ready HGs
-PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
+PANE_TITLES = {"#overview": "Overview", "#rtab": "Results", "#stages": "1 Stages", "#hgs": "2 HGs",
                "#arrays": "3 Arrays", "#detail": "4 Detail",
                "#res": "Results", "#ogs": "OGs", "#members": "members", "#species_box": "species"}
 STATE_STYLE = {"done": "green", "running": "cyan", "ready": "yellow", "failed": "red",
@@ -202,13 +202,35 @@ MEM_KEYS = {"gene": (lambda p: p[1].gene, False), "sp": (lambda p: p[1].species,
             "ref": (lambda p: p[1].ref, False), "sup": (lambda p: _lead_float(p[1].ref_support), True)}
 
 
+# Results tab (first screen): one row per Jobs group; names = model.OGGroupRow fields.
+RT_COLS = [SortCol("group", "group"), SortCol("hgs", "HGs", True),
+           SortCol("with_output", "with output", True), SortCol("ogs", "OGs", True),
+           SortCol("genes", "genes", True), SortCol("zero", "⚠ sup 0", True)]
+RT_KEYS = {c.name: ((lambda r, n=c.name: getattr(r, n)), c.numeric) for c in RT_COLS}
+
+
+def rt_order(rows: list, sort: "tuple | None", hide: "str | None") -> list:
+    """Results tab rows as shown: ALL pinned first; `hide` (a count column name) drops rows
+    whose count there is 0; `sort` as for every SortTable."""
+    head = [r for r in rows if r.group == "ALL"]
+    rest = [r for r in rows if r.group != "ALL"]
+    if hide is not None:
+        rest = [r for r in rest if getattr(r, hide)]
+    return head + sort_rows(rest, sort, RT_KEYS)
+
+
 class _HeadText(Text):
     """A sortable column's label: it measures 2 cells wider than its text, room for ' ▲'/' ▼',
-    so sorting never changes a column's width (rich's public __rich_measure__ protocol)."""
+    so sorting never changes a column's width (rich's public __rich_measure__ protocol).
+    `pad` = 0 for a label that already carries the arrow: text + arrow is the same width."""
+
+    def __init__(self, *args, pad: int = 2, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.pad = pad
 
     def __rich_measure__(self, console, options):
         m = super().__rich_measure__(console, options)
-        return Measurement(m.minimum + 2, m.maximum + 2)
+        return Measurement(m.minimum + self.pad, m.maximum + self.pad)
 
 
 class SortTable(DataTable):
@@ -241,11 +263,12 @@ class SortTable(DataTable):
 
     def _label(self, i: int) -> Text:
         c = self.cols[i]
-        text = c.label
+        text, pad = c.label, 2
         if self.sort is not None and c.name is not None and self.sort[0] == c.name:
             text += " " + sort_arrow(c.numeric, self.sort[1])
+            pad = 0                              # the arrow takes the room the padding reserves
         style = "reverse" if self.header and i == self.hcol else ""
-        return _HeadText(text, style=style) if c.name is not None else Text(text, style=style)
+        return _HeadText(text, style=style, pad=pad) if c.name is not None else Text(text, style=style)
 
     def relabel(self) -> None:
         """Show the current sort / header cursor in the labels.  The width never changes (a
@@ -357,6 +380,10 @@ class PhyloApp(App):
     #ov { height: 1fr; }
     #overview { height: 1fr; border: round $primary; }
     #ovfoot { height: auto; }
+    #tabbar { height: 1; }
+    #rtab { height: 1fr; border: round $primary; }
+    #rtab:focus { border: round orange; }
+    #rtab.loading { opacity: 40%; }
     #hgview { height: 1fr; }
     #hgview DataTable:focus, #overview:focus { border: round orange; }
     #hgview.loading { opacity: 40%; }
@@ -437,6 +464,17 @@ class PhyloApp(App):
         self._array_rows: list = []
         self.ov_hide: "str | None" = None       # stage name; h
         self.ov_shown: list = []                # ov_rows as displayed (sorted / filtered)
+        self.tab = "jobs"                       # first-screen tab: "jobs" | "results"; tab
+        self.rt_source: "str | None" = None     # Results tab source; None = default_source
+        self.rt_hide: "str | None" = None       # Results tab: count column name; h
+        self.rt_rows: list = []                 # [model.OGGroupRow], Jobs group order
+        self.rt_shown: list = []
+        self._og_cache: "dict | None" = None    # {source, rows: {hg: HGOgs}, hgs: frozenset}
+        self._rt_gen = 0
+        self._rt_note = ""
+        self._rt_foot = ""
+        self._tab_text = ""
+        self._res_want: "str | None" = None     # source asked for by the opener (Results tab)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -446,7 +484,9 @@ class PhyloApp(App):
                 yield Static("", id="help")
                 yield Static("", id="status")
         with Vertical(id="ov"):
+            yield Static("", id="tabbar")
             yield SortTable(id="overview", cursor_type="cell", header_height=2)   # step1/step2 header
+            yield SortTable(id="rtab", cursor_type="cell")
             yield Static("", id="ovfoot")
         with Grid(id="hgview"):
             yield DataTable(id="stages", cursor_type="row")
@@ -469,6 +509,7 @@ class PhyloApp(App):
     def on_mount(self) -> None:
         self.query_one("#stages", DataTable).add_columns("stage", "done", "run", "ready", "blk", "total")
         self.query_one("#overview", SortTable).set_cols(OV_COLS)
+        self.query_one("#rtab", SortTable).set_cols(RT_COLS)
         self._set_units(force=True)
         self.query_one("#res", SortTable).set_cols(RES_COLS)
         self.query_one("#ogs", SortTable).set_cols(OG_COLS)
@@ -563,11 +604,18 @@ class PhyloApp(App):
                 "[b]Results[/]",
                 "/: filter this pane · p: possvm ↔ possvm_prev · tab: pane",
                 "esc: clear filters, then back · R: refresh · q: quit"])
+        if self.tab == "results":                # the first screen's Results tab
+            return "\n".join([
+                "[b]Overview · Results tab[/]  POSSVM output per group",
+                "enter / o: open the group's Results · p: possvm ↔ possvm_prev · tab: Jobs",
+                "s: sort by the column · h: hide rows with 0 in the column · c/f: category/family",
+                "↑ on the first row: header (←/→ column, enter/s sort) · R: re-read · q: quit",
+                "⚠ sup 0 = OGs with support 0 (GeneRax bug case)"])
         return "\n".join([
             "[b]Overview[/]",
             glyphs,
             "search/cluster count families, the other stages HGs",
-            "enter: open the group at that stage · o: results · c/f: category/family",
+            "enter: open the group at that stage · o: results · c/f: category/family · tab: Results",
             "s: sort by the column · h: only actionable at the column · R: refresh · q: quit",
             "default view: failed+ready"])
 
@@ -593,6 +641,7 @@ class PhyloApp(App):
             self._regroup()
         else:
             self._fill_overview(snap["ov_rows"])
+        self._maybe_load_rtab()
         hg = snap["hg"]
         if not snap["known"]:
             self._notify_once("squeue not on PATH: running jobs not detected")
@@ -676,8 +725,143 @@ class PhyloApp(App):
         self.query_one("#ov").display = self.view == "overview"
         self.query_one("#hgview").display = self.view == "hgs"
         self.query_one("#resv").display = self.view == "results"
-        self.query_one({"overview": "#overview", "hgs": "#hgs", "results": "#res"}[self.view]).focus()
-        self._update_help()
+        jobs = self.tab == "jobs"
+        self.query_one("#overview").display = jobs
+        self.query_one("#rtab").display = not jobs
+        self._set_tabbar()
+        first = "#overview" if jobs else "#rtab"
+        self.query_one({"overview": first, "hgs": "#hgs", "results": "#res"}[self.view]).focus()
+        if self.view == "overview":
+            self._overview_footer() if jobs else self._rt_footer()
+        self._update_help()                      # help follows view and tab
+
+    def _set_tabbar(self) -> None:
+        """`[Jobs] │ Results`: the active tab bracketed and reversed."""
+        names = (("jobs", "Jobs"), ("results", "Results"))
+        self._tab_text = " │ ".join(f"[{n}]" if k == self.tab else n for k, n in names)
+        txt = Text()
+        for i, (k, n) in enumerate(names):
+            txt.append(" │ " if i else "")
+            txt.append(f"[{n}]" if k == self.tab else n, style="reverse bold" if k == self.tab else "")
+        txt.append("   tab: switch", style="dim")
+        self.query_one("#tabbar", Static).update(txt)
+
+    def _switch_tab(self) -> None:
+        for wid in ("#overview", "#rtab"):       # the new tab starts in row mode, the old one too
+            t = self.query_one(wid, SortTable)
+            if t.header:
+                t.leave_header(to_row=False)
+        self.tab = "results" if self.tab == "jobs" else "jobs"
+        self._show_view()
+        self.refresh_bindings()                  # p shows on the Results tab only
+        self._maybe_load_rtab()
+
+    def action_focus_next(self) -> None:
+        """tab: on the first screen it switches Jobs / Results; elsewhere it moves focus."""
+        if self.view == "overview" and not isinstance(self.screen, ModalScreen):
+            self._switch_tab()
+            return
+        super().action_focus_next()
+
+    def action_focus_previous(self) -> None:
+        if self.view == "overview" and not isinstance(self.screen, ModalScreen):
+            self._switch_tab()
+            return
+        super().action_focus_previous()
+
+    # ---- Results tab --------------------------------------------------------------------------
+    def _rt_loading(self) -> bool:
+        return self.query_one("#rtab").has_class("loading")
+
+    def _maybe_load_rtab(self) -> None:
+        """Start the one read of every expected HG when the Results tab is shown and nothing is
+        cached or loading; waits for the first refresh (no expected HGs known yet)."""
+        if (self.view == "overview" and self.tab == "results" and self._og_cache is None
+                and not self._rt_loading() and self._ov_inputs[0]):
+            self._reload_rtab()
+
+    def _reload_rtab(self) -> None:
+        self._rt_gen += 1
+        self._og_cache = None
+        self.query_one("#rtab").add_class("loading")
+        self._rt_note = "loading…"
+        self._rt_footer()
+        self._load_rtab(sorted(self._ov_inputs[0], key=model.hg_sort_key), self.rt_source,
+                        self._rt_gen)
+
+    @work(thread=True, exclusive=True, group="rtab")
+    def _load_rtab(self, hgs: list, source: "str | None", gen: int) -> None:
+        """Every expected HG's ortholog_groups.csv, read once (NFS; ~10 s for ~1,900 files).
+        Own worker group: load_bg and the Results window load never cancel it, nor it them."""
+        worker = get_current_worker()
+        snap = dict(gen=gen, source=source or "possvm", rows=[], hgs=hgs, note="")
+        try:
+            snap["source"] = source or model.default_source(self.cfg)
+
+            def progress(k: int, n: int) -> None:   # throttled: ~every 50 files
+                if k and k % 50 == 0 and not worker.is_cancelled:
+                    self.call_from_thread(self._rt_progress, gen, k, n)
+            snap["rows"], _missing = model.group_ogs(
+                self.cfg, hgs, snap["source"], progress=progress,
+                cancelled=lambda: worker.is_cancelled or gen != self._rt_gen)
+        except Exception as e:                   # never let a worker kill the app
+            snap["note"] = f"cannot read {snap['source']}/: {e}"
+        if worker.is_cancelled:
+            return
+        self.call_from_thread(self._apply_rtab, snap)
+
+    def _rt_progress(self, gen: int, k: int, n: int) -> None:
+        if gen == self._rt_gen and self._rt_loading():
+            self._rt_note = f"loading {k}/{n}…"
+            self._rt_footer()
+
+    def _apply_rtab(self, snap: dict) -> None:
+        if snap["gen"] != self._rt_gen:          # superseded by R or p
+            return
+        self.query_one("#rtab").remove_class("loading")
+        self.rt_source = snap["source"]
+        ok = not snap["note"]                    # a failed read caches nothing reusable
+        self._og_cache = dict(source=snap["source"], rows={r.hg: r for r in snap["rows"]},
+                              hgs=frozenset(snap["hgs"]) if ok else frozenset())
+        self._rt_note = snap["note"]
+        self._fill_rtab()
+
+    def _fill_rtab(self) -> None:
+        """Results tab rows: the Jobs groups, counted over the cached files (memory only)."""
+        t = self.query_one("#rtab", SortTable)
+        cache = self._og_cache or {}
+        self.rt_rows = model.og_group_rows([r.group for r in self.ov_rows], self._ov_inputs[0],
+                                           self.by, cache.get("rows", {}).values())
+        self.rt_shown = rt_order(self.rt_rows, t.sort, self.rt_hide)
+        keep, keep_row, col = self._key_at_cursor(t), t.cursor_row, t.cursor_column
+        t.clear()
+        for r in self.rt_shown:
+            t.add_row(escape(r.group), str(r.hgs), str(r.with_output), str(r.ogs), str(r.genes),
+                      str(r.zero), key=r.group)
+        keys = [r.group for r in self.rt_shown]
+        if keys:
+            t.move_cursor(row=keys.index(keep) if keep in keys else max(0, min(keep_row, len(keys) - 1)),
+                          column=col)
+        t.border_title = " · ".join(
+            ["Results"] + ([cache["source"]] if cache else [])
+            + ([f"only {self.rt_hide} > 0"] if self.rt_hide else []))
+        self._rt_footer()
+
+    def _rt_footer(self) -> None:
+        if self.view != "overview" or self.tab != "results":
+            return
+        key = self._key_at_cursor(self.query_one("#rtab", SortTable))
+        r = next((x for x in self.rt_rows if x.group == key), None)
+        lines = [self._rt_note] if self._rt_note else []
+        if r is not None and self._og_cache is not None:
+            line = (f"{r.group}: {r.hgs} HGs · {r.with_output} with output · {r.ogs} OGs · "
+                    f"{r.genes} genes · {r.zero} OGs with support 0")
+            bad = sum(1 for x in self._og_cache["rows"].values() if x.error)
+            if bad:
+                line += f" · {bad} HG{'' if bad == 1 else 's'} unreadable"
+            lines.append(line)
+        self._rt_foot = "\n".join(lines)         # status only: the keys are in the strip's help
+        self.query_one("#ovfoot", Static).update(escape(self._rt_foot))
 
     def _fill_overview(self, rows: list) -> None:
         self.ov_rows = rows                      # as computed; ov_shown is what the table shows
@@ -708,6 +892,8 @@ class PhyloApp(App):
                       column=col)
         t.border_title = self._ov_title()
         self._overview_footer()
+        if self._og_cache is not None:          # same groups (c / f, refresh) on the Results tab
+            self._fill_rtab()
 
     def _ov_title(self) -> str:
         parts = ["Overview"]
@@ -728,6 +914,8 @@ class PhyloApp(App):
         return ("group", "HGs")[col] if col < 2 else stage_at_column(col)
 
     def _overview_footer(self) -> None:
+        if self.tab != "jobs":                   # #ovfoot belongs to the Results tab then
+            return
         key = self._key_at_cursor(self.query_one("#overview", DataTable))
         r = next((x for x in self.ov_rows if x.group == key), None)
         if r is None:
@@ -813,7 +1001,9 @@ class PhyloApp(App):
             return self.view in ("hgs", "results")
         if action in ("open_results", "cycle_filter"):
             return self.view in ("overview", "hgs")
-        if action in ("toggle_source", "member_filter"):
+        if action == "toggle_source":
+            return self.view == "results" or (self.view == "overview" and self.tab == "results")
+        if action == "member_filter":
             return self.view == "results"
         return True
 
@@ -852,15 +1042,17 @@ class PhyloApp(App):
         return self.query_one("#overview", SortTable).sort
 
     def action_sort(self) -> None:
-        """s with the overview table not focused (focused, the table's own s handles it)."""
+        """s with the first-screen table not focused (focused, the table's own s handles it)."""
         if self.view == "overview":
-            t = self.query_one("#overview", SortTable)
+            t = self.query_one("#overview" if self.tab == "jobs" else "#rtab", SortTable)
             t.sort_by(t.cursor_column)           # no-op on the │ separator
 
     def _resorted(self, t: "SortTable") -> None:
         """A table's sort changed (header enter / s, or s on a cell): reorder it in memory."""
         if t.id == "overview":
             self._fill_overview(self.ov_rows)
+        elif t.id == "rtab":
+            self._fill_rtab()
         elif t.id == "hgs":
             self._fill_hgs(keep=self._key_at_cursor(t))   # the cursor stays on the same HG
         elif t.id == "res":
@@ -871,6 +1063,15 @@ class PhyloApp(App):
             self._fill_members()
 
     def action_hide(self) -> None:
+        if self.view == "overview" and self.tab == "results":
+            t = self.query_one("#rtab", SortTable)
+            name = t.cols[t.cursor_column].name if t.cols else None
+            if name in (None, "group"):
+                self.notify("h: move to a count column first", severity="warning")
+                return
+            self.rt_hide = None if self.rt_hide == name else name
+            self._fill_rtab()                    # in memory only
+            return
         col = self._ov_column() if self.view == "overview" else None
         if col in (None, "group", "HGs"):        # not a stage column (incl. the │ separator)
             self.notify("h: move to a stage column first", severity="warning")
@@ -879,6 +1080,9 @@ class PhyloApp(App):
         self._fill_overview(self.ov_rows)        # in memory only
 
     def on_data_table_cell_selected(self, event: DataTable.CellSelected) -> None:
+        if self.view == "overview" and event.data_table.id == "rtab":
+            self._open_results(event.cell_key.row_key.value, self.by, source=self.rt_source)
+            return
         if event.data_table.id != "overview" or self.view != "overview":
             return
         stage = stage_at_column(event.coordinate.column)   # None: group, HGs or │ -> current stage
@@ -887,6 +1091,8 @@ class PhyloApp(App):
     def on_data_table_cell_highlighted(self, event: DataTable.CellHighlighted) -> None:
         if event.data_table.id == "overview":
             self._overview_footer()
+        elif event.data_table.id == "rtab":
+            self._rt_footer()
 
     def _fill_hgs(self, keep: "str | None" = None) -> None:
         """Rebuild the HG table, keeping the cursor on the same HG (clear() resets it to row 0).
@@ -998,6 +1204,9 @@ class PhyloApp(App):
         self._fill_hgs()
 
     def action_refresh(self) -> None:
+        self._og_cache = None                    # R re-reads the ortholog-group files too
+        if self.view == "overview" and self.tab == "results":
+            self._reload_rtab()
         if self.view == "results" and self.res_source is not None:
             self._reload_results()          # keeps group / source / cursor where possible
         self.load_bg()
@@ -1023,7 +1232,11 @@ class PhyloApp(App):
 
     # ---- Results window ---------------------------------------------------------------------
     def action_open_results(self) -> None:
-        if self.view == "overview":
+        if self.view == "overview" and self.tab == "results":
+            group = self._key_at_cursor(self.query_one("#rtab", DataTable))
+            if group is not None:
+                self._open_results(group, self.by, source=self.rt_source)
+        elif self.view == "overview":
             group = self._key_at_cursor(self.query_one("#overview", DataTable))
             if group is not None:
                 self._open_results(group, self.by)
@@ -1037,7 +1250,8 @@ class PhyloApp(App):
             else:
                 self._open_results(model.group_key(hg, self.by), self.by, focus=hg)
 
-    def _open_results(self, group: str, by: str, focus: "str | None" = None) -> None:
+    def _open_results(self, group: str, by: str, focus: "str | None" = None,
+                      source: "str | None" = None) -> None:
         """Results window for a group of HGs: `group` under grouping `by` (ALL = every HG; a
         family id under "family" = that family's HGs).  The HG list comes from the last
         snapshot in memory (_ov_inputs[0] = expected HGs); the files are read by _load_results."""
@@ -1046,6 +1260,7 @@ class PhyloApp(App):
                               key=model.hg_sort_key)
         self.res_from, self.res_group, self._res_focus = self.view, group, focus
         self.res_source, self.res_rows, self.res_missing = None, [], 0
+        self._res_want = source                 # None = default_source(), in the worker
         self._flt = {"res": "", "ogs": "", "members": ""}
         inp = self.query_one("#memfilter", Input)
         inp.value = ""
@@ -1065,10 +1280,12 @@ class PhyloApp(App):
         self._res_note = "loading…"
         self.sub_title = f"Results · {self.res_group} · {self.res_source or '…'}"
         self._fill_ogs()
-        self._load_results(list(self.res_hgs), self.res_source, self._res_gen)
+        self._load_results(list(self.res_hgs), self.res_source or self._res_want, self._res_gen,
+                           self._og_cache)
 
     @work(thread=True, exclusive=True, group="results")
-    def _load_results(self, hgs: list, source: "str | None", gen: int) -> None:
+    def _load_results(self, hgs: list, source: "str | None", gen: int,
+                      cache: "dict | None" = None) -> None:
         """Reads the ortholog_groups.csv files (NFS) and, until they have been read once, the
         species tree tips and species_info.tsv: never on the UI thread.  Own worker group:
         load_bg (default group, exclusive) must not cancel it, nor it load_bg."""
@@ -1080,9 +1297,14 @@ class PhyloApp(App):
             def progress(k: int, n: int) -> None:   # throttled: ~every 50 files
                 if k and k % 50 == 0 and not worker.is_cancelled:
                     self.call_from_thread(self._res_progress, gen, k, n)
-            snap["rows"], snap["missing"] = model.group_ogs(
-                self.cfg, hgs, snap["source"], progress=progress,
-                cancelled=lambda: worker.is_cancelled or gen != self._res_gen)
+            if (cache is not None and cache["source"] == snap["source"]
+                    and set(hgs) <= cache["hgs"]):   # the Results tab read them: no 2nd read
+                snap["rows"] = [cache["rows"][h] for h in hgs if h in cache["rows"]]
+                snap["missing"] = len(hgs) - len(snap["rows"])
+            else:
+                snap["rows"], snap["missing"] = model.group_ogs(
+                    self.cfg, hgs, snap["source"], progress=progress,
+                    cancelled=lambda: worker.is_cancelled or gen != self._res_gen)
         except Exception as e:                   # never let a worker kill the app
             snap["note"] = f"cannot read {snap['source']}/: {e}"
         notes = []
@@ -1269,6 +1491,12 @@ class PhyloApp(App):
         self._update_status()
 
     def action_toggle_source(self) -> None:
+        if self.view == "overview" and self.tab == "results":
+            if self._og_cache is None:           # the first read is still running
+                return
+            self.rt_source = "possvm_prev" if self._og_cache["source"] == "possvm" else "possvm"
+            self._reload_rtab()
+            return
         if self.view != "results" or self.res_source is None:   # first load still running
             return
         self.res_source = "possvm_prev" if self.res_source == "possvm" else "possvm"
