@@ -10,6 +10,7 @@ pytest.importorskip("textual")
 
 from phylocli import core, tui  # noqa: E402
 from phylocli.tests.test_cli import _state, cli  # noqa: E402,F401
+from phylocli.tests.test_model import OG_HEAD, write_results  # noqa: E402
 
 SACCT_OOM = ("12345_0|COMPLETED|10M|00:01:00|0:0\\n"
              "12345_1|OUT_OF_MEMORY|4100M|00:03:00|0:125\\n")
@@ -1041,4 +1042,384 @@ def test_partial_sbatch_failure_keeps_dialog_open(cli, monkeypatch):
             await _settle(app, pilot)
             assert isinstance(app.screen, tui.ResubmitScreen)
             assert "boom" in scr._shown and scr.submitted == ["12345"]
+    _run(go())
+
+
+# ---- Results window ---------------------------------------------------------------------------
+def _ov_row(app, group):
+    return [r.group for r in app.ov_rows].index(group)
+
+
+async def _press(pilot, *keys):
+    for k in keys:
+        await pilot.press(k)
+        await pilot.pause()
+
+
+async def _open_results(app, pilot, group, family=False):
+    """Overview -> cursor on `group` -> o -> wait for the Results load."""
+    app.load_now()
+    await pilot.pause()
+    if family:
+        await _press(pilot, "f")
+    app.query_one("#overview").move_cursor(row=_ov_row(app, group), column=2)
+    await pilot.pause()
+    await pilot.press("o")
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+
+
+def _cells(app, table, row):
+    t = app.query_one(table)
+    return [str(t.get_cell_at((row, c))) for c in range(len(t.columns))]
+
+
+def _member_genes(app):
+    t = app.query_one("#members")
+    return [str(t.get_cell_at((i, 0))) for i in range(t.row_count)]
+
+
+def test_o_on_overview_opens_results_for_that_group(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert app.view == "results" and app.focused is app.query_one("#res")
+            assert [r.hg for r in app.res_rows] == ["tfs.A.HG1", "tfs.A.HG11"]   # C_x: no output
+            assert app.res_missing == 1 and "1 HG without output" in app._res_foot
+            assert app.query_one("#res").border_title == "Results · tfs"
+            assert _cells(app, "#res", 0) == ["tfs.A.HG1", "2", "5", "1"]
+            assert app.query_one("#ogs").border_title == "OGs · tfs.A.HG1 · possvm"
+            assert _cells(app, "#ogs", 0) == ["HG1.0", "T/Tbx19", "3", "2", "78.4", "T/Tbx19",
+                                              "98.2/98.2"]
+            assert _cells(app, "#ogs", 1)[4] == "0.0 ⚠"
+            assert app.query_one("#members").border_title == "members · HG1.0 T/Tbx19"
+            assert _cells(app, "#members", 2) == ["Hsap_ENSP1", "Hsap", "T/Tbx19", "98.2/98.2"]
+            assert app.query_one("#species_box").border_title == "species · HG1.0"
+            assert app._species_text.splitlines() == [
+                "Ctenophora  1/2 spp  2 genes", "  Mlei 2",
+                "Chordata    1/1 spp  1 gene", "  Hsap 1",
+                "absent: unknown"]
+            assert "2 OGs · possvm · ⚠ = support 0 (GeneRax bug case; check possvm_prev)" \
+                in app._res_foot
+    _run(go())
+
+
+def test_o_on_hg_highlights_it_and_esc_returns_to_hg_view(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.open_group("tfs", "align")
+            await pilot.pause()
+            app.load_now()
+            await pilot.pause()
+            vis = [r.hg for r in app.visible()]
+            assert "tfs.A.HG11" in vis
+            app.query_one("#hgs").move_cursor(row=vis.index("tfs.A.HG11"))
+            await pilot.pause()
+            await pilot.press("o")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.view == "results" and app.res_group == "tfs"
+            assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG11"
+            assert app.query_one("#ogs").border_title == "OGs · tfs.A.HG11 · possvm"
+            assert _cells(app, "#ogs", 0)[:2] == ["HG11.0", "Tbx20"]
+            await _press(pilot, "escape")
+            assert app.view == "hgs" and app._cursor_hg() == "tfs.A.HG11"
+            assert app.focused is app.query_one("#hgs")
+    _run(go())
+
+
+def test_o_on_family_row_opens_results_for_its_hgs(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.open_group("ALL", "search")                        # rows are families here
+            await pilot.pause()
+            app.load_now()
+            await pilot.pause()
+            vis = [r.hg for r in app.visible()]
+            assert "tfs.A" in vis                                  # no search output: ready
+            app.query_one("#hgs").move_cursor(row=vis.index("tfs.A"))
+            await pilot.pause()
+            await pilot.press("o")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.view == "results" and app.res_group == "tfs.A"
+            assert app.res_hgs == ["tfs.A.HG1", "tfs.A.HG11"]
+            assert [r.hg for r in app.res_rows] == ["tfs.A.HG1", "tfs.A.HG11"]
+            assert app.query_one("#res").border_title == "Results · tfs.A"
+            await _press(pilot, "escape")
+            assert app.view == "hgs" and app.stage == "search" and app._cursor_hg() == "tfs.A"
+    _run(go())
+
+
+def test_results_cursor_moves_update_panes_without_file_reads(cli, monkeypatch):
+    write_results(_cfg())
+
+    def boom(*a, **k):
+        raise AssertionError("file read on a key press")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            for name in ("read_ogs", "group_ogs", "species_universe", "phyla"):
+                monkeypatch.setattr(tui.model, name, boom)
+            monkeypatch.setattr(core.report_status, "nonempty_files", boom)
+            await _press(pilot, "down")                            # Results: tfs.A.HG11
+            assert app.query_one("#ogs").border_title == "OGs · tfs.A.HG11 · possvm"
+            assert _member_genes(app) == ["Bova_x1", "Mlei_v05_G9"]
+            assert app._species_text.splitlines()[:2] == ["Ctenophora  2/2 spp  2 genes",
+                                                          "  Bova 1 · Mlei 1"]
+            await _press(pilot, "up", "tab")                       # back to HG1, into OGs
+            assert app.focused is app.query_one("#ogs")
+            await _press(pilot, "down")                            # OG HG1.1: Hsap + Nvec
+            assert app.query_one("#members").border_title == "members · HG1.1 like:Eomes/Tbr1"
+            assert _member_genes(app) == ["Hsap_ENSP2", "Nvec_v1_g3"]
+            assert app._species_text.splitlines() == [
+                "Chordata  1/1 spp  1 gene", "  Hsap 1",
+                "unknown   1/1 spp  1 gene", "  Nvec 1",
+                "absent: Ctenophora"]
+    _run(go())
+
+
+def test_slash_filters_members_and_esc_clears(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert len(_member_genes(app)) == 3
+            inp = app.query_one("#memfilter")
+            assert not inp.display
+            await _press(pilot, "slash")
+            assert inp.display and app.focused is inp
+            await _press(pilot, "h", "s", "a", "p")               # `p` is text here, not a switch
+            assert app.res_source == "possvm" and inp.value == "hsap"
+            assert _member_genes(app) == ["Hsap_ENSP1"]
+            await _press(pilot, "escape")                          # clears; stays in Results
+            assert app.view == "results" and not inp.display and inp.value == ""
+            assert len(_member_genes(app)) == 3 and app.focused is app.query_one("#members")
+            await _press(pilot, "slash", "M", "L", "E", "I", "enter")   # case-insensitive; enter keeps
+            assert app.focused is app.query_one("#members")
+            assert _member_genes(app) == ["Mlei_v05_G1", "Mlei_v05_G2"]
+            await _press(pilot, "escape", "escape")
+            assert app.view == "overview"
+    _run(go())
+
+
+def test_p_switches_source_and_recomputes_results(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert [r.hg for r in app.res_rows] == ["tfs.A.HG1", "tfs.A.HG11"]
+            await pilot.press("p")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.res_source == "possvm_prev"
+            assert [r.hg for r in app.res_rows] == ["tfs.A.HG1"] and app.res_missing == 2
+            assert app.query_one("#ogs").border_title == "OGs · tfs.A.HG1 · possvm_prev"
+            assert _cells(app, "#ogs", 0)[:2] == ["HG1.0", "like:Tbx2/Tbx3"]
+            assert app._species_text.splitlines() == [
+                "Ctenophora  1/2 spp  1 gene", "  Mlei 1",
+                "absent: Chordata, unknown",
+                "not in species tree: Zzz 1"]
+            await pilot.press("p")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.res_source == "possvm" and len(app.res_rows) == 2
+    _run(go())
+
+
+def test_esc_from_results_returns_to_overview_cursor_kept(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _press(pilot, "f")
+            ov = app.query_one("#overview")
+            ov.move_cursor(row=_ov_row(app, "tfs.C_x"), column=3)
+            await pilot.pause()
+            await pilot.press("o")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.view == "results" and app.res_group == "tfs.C_x"
+            await _press(pilot, "escape")
+            assert app.view == "overview" and app.focused is ov
+            assert (ov.cursor_row, ov.cursor_column) == (_ov_row(app, "tfs.C_x"), 3)
+    _run(go())
+
+
+def test_results_without_output_says_so_and_p_still_works(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs.C_x", family=True)
+            assert app.res_rows == []
+            assert "no ortholog groups yet (possvm not done)" in app._res_foot
+            assert app._species_text == "no ortholog groups yet (possvm not done)"
+            await pilot.press("p")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.res_source == "possvm_prev"
+            assert "no ortholog groups yet (possvm_prev not done)" in app._res_foot
+    _run(go())
+
+
+def test_results_read_in_worker_shows_loading(cli, monkeypatch):
+    import threading
+    write_results(_cfg())
+    gate = threading.Event()
+    on_main = []
+    real = tui.model.read_ogs
+
+    def slow(*a, **k):
+        on_main.append(threading.current_thread() is threading.main_thread())
+        gate.wait(10)
+        return real(*a, **k)
+    monkeypatch.setattr(tui.model, "read_ogs", slow)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await pilot.press("o")                                 # cursor on ALL
+            await pilot.pause()
+            assert app.view == "results" and app.res_group == "ALL"
+            assert app.query_one("#resv").has_class("loading")
+            assert "loading…" in app._res_foot and app.res_rows == []
+            app.load_bg()                                          # a periodic refresh meanwhile
+            await pilot.pause()
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not app.query_one("#resv").has_class("loading")
+            assert [r.hg for r in app.res_rows] == ["tfs.A.HG1", "tfs.A.HG11"]
+    _run(go())
+    assert on_main and not any(on_main)
+
+
+def test_results_bad_row_is_shown_not_a_crash(cli):
+    write_results(_cfg())
+    p = _cfg().outdir / "possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv"
+    p.write_text(OG_HEAD + "broken row\n")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert [r.hg for r in app.res_rows] == ["tfs.A.HG1", "tfs.A.HG11"]
+            assert _cells(app, "#res", 1) == ["tfs.A.HG11", "–", "–", "!"]
+            await _press(pilot, "down")
+            assert f"{p}:2:" in app._species_text and f"{p}:2:" in app._res_foot
+            assert app.query_one("#ogs").row_count == 0 and _member_genes(app) == []
+    _run(go())
+
+
+def test_results_without_species_files_still_lists_ogs(cli):
+    from pathlib import Path
+    write_results(_cfg())
+    tree = Path(_cfg().params["SPECIES_TREE"])
+    info = tui.model.species_info_path(_cfg())
+    tree.unlink()
+    info.unlink()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert _cells(app, "#ogs", 0)[:2] == ["HG1.0", "T/Tbx19"]
+            assert len(_member_genes(app)) == 3
+            lines = app._species_text.splitlines()
+            assert lines[0].startswith(f"species tree {tree}: ")
+            assert f"{info}: " in lines[0] and "phyla shown as unknown" in lines[0]
+            assert lines[-1] == "not in species tree: Mlei 2, Hsap 1"
+    _run(go())
+
+
+def test_results_tab_cycles_four_panes_with_orange_border(cli):
+    from textual.color import Color
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            panes = ("#res", "#ogs", "#members", "#species_box")
+            for pane in panes:
+                assert app.focused is app.query_one(pane)
+                for other in panes:
+                    colour = app.query_one(other).styles.border.top[1]
+                    assert (colour == Color.parse("orange")) == (other == pane), (pane, other)
+                await _press(pilot, "tab")
+            assert app.focused is app.query_one("#res")             # wraps around
+            await _press(pilot, "shift+tab")
+            assert app.focused is app.query_one("#species_box")
+    _run(go())
+
+
+def test_footer_keys_in_results(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            assert app.check_action("open_results", ())
+            assert not app.check_action("toggle_source", ()) and not app.check_action("member_filter", ())
+            await _open_results(app, pilot, "tfs")
+            for a in ("toggle_source", "member_filter", "back"):
+                assert app.check_action(a, ()), a
+            for a in ("open_results", "resubmit", "toggle", "select_all", "log", "by_category",
+                      "cycle_filter"):
+                assert not app.check_action(a, ()), a
+    _run(go())
+
+
+def test_late_result_of_previous_group_is_dropped(cli, monkeypatch):
+    import threading
+    write_results(_cfg())
+    gate = threading.Event()
+    real = tui.model.group_ogs
+
+    def slow(cfg, hgs, source):
+        if list(hgs) == ["tfs.C_x.HG1"]:                         # the first open: family tfs.C_x
+            gate.wait(10)
+        return real(cfg, hgs, source)
+    monkeypatch.setattr(tui.model, "group_ogs", slow)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _press(pilot, "f")
+            ov = app.query_one("#overview")
+            ov.move_cursor(row=_ov_row(app, "tfs.C_x"))
+            await pilot.pause()
+            await _press(pilot, "o", "escape")                     # first load blocked in the worker
+            ov.move_cursor(row=_ov_row(app, "tfs.A"))
+            await pilot.pause()
+            await _press(pilot, "o")
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.res_group == "tfs.A"
+            assert [r.hg for r in app.res_rows] == ["tfs.A.HG1", "tfs.A.HG11"]
     _run(go())

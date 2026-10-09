@@ -201,6 +201,19 @@ the stage column and `enter` opens the HG panels for that row at that stage (fil
 `esc` returns to the overview. The overview reads output files and squeue only; the slow
 attempt history is read only once an HG view is open.
 
+`o` opens the **Results** window for the overview row under the cursor (`ALL` included); in the
+HG view, for the highlighted HG's category/family (that HG highlighted) or, on search/cluster,
+for the highlighted family's HGs. Four panes, `tab` between them: **Results** (the group's HGs
+that have POSSVM output: OGs, genes, OGs with support 0 `⚠`; the footer counts the HGs without
+output), **OGs** (the ortholog groups of the highlighted HG, largest first: OG, name, genes,
+species, orthogroup support, reference ortholog and its support), **members** (the highlighted
+OG's rows of `*.ortholog_groups.csv`: gene, species, reference ortholog and support; `/` filters,
+`enter` keeps the filter, `esc` clears it) and **species** (per phylum `k/m spp  n genes` with
+the species and their counts, absent phyla last; the universe is the tips of
+`params.SPECIES_TREE`, phyla from `data/species_info.tsv`). `p` switches `possvm/` (post-GeneRax,
+default) ↔ `possvm_prev/` (raw IQ-TREE); `esc` goes back. Support `0.0 ⚠` is the GeneRax bug
+case: check `possvm_prev`. Files are read in the background.
+
 `search` and `cluster` are the first two columns and count FAMILIES (`ALL` = all families, a
 category row = its families, a family row = that family); the `HGs` column stays the group's HG
 count, so a family added to the genefam file shows as its own row with 0 HGs until `cluster`
@@ -212,7 +225,7 @@ HG view panels: stages (top left) · HGs — or families, for search / cluster �
 (bottom left) · details of the highlighted HG (bottom right). Refreshes in the background.
 
 Keys (HG view): `↑↓` move · `tab` panel · `esc` overview · `f` filter (failed → ready → running → blocked → done) ·
-`space` select · `a` select all shown · `r` resubmit selection · `l` last log · `R` refresh ·
+`space` select · `a` select all shown · `r` resubmit selection · `l` last log · `o` results · `R` refresh ·
 `q` quit.
 
 Resubmit: one row per resource group, pre-filled with the automatic bump (out of memory →

@@ -12,7 +12,7 @@ from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
+from textual.containers import Grid, Horizontal, ScrollableContainer, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 from textual.worker import get_current_worker
@@ -29,7 +29,8 @@ def load_raw() -> dict:
 FILTERS = ("actionable", "failed", "ready", "running", "blocked", "done")
 ACTIONABLE = ("failed", "ready")      # the "actionable" filter shows failed + ready HGs
 PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
-               "#arrays": "3 Arrays", "#detail": "4 Detail"}
+               "#arrays": "3 Arrays", "#detail": "4 Detail",
+               "#res": "Results", "#ogs": "OGs", "#members": "members", "#species_box": "species"}
 STATE_STYLE = {"done": "green", "running": "cyan", "ready": "yellow", "failed": "red",
                "blocked": "bright_black"}
 # Stages the TUI shows (overview columns, stages panel, HG-view data): search/cluster in front.
@@ -53,6 +54,29 @@ def stage_at_column(col: int) -> "str | None":
     return OV_COLUMNS[col - 2] if 2 <= col < 2 + len(OV_COLUMNS) else None
 
 
+def _short_og(og_id: str) -> str:
+    """tfs.T-box.HG1.6 -> HG1.6"""
+    return ".".join(og_id.rsplit(".", 2)[-2:])
+
+
+def species_lines(stats: list, outside: list) -> list[str]:
+    """The species pane: per phylum with members `k/m spp  n genes` and its species, then the
+    absent phyla, then member species that are not tips of the species tree."""
+    present = [r for r in stats if r.covered]
+    absent = [r for r in stats if not r.covered]
+    w = max((len(r.phylum) for r in present), default=0)
+    out: list[str] = []
+    for r in present:
+        out.append(f"{r.phylum.ljust(w)}  {r.covered}/{r.total} spp  "
+                   f"{r.n_genes} gene{'' if r.n_genes == 1 else 's'}")
+        out.append("  " + " · ".join(f"{sp} {n}" for sp, n in r.species))
+    if absent:
+        out.append("absent: " + ", ".join(r.phylum for r in absent))
+    if outside:
+        out.append("not in species tree: " + ", ".join(f"{sp} {n}" for sp, n in outside))
+    return out
+
+
 class PhyloApp(App):
     TITLE = "phylocli"
     CSS = """
@@ -65,6 +89,18 @@ class PhyloApp(App):
     #hgview { height: 1fr; }
     #hgview DataTable:focus, #overview:focus { border: round orange; }
     #hgview.loading { opacity: 40%; }
+    #resv { height: 1fr; }
+    #results { height: 1fr; }
+    #res { width: 1fr; }
+    #ogs, #rescol { width: 2fr; }
+    #res, #ogs, #rescol { height: 100%; }
+    #members, #species_box { height: 1fr; }
+    #results DataTable, #species_box { border: round $primary; }
+    #results DataTable:focus, #species_box:focus { border: round orange; }
+    #memfilter { height: 3; }
+    #resv.loading { opacity: 40%; }
+    #species { width: auto; }
+    #resfoot { height: auto; }
     """
     BINDINGS = [
         Binding("escape", "back", "overview"),
@@ -74,6 +110,9 @@ class PhyloApp(App):
         Binding("a", "select_all", "select all"),
         Binding("r", "resubmit", "resubmit"),
         Binding("l", "log", "log"),
+        Binding("o", "open_results", "results"),
+        Binding("p", "toggle_source", "possvm/prev"),
+        Binding("slash", "member_filter", "filter members"),
         Binding("R", "refresh", "refresh"),
         Binding("q", "quit", "quit"),
     ]
@@ -102,6 +141,21 @@ class PhyloApp(App):
         self._ov_inputs: tuple = (set(), {}, set(), {})    # exp, HG states, families, family states
         self.hg_count: dict[str, int] = {}                 # family id -> expected HGs
         self._banner_text = ""
+        self.res_from = "overview"              # the view esc returns to from Results
+        self.res_group = ""
+        self.res_hgs: list[str] = []
+        self.res_source: "str | None" = None    # None = model.default_source(), in the worker
+        self.res_rows: list = []                # [model.HGOgs] of the open group
+        self.res_missing = 0
+        self._res_focus: "str | None" = None    # HG to put the Results cursor on after a load
+        self._res_gen = 0                       # bumped per load / esc: late snapshots dropped
+        self._res_note = ""
+        self._res_foot = ""
+        self._species_text = ""
+        self._mem_filter = ""
+        self._universe: "list | None" = None    # species tree tips, read once by the worker
+        self._phyla: "dict | None" = None       # species -> phylum, read once by the worker
+        self._sp_note = ""                      # why the universe / phyla could not be read
         self._hg_unit: "str | None" = None                 # unit the #hgs / #arrays headers show
         self._array_rows: list = []
 
@@ -116,11 +170,27 @@ class PhyloApp(App):
             yield DataTable(id="hgs", cursor_type="row")
             yield DataTable(id="arrays", cursor_type="row")
             yield Static("", id="detail")
+        with Vertical(id="resv"):
+            with Horizontal(id="results"):
+                yield DataTable(id="res", cursor_type="row")
+                yield DataTable(id="ogs", cursor_type="row")
+                with Vertical(id="rescol"):
+                    yield Input(placeholder="filter members (enter: keep · esc: clear)",
+                                id="memfilter")
+                    yield DataTable(id="members", cursor_type="row")
+                    with ScrollableContainer(id="species_box"):
+                        yield Static("", id="species", markup=False)
+            yield Static("", id="resfoot")
         yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#stages", DataTable).add_columns("stage", "done", "run", "ready", "blk", "total")
         self._set_units(force=True)
+        self.query_one("#res", DataTable).add_columns("HG", "OGs", "genes", "⚠")
+        self.query_one("#ogs", DataTable).add_columns("OG", "name", "genes", "spp", "support",
+                                                       "ref", "ref sup")
+        self.query_one("#members", DataTable).add_columns("gene", "sp", "ref.orth", "sup")
+        self.query_one("#memfilter").display = False
         for wid, title in PANE_TITLES.items():   # names in the top-left border, to refer to them
             self.query_one(wid).border_title = title
         self._show_view()
@@ -268,7 +338,8 @@ class PhyloApp(App):
     def _show_view(self) -> None:
         self.query_one("#ov").display = self.view == "overview"
         self.query_one("#hgview").display = self.view == "hgs"
-        self.query_one("#overview" if self.view == "overview" else "#hgs").focus()
+        self.query_one("#resv").display = self.view == "results"
+        self.query_one({"overview": "#overview", "hgs": "#hgs", "results": "#res"}[self.view]).focus()
 
     def _fill_overview(self, rows: list) -> None:
         self.ov_rows = rows
@@ -310,7 +381,7 @@ class PhyloApp(App):
             f"[b]{escape(r.group)}[/] {r.total} HGs · {r.n_fams} families · "
             "done/running/ready/blocked: " + " · ".join(parts)
             + "\n█ done ▒ running ▓ ready/failed ░ blocked · search/cluster count families · "
-              "enter: open · c/f: category/family"
+              "enter: open · o: results · c/f: category/family"
             + " · default view: failed+ready")
 
     def _regroup(self) -> None:
@@ -380,12 +451,30 @@ class PhyloApp(App):
         """Footer shows only the keys of the current view."""
         if action in ("by_category",):
             return self.view == "overview"
-        if action in ("back", "toggle", "select_all", "resubmit", "log"):
+        if action in ("toggle", "select_all", "resubmit", "log"):
             return self.view == "hgs"
+        if action == "back":
+            return self.view in ("hgs", "results")
+        if action in ("open_results", "cycle_filter"):
+            return self.view in ("overview", "hgs")
+        if action in ("toggle_source", "member_filter"):
+            return self.view == "results"
         return True
 
     def action_back(self) -> None:
-        if self.view == "hgs":
+        if self.view == "results":
+            inp = self.query_one("#memfilter", Input)
+            if inp.display:                      # esc with the filter box open: clear it first
+                inp.value = ""
+                inp.display = False
+                self._mem_filter = ""
+                self._fill_members()
+                self.query_one("#members").focus()
+                return
+            self._res_gen += 1                   # a load still running is dropped when it lands
+            self.view = self.res_from
+            self._show_view()
+        elif self.view == "hgs":
             self.view = "overview"
             self._show_view()
 
@@ -476,8 +565,14 @@ class PhyloApp(App):
                 self._fill_hgs(keep="")
         elif t.id == "hgs":
             self._show_detail()
+        elif t.id == "res":
+            self._fill_ogs()
+        elif t.id == "ogs":
+            self._show_og()
 
     def action_cycle_filter(self) -> None:
+        if self.view == "results":           # f has no meaning in Results (check_action hides it)
+            return
         if self.view == "overview":
             self.by = "family"
             self._regroup()
@@ -515,6 +610,198 @@ class PhyloApp(App):
             self.notify("no attempt recorded for this HG at this stage", severity="warning")
             return
         self.push_screen(LogScreen(a.log))
+
+    # ---- Results window ---------------------------------------------------------------------
+    def action_open_results(self) -> None:
+        if self.view == "overview":
+            group = self._key_at_cursor(self.query_one("#overview", DataTable))
+            if group is not None:
+                self._open_results(group, self.by)
+        elif self.view == "hgs":
+            hg = self._cursor_hg()
+            if hg is None:
+                self.notify("nothing under the cursor", severity="warning")
+                return
+            if self.stage in core.FAMILY_STAGES:   # a family row (search / cluster): its HGs
+                self._open_results(hg, "family")
+            else:
+                self._open_results(model.group_key(hg, self.by), self.by, focus=hg)
+
+    def _open_results(self, group: str, by: str, focus: "str | None" = None) -> None:
+        """Results window for a group of HGs: `group` under grouping `by` (ALL = every HG; a
+        family id under "family" = that family's HGs).  The HG list comes from the last
+        snapshot in memory (_ov_inputs[0] = expected HGs); the files are read by _load_results."""
+        exp = self._ov_inputs[0]
+        self.res_hgs = sorted((h for h in exp if group == "ALL" or model.group_key(h, by) == group),
+                              key=model.hg_sort_key)
+        self.res_from, self.res_group, self._res_focus = self.view, group, focus
+        self.res_source, self.res_rows, self.res_missing = None, [], 0
+        self._mem_filter = ""
+        inp = self.query_one("#memfilter", Input)
+        inp.value = ""
+        inp.display = False
+        self.query_one("#res", DataTable).clear()
+        self.query_one("#res").border_title = f"Results · {group}"
+        self.view = "results"
+        self._show_view()
+        self._reload_results()
+
+    def _reload_results(self) -> None:
+        """Grey the window and start a load; the #res rows stay (greyed) so the cursor's HG is
+        kept across `p`, while the other panes empty until the new source is read."""
+        self._res_gen += 1
+        self.res_rows = []
+        self.query_one("#resv").add_class("loading")
+        self._res_note = "loading…"
+        self._fill_ogs()
+        self._load_results(list(self.res_hgs), self.res_source, self._res_gen)
+
+    @work(thread=True, exclusive=True, group="results")
+    def _load_results(self, hgs: list, source: "str | None", gen: int) -> None:
+        """Reads the ortholog_groups.csv files (NFS) and, until they have been read once, the
+        species tree tips and species_info.tsv: never on the UI thread.  Own worker group:
+        load_bg (default group, exclusive) must not cancel it, nor it load_bg."""
+        worker = get_current_worker()
+        snap = dict(gen=gen, source=source or "possvm", rows=[], missing=0, note="",
+                    universe=self._universe, phyla=self._phyla, sp_note="")
+        try:
+            snap["source"] = source or model.default_source(self.cfg)
+            snap["rows"], snap["missing"] = model.group_ogs(self.cfg, hgs, snap["source"])
+        except Exception as e:                   # never let a worker kill the app
+            snap["note"] = f"cannot read {snap['source']}/: {e}"
+        notes = []
+        if snap["universe"] is None:
+            try:
+                snap["universe"] = model.species_universe(self.cfg)
+            except Exception as e:
+                notes.append(f"species tree {self.cfg.params.get('SPECIES_TREE', '')}: {e}")
+        if snap["phyla"] is None:
+            try:
+                snap["phyla"] = model.phyla(self.cfg)
+            except Exception as e:
+                notes.append(f"{model.species_info_path(self.cfg)}: {e} (phyla shown as unknown)")
+        snap["sp_note"] = "; ".join(notes)
+        if worker.is_cancelled:
+            return
+        self.call_from_thread(self._apply_results, snap)
+
+    def _apply_results(self, snap: dict) -> None:
+        if snap["gen"] != self._res_gen:         # superseded: esc, another o, or p meanwhile
+            return
+        self.query_one("#resv").remove_class("loading")
+        self.res_source, self.res_rows, self.res_missing = snap["source"], snap["rows"], snap["missing"]
+        self._universe, self._phyla, self._sp_note = snap["universe"], snap["phyla"], snap["sp_note"]
+        self._res_note = snap["note"] or ("" if self.res_rows else
+                                          f"no ortholog groups yet ({self.res_source} not done)")
+        t = self.query_one("#res", DataTable)
+        keep = self._res_focus or self._key_at_cursor(t)
+        self._res_focus = None
+        t.clear()
+        for r in self.res_rows:
+            if r.error:
+                t.add_row(r.hg, "–", "–", "!", key=r.hg)
+            else:
+                t.add_row(r.hg, str(len(r.ogs)), str(sum(len(o.genes) for o in r.ogs)),
+                          str(sum(1 for o in r.ogs if o.support == 0)), key=r.hg)
+        keys = [r.hg for r in self.res_rows]
+        if keys:
+            t.move_cursor(row=keys.index(keep) if keep in keys else 0)
+        self._fill_ogs()
+
+    def _cur_res(self):
+        key = self._key_at_cursor(self.query_one("#res", DataTable))
+        return next((r for r in self.res_rows if r.hg == key), None)
+
+    def _cur_og(self):
+        r = self._cur_res()
+        if r is None:
+            return None
+        key = self._key_at_cursor(self.query_one("#ogs", DataTable))
+        return next((o for o in r.ogs if o.id == key), None)
+
+    def _fill_ogs(self) -> None:
+        """OG table of the HG under the Results cursor (in memory), then its members/species."""
+        r = self._cur_res()
+        t = self.query_one("#ogs", DataTable)
+        t.clear()
+        t.border_title = f"OGs · {r.hg if r else '–'} · {self.res_source or '…'}"
+        for og in (r.ogs if r else []):
+            sup = ("–" if og.support is None else "0.0 ⚠" if og.support == 0
+                   else f"{og.support:.1f}")
+            t.add_row(_short_og(og.id), escape(og.name), str(len(og.genes)),
+                      str(len({m.species for m in og.genes})), sup, escape(og.ref),
+                      escape(og.ref_support), key=og.id)
+        if t.row_count:
+            t.move_cursor(row=0)
+        self._show_og()
+
+    def _show_og(self) -> None:
+        """members + species panes for the OG under the OGs cursor (in memory, no file access)."""
+        r, og = self._cur_res(), self._cur_og()
+        self.query_one("#members").border_title = (
+            f"members · {_short_og(og.id)} {escape(og.name)}" if og else "members")
+        self.query_one("#species_box").border_title = (
+            f"species · {_short_og(og.id)}" if og else "species")
+        self._fill_members()
+        if r is not None and r.error:
+            text = r.error
+        elif og is None:
+            text = self._res_note
+        else:
+            uni = self._universe or []
+            lines = species_lines(model.og_species_stats(og, uni, self._phyla or {}),
+                                  model.og_outside(og, uni))
+            text = "\n".join(([self._sp_note, ""] if self._sp_note else []) + lines)
+        self._species_text = text
+        self.query_one("#species", Static).update(text)
+        self._results_footer()
+
+    def _fill_members(self) -> None:
+        """Annotation rows of the highlighted OG, filtered by the `/` box (case-insensitive
+        substring on any column)."""
+        og = self._cur_og()
+        t = self.query_one("#members", DataTable)
+        t.clear()
+        q = self._mem_filter.lower()
+        for i, m in enumerate(og.genes if og else []):
+            cells = (m.gene, m.species, m.ref, m.ref_support)
+            if q and not any(q in c.lower() for c in cells):
+                continue
+            t.add_row(*(escape(c) for c in cells), key=f"{i}:{m.gene}")
+
+    def _results_footer(self) -> None:
+        r = self._cur_res()
+        head = r.error if r is not None and r.error else self._res_note
+        parts = ([f"{len(r.ogs)} OGs"] if r is not None and not r.error else []) + [
+            self.res_source or "…", "⚠ = support 0 (GeneRax bug case; check possvm_prev)"]
+        if self.res_missing:
+            parts.append(f"{self.res_missing} HG{'' if self.res_missing == 1 else 's'} without output")
+        lines = ([head] if head else []) + [
+            " · ".join(parts), "/: filter members · p: possvm ↔ possvm_prev · tab: pane · esc: back"]
+        self._res_foot = "\n".join(lines)
+        self.query_one("#resfoot", Static).update(escape(self._res_foot))
+
+    def action_toggle_source(self) -> None:
+        if self.view != "results" or self.res_source is None:   # first load still running
+            return
+        self.res_source = "possvm_prev" if self.res_source == "possvm" else "possvm"
+        self._reload_results()
+
+    def action_member_filter(self) -> None:
+        if self.view != "results":
+            return
+        inp = self.query_one("#memfilter", Input)
+        inp.display = True
+        inp.focus()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "memfilter":        # (the resubmit dialog's Inputs have other ids)
+            self._mem_filter = event.value
+            self._fill_members()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "memfilter":        # enter: keep the filter, back to the rows
+            self.query_one("#members").focus()
 
 
 def resource_groups(cfg: core.Config, stage: str, rows: list, nseq: "dict | None" = None) -> list:
