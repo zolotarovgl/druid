@@ -305,7 +305,7 @@ def _load_array_cache(path: Path) -> dict:
 def _write_array_cache(path: Path, data: dict):
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")   # per process: concurrent writers
         tmp.write_text(json.dumps(data))
         os.replace(tmp, path)
     except OSError:
