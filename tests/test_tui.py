@@ -1764,3 +1764,99 @@ def test_s_h_on_family_stage_count_families_and_skip_separator(cli):
             assert (app.ov_sort, app.ov_hide) == (("search", False), "search")
             assert _pair(app) == ["tfs.C_x"]
     _run(go())
+
+
+# ---- final-review fix wave -------------------------------------------------------------------
+def test_long_ref_support_is_truncated_in_ogs_and_members(cli):
+    write_results(_cfg())
+    long = "98.2/" * 120                                    # 600 characters, as in sig.GPCRglut
+    p = _cfg().outdir / "possvm/tfs.A.HG1.generax.support.tree.ortholog_groups.csv"
+    p.write_text(OG_HEAD + f"Mlei_v05_G1\ttfs.A.HG1.0:T/Tbx19\t78.4\t{'R' * 60}\t{long}\n")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            og = _cells(app, "#ogs", 0)
+            assert len(og[4]) <= 13, len(og[4])
+            mem = _cells(app, "#members", 0)
+            assert len(mem[2]) <= 25 and len(mem[3]) <= 13, (len(mem[2]), len(mem[3]))
+    _run(go())
+
+
+def test_R_in_results_reloads_results_keeping_source_and_cursor(cli, monkeypatch):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            app.query_one("#res").move_cursor(row=1)
+            await pilot.pause()
+            gen = app._res_gen
+            await pilot.press("R")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app._res_gen > gen and app.view == "results"
+            assert app.res_source == "possvm" and app.res_group == "tfs"
+            assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG11"
+    _run(go())
+
+
+def test_h_fallback_cursor_is_previous_row_not_zero(cli):
+    _sorted_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _family_overview(app, pilot)
+            row = _shown(app).index("tfs.A")
+            assert row >= 1
+            _to_col(app, "tree", row=row)
+            await _key(pilot, "h")                       # tfs.A has nothing to do at tree
+            assert "tfs.A" not in _shown(app)
+            assert app.query_one("#overview").cursor_row == min(row, len(_shown(app)) - 1)
+    _run(go())
+
+
+def test_o_on_hg_without_output_notifies_and_goes_to_first_hg(cli, monkeypatch):
+    write_results(_cfg())
+    notes = []
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        monkeypatch.setattr(app, "notify", lambda msg, **kw: notes.append(msg))
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.open_group("tfs", "align")
+            await pilot.pause()
+            app.load_now()
+            await pilot.pause()
+            vis = [r.hg for r in app.visible()]
+            assert "tfs.C_x.HG1" in vis
+            app.query_one("#hgs").move_cursor(row=vis.index("tfs.C_x.HG1"))
+            await pilot.pause()
+            await pilot.press("o")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.view == "results"
+            assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG1"
+            assert "tfs.C_x.HG1: no output in possvm" in notes
+    _run(go())
+
+
+def test_footer_prev_hint_only_for_possvm(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert "check possvm_prev" in app._res_foot
+            await pilot.press("p")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.res_source == "possvm_prev"
+            assert "check possvm_prev" not in app._res_foot
+    _run(go())

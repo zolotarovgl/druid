@@ -211,8 +211,8 @@ highlighted stage (on search/cluster: families); `h` again shows all.
 HG view, for the highlighted HG's category/family (that HG highlighted) or, on search/cluster,
 for the highlighted family's HGs. Four panes, `tab` between them: **Results** (the group's HGs
 that have POSSVM output: OGs, genes, OGs with support 0 `⚠`; the footer counts the HGs without
-output), **OGs** (the ortholog groups of the highlighted HG, largest first: OG, name, genes,
-species, orthogroup support, reference ortholog and its support), **members** (the highlighted
+output), **OGs** (the ortholog groups of the highlighted HG, largest first: OG, genes, spp,
+support, ref sup, ref, name; long reference strings are cut with `…`), **members** (the highlighted
 OG's rows of `*.ortholog_groups.csv`: gene, species, reference ortholog and support; `/` filters,
 `enter` keeps the filter, `esc` clears it) and **species** (per phylum `k/m spp  n genes` with
 the species and their counts, absent phyla last; the universe is the tips of

@@ -397,6 +397,7 @@ class PhyloApp(App):
         self.ov_shown = ov_order(rows, self.ov_sort, self.ov_hide)
         t =self.query_one("#overview", DataTable)
         keep = self._key_at_cursor(t)
+        keep_row = t.cursor_row
         col = t.cursor_column
         if col >= 2 and stage_at_column(col) is None:      # never restore onto the separator
             col += 1
@@ -420,7 +421,8 @@ class PhyloApp(App):
                                      for (ch, fg), k in zip(self.OV_GLYPHS, n) if k))
             t.add_row(r.group, str(r.total), *cells, key=r.group)
         keys = [r.group for r in self.ov_shown]
-        t.move_cursor(row=keys.index(keep) if keep in keys else 0, column=col)
+        t.move_cursor(row=keys.index(keep) if keep in keys else max(0, min(keep_row, len(keys) - 1)),
+                      column=col)
         t.border_title = self._ov_title()
         self._overview_footer()
 
@@ -680,6 +682,8 @@ class PhyloApp(App):
         self._fill_hgs()
 
     def action_refresh(self) -> None:
+        if self.view == "results" and self.res_source is not None:
+            self._reload_results()          # keeps group / source / cursor where possible
         self.load_bg()
 
     def action_resubmit(self) -> None:
@@ -794,8 +798,11 @@ class PhyloApp(App):
         self._res_note = snap["note"] or ("" if self.res_rows else
                                           f"no ortholog groups yet ({self.res_source} not done)")
         t = self.query_one("#res", DataTable)
-        keep = self._res_focus or self._key_at_cursor(t)
-        self._res_focus = None
+        focus, self._res_focus = self._res_focus, None
+        keep = focus or self._key_at_cursor(t)
+        if focus and focus not in {r.hg for r in self.res_rows}:
+            self.notify(f"{focus}: no output in {self.res_source}", severity="warning")
+            keep = None
         t.clear()
         for r in self.res_rows:
             if r.error:
@@ -829,7 +836,7 @@ class PhyloApp(App):
             sup = ("–" if og.support is None else "0.0 ⚠" if og.support == 0
                    else f"{og.support:.1f}")
             t.add_row(_short_og(og.id), str(len(og.genes)),
-                      str(len({m.species for m in og.genes})), sup, escape(og.ref_support),
+                      str(len({m.species for m in og.genes})), sup, escape(_trunc(og.ref_support, 12)),
                       escape(_trunc(og.ref)), escape(_trunc(og.name)), key=og.id)
         if t.row_count:
             t.move_cursor(row=0)
@@ -868,13 +875,15 @@ class PhyloApp(App):
             cells = (m.gene, m.species, m.ref, m.ref_support)
             if q and not any(q in c.lower() for c in cells):
                 continue
-            t.add_row(*(escape(c) for c in cells), key=f"{i}:{m.gene}")
+            shown = (m.gene, m.species, _trunc(m.ref), _trunc(m.ref_support, 12))
+            t.add_row(*(escape(c) for c in shown), key=f"{i}:{m.gene}")
 
     def _results_footer(self) -> None:
         r = self._cur_res()
         head = r.error if r is not None and r.error else self._res_note
+        hint = "⚠ = support 0 (GeneRax bug case" + ("; check possvm_prev)" if self.res_source == "possvm" else ")")
         parts = ([f"{len(r.ogs)} OGs"] if r is not None and not r.error else []) + [
-            self.res_source or "…", "⚠ = support 0 (GeneRax bug case; check possvm_prev)"]
+            self.res_source or "…", hint]
         if self.res_missing:
             parts.append(f"{self.res_missing} HG{'' if self.res_missing == 1 else 's'} without output")
         lines = ([head] if head else []) + [
