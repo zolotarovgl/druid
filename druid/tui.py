@@ -136,6 +136,12 @@ def ov_cell(c: tuple, width: int, bar: int, glyphs) -> str:
             + "".join(f"[{fg}]{ch * k}[/]" for (ch, fg), k in zip(glyphs, n) if k))
 
 
+def _possvm_sig(states: dict) -> frozenset:
+    """(stage, hg) of every finished POSSVM output: the Results caches go stale when it moves."""
+    return frozenset((st, hg) for st in ("possvm", "possvm_prev")
+                     for hg, v in states.get(st, {}).items() if v == 0)
+
+
 def _todo_at(r, stage: str) -> tuple:
     """(ready incl. failed, running) of an overview row at a stage; (-1, -1) when n/a."""
     c = r.per_stage.get(stage)
@@ -283,7 +289,7 @@ class SortTable(DataTable):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.cols: list = []
-        self.sort: "tuple | None" = None
+        self.sort_state: "tuple | None" = None   # (column name, reversed); DataTable.sort() stays
         self.header = False                     # header mode
         self.hcol = 0                           # header cursor column
         self.on_sort = None                     # callable(table), set by the app
@@ -299,8 +305,8 @@ class SortTable(DataTable):
     def _label(self, i: int) -> Text:
         c = self.cols[i]
         text, pad = c.label, 2
-        if self.sort is not None and c.name is not None and self.sort[0] == c.name:
-            text += " " + sort_arrow(c.numeric, self.sort[1])
+        if self.sort_state is not None and c.name is not None and self.sort_state[0] == c.name:
+            text += " " + sort_arrow(c.numeric, self.sort_state[1])
             pad = 0                              # the arrow takes the room the padding reserves
         style = "reverse" if self.header and i == self.hcol else ""
         return _HeadText(text, style=style, pad=pad) if c.name is not None else Text(text, style=style)
@@ -328,6 +334,7 @@ class SortTable(DataTable):
         self.hcol = self._near(self.cursor_column if self.cursor_type == "cell" else 0)
         self.show_cursor = False
         self.relabel()
+        self.app.refresh_bindings()              # the footer stops advertising row-only keys
 
     def leave_header(self, to_row: bool = True) -> None:
         self.header = False
@@ -335,6 +342,7 @@ class SortTable(DataTable):
         if to_row and self.row_count:
             self.move_cursor(row=0, column=self.hcol if self.cursor_type == "cell" else None)
         self.relabel()
+        self.app.refresh_bindings()
 
     def _step(self, d: int) -> None:
         nxt = [j for j in self._selectable() if (j - self.hcol) * d > 0]
@@ -351,8 +359,8 @@ class SortTable(DataTable):
         if not 0 <= i < len(self.cols) or self.cols[i].name is None:
             return
         name = self.cols[i].name
-        same = self.sort is not None and self.sort[0] == name
-        self.sort = (name, not self.sort[1] if same else False)
+        same = self.sort_state is not None and self.sort_state[0] == name
+        self.sort_state = (name, not self.sort_state[1] if same else False)
         self.relabel()
         if self.on_sort is not None:
             self.on_sort(self)
@@ -437,7 +445,7 @@ class Spinner(Static):
         self._draw()
 
     def _draw(self) -> None:
-        self.update(f"{SPIN_FRAMES[self.frame]} {self.text}")
+        self.update(f"{SPIN_FRAMES[self.frame]} {self.text}", layout=False)
 
 
 class PhyloApp(App):
@@ -544,6 +552,7 @@ class PhyloApp(App):
         self.rt_shown: list = []
         self._og_cache: "dict | None" = None    # {source, rows: {hg: HGOgs}, hgs: frozenset}
         self._rt_gen = 0
+        self._og_sig: "frozenset | None" = None  # which POSSVM outputs were done when it was read
         self._rt_note = ""
         self._rt_foot = ""
         self._tab_text = ""
@@ -720,6 +729,7 @@ class PhyloApp(App):
             self._regroup()
         else:
             self._fill_overview(snap["ov_rows"])
+        self._og_cache_check()
         self._maybe_load_rtab()
         hg = snap["hg"]
         if not snap["known"]:
@@ -786,7 +796,7 @@ class PhyloApp(App):
         if self.group is not None:          # search / cluster list families, the rest HGs
             key = model.fam_group_key if self.stage in core.FAMILY_STAGES else model.group_key
             rows = [r for r in rows if key(r.hg, self.by) == self.group]
-        return sort_rows(rows, self.query_one("#hgs", SortTable).sort, self._hg_keys())
+        return sort_rows(rows, self.query_one("#hgs", SortTable).sort_state, self._hg_keys())
 
     def _hg_keys(self) -> dict:
         """Sort keys of pane 2 HGs (the second column counts HGs per family on search/cluster)."""
@@ -852,6 +862,18 @@ class PhyloApp(App):
     def _rt_loading(self) -> bool:
         return self.query_one("#rtab").has_class("loading")
 
+    def _og_cache_check(self) -> None:
+        """A POSSVM output finished (or vanished) since the cache was read: drop it.  On the
+        Results tab the old rows stay shown while a background re-read runs; the cache is made
+        unusable for the Results window at once."""
+        if self._og_cache is None or _possvm_sig(self._ov_inputs[1]) == self._og_sig:
+            return
+        if self.view == "overview" and self.tab == "results":
+            self._og_cache = dict(self._og_cache, hgs=frozenset())     # shown, not reusable
+            self._reload_rtab(keep_rows=True)
+        else:
+            self._og_cache = None
+
     def _maybe_load_rtab(self) -> None:
         """Start the one read of every expected HG when the Results tab is shown and nothing is
         cached or loading; waits for the first refresh (no expected HGs known yet)."""
@@ -859,9 +881,15 @@ class PhyloApp(App):
                 and not self._rt_loading() and self._ov_inputs[0]):
             self._reload_rtab()
 
-    def _reload_rtab(self) -> None:
+    def _reload_rtab(self, keep_rows: bool = False) -> None:
+        """Start the one read.  keep_rows: the cached rows stay shown (greyed) until the new
+        data land; the cache is already unusable for the Results window (hgs emptied)."""
+        if not self._ov_inputs[0]:               # no snapshot yet: _apply -> _maybe_load_rtab reads
+            return
         self._rt_gen += 1
-        self._og_cache = None
+        self._og_sig = _possvm_sig(self._ov_inputs[1])
+        if not keep_rows:
+            self._og_cache = None
         self.query_one("#rtab").add_class("loading")
         self._rt_note = "loading…"
         self._rt_footer()
@@ -915,7 +943,7 @@ class PhyloApp(App):
         cache = self._og_cache or {}
         self.rt_rows = model.og_group_rows([r.group for r in self.ov_rows], self._ov_inputs[0],
                                            self.by, cache.get("rows", {}).values())
-        self.rt_shown = rt_order(self.rt_rows, t.sort, self.rt_hide)
+        self.rt_shown = rt_order(self.rt_rows, t.sort_state, self.rt_hide)
         keep, keep_row, col = self._key_at_cursor(t), t.cursor_row, t.cursor_column
         t.clear()
         for r in self.rt_shown:
@@ -1123,7 +1151,7 @@ class PhyloApp(App):
     @property
     def ov_sort(self) -> "tuple | None":
         """The overview's sort = its table's header sort: one state for s and the header."""
-        return self.query_one("#overview", SortTable).sort
+        return self.query_one("#overview", SortTable).sort_state
 
     def action_sort(self) -> None:
         """s with the first-screen table not focused (focused, the table's own s handles it)."""
@@ -1444,7 +1472,7 @@ class PhyloApp(App):
             self._set_res_title()
             return
         q = self._flt["res"].lower()
-        rows = sort_rows([r for r in self.res_rows if q in r.hg.lower()], t.sort, RES_KEYS)
+        rows = sort_rows([r for r in self.res_rows if q in r.hg.lower()], t.sort_state, RES_KEYS)
         t.clear()
         for r in rows:
             if r.error:
@@ -1504,7 +1532,7 @@ class PhyloApp(App):
         t.border_title = f"OGs · {r.hg if r else '–'} · {self.res_source or '…'}{self._ftag('ogs')}"
         q = self._flt["ogs"].lower()
         ogs = [o for o in r.ogs if q in o.id.lower() or q in o.name.lower()] if r else []
-        ogs = sort_rows(ogs, t.sort, OG_KEYS)
+        ogs = sort_rows(ogs, t.sort_state, OG_KEYS)
         for og in ogs:
             sup = ("–" if og.support is None else "0.0 ⚠" if og.support == 0
                    else f"{og.support:.1f}")
@@ -1549,7 +1577,7 @@ class PhyloApp(App):
         self.query_one("#members").border_title = (
             (f"members · {_short_og(og.id)} {escape(og.name)}" if og else "members")
             + self._ftag("members"))
-        for i, m in sort_rows(list(enumerate(og.genes if og else [])), t.sort, MEM_KEYS):
+        for i, m in sort_rows(list(enumerate(og.genes if og else [])), t.sort_state, MEM_KEYS):
             cells = (m.gene, m.species, m.ref, m.ref_support)
             if q and not any(q in c.lower() for c in cells):
                 continue

@@ -2258,9 +2258,9 @@ def test_results_panes_header_sort_independently(cli):
             await _key(pilot, "enter")
             assert _member_genes(app) == ["Nvec_v1_g3", "Hsap_ENSP2"]
             assert _heads(app, "#res")[1] == "OGs ▲"                 # each pane its own sort
-            assert app.query_one("#res").sort == ("ogs", True)
-            assert app.query_one("#ogs").sort == ("support", True)
-            assert app.query_one("#members").sort == ("sp", True)
+            assert app.query_one("#res").sort_state == ("ogs", True)
+            assert app.query_one("#ogs").sort_state == ("support", True)
+            assert app.query_one("#members").sort_state == ("sp", True)
             await pilot.press("p")                                   # new source: sorts kept
             await app.workers.wait_for_complete()
             await pilot.pause()
@@ -2281,7 +2281,7 @@ def test_header_mode_never_captures_filter_typing(cli):
             await _key(pilot, "slash", "s", "q", "R", "p")           # all text for the box
             inp = app.query_one("#memfilter")
             assert inp.value == "sqRp" and app.focused is inp
-            assert m.sort is None and not m.header and app.view == "results"
+            assert m.sort_state is None and not m.header and app.view == "results"
             assert app.res_source == "possvm"
     _run(go())
 
@@ -2295,7 +2295,7 @@ def test_header_sort_on_empty_results_pane(cli):
             await _open_results(app, pilot, "cal")                   # a group with no HGs
             assert app.query_one("#res").row_count == 0
             await _key(pilot, "up", "enter", "down")
-            assert app.query_one("#res").sort == ("hg", False) and app.view == "results"
+            assert app.query_one("#res").sort_state == ("hg", False) and app.view == "results"
     _run(go())
 
 
@@ -2612,14 +2612,14 @@ def test_results_tab_sort_hide_and_header_keep_all_pinned(cli, monkeypatch):
             await _key(pilot, "h")                                   # group: not a count
             assert app.rt_hide is None
             await _key(pilot, "s")                                   # s on a cell: group ▲
-            assert rt.sort == ("group", False) and [r[0] for r in _rt(app)] == ["ALL", "cal", "slc", "tfs"]
+            assert rt.sort_state == ("group", False) and [r[0] for r in _rt(app)] == ["ALL", "cal", "slc", "tfs"]
             await _key(pilot, "up", "right", "right", "right", "enter")   # header: OGs ▼
             assert app.view == "overview"                            # enter in the header never opens
-            assert rt.sort == ("ogs", False) and _heads(app, "#rtab")[3] == "OGs ▼"
+            assert rt.sort_state == ("ogs", False) and _heads(app, "#rtab")[3] == "OGs ▼"
             assert [r[0] for r in _rt(app)][:2] == ["ALL", "tfs"]
             app.load_now()                                           # refresh: sort kept, no read
             await pilot.pause()
-            assert rt.sort == ("ogs", False) and [r[0] for r in _rt(app)][:2] == ["ALL", "tfs"]
+            assert rt.sort_state == ("ogs", False) and [r[0] for r in _rt(app)][:2] == ["ALL", "tfs"]
     _run(go())
 
 
@@ -2679,7 +2679,7 @@ def test_results_tab_keys_touch_no_files_or_slurm(cli, monkeypatch):
             app.query_one("#rtab").move_cursor(row=0, column=3)
             await _key(pilot, "s", "h", "h", "up", "right", "enter", "down", "f", "c",
                        "shift+tab", "tab")
-            assert app.tab == "results" and app.query_one("#rtab").sort == ("genes", False)
+            assert app.tab == "results" and app.query_one("#rtab").sort_state == ("genes", False)
     _run(go())
 
 
@@ -2781,11 +2781,11 @@ def test_set_cols_sizes_a_sorted_column_like_a_resort(cli):
             await _open_results(app, pilot, "tfs")
             t = app.query_one("#res")
             t.on_sort = None                                         # no row refill: labels only
-            t.sort = None
+            t.sort_state = None
             t.set_cols(tui.RES_COLS)
-            t.sort_by(1)                                             # plain re-sort: OGs ▼, pre-sized
+            t.sort_by(1)                                            # plain re-sort: OGs ▼, pre-sized
             await pilot.pause()
-            assert t.sort == ("ogs", False)
+            assert t.sort_state == ("ogs", False)
             after_sort = _widths(app, "#res")
             t.set_cols(tui.RES_COLS)                                 # refill with the sort kept
             await pilot.pause()
@@ -3063,4 +3063,127 @@ def test_spinner_stops_when_a_read_is_cancelled_by_leaving_the_window(cli, monke
             assert app.res_rows == []
             await _key(pilot, "escape")                                # ... and the user leaves
             assert not spin.running and str(spin.render()) == ""
+    _run(go())
+
+
+# ---- final-review fixes ----------------------------------------------------------------------
+def _flip_possvm_done():
+    """tfs.C_x.HG1 had no POSSVM output; give it one (its possvm stage is now done)."""
+    from phylocli.tests.test_model import POSSVM_HG1, og_csv
+    (_cfg().outdir / "possvm/tfs.C_x.HG1.generax.support.tree.ortholog_groups.csv").write_text(
+        og_csv(POSSVM_HG1))
+
+
+def test_refresh_after_possvm_finishes_rereads_results_tab_keeping_old_rows(cli, monkeypatch):
+    write_results(_cfg())
+    gate = _gated_read_ogs(monkeypatch, start_open=True)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            assert _rt(app)[1] == ("tfs", 3, 2, 3, 7, 1)
+            _flip_possvm_done()
+            gate.clear()
+            app.load_now()
+            await pilot.pause()
+            await pilot.pause(0.3)
+            assert app.query_one("#rtab").has_class("loading")      # background re-read started
+            assert _rt(app)[1] == ("tfs", 3, 2, 3, 7, 1)            # ... old rows kept meanwhile
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert _rt(app)[1][2] == 3 and not app.query_one("#rtab").has_class("loading")
+    _run(go())
+
+
+def test_refresh_after_possvm_finishes_then_o_reads_the_new_hg(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            assert app._og_cache is not None
+            await _key(pilot, "shift+tab")                          # Jobs tab
+            _flip_possvm_done()
+            app.load_now()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await _key(pilot, "o")                                  # ALL
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.res_missing == 0 and "tfs.C_x.HG1" in [r.hg for r in app.res_rows]
+    _run(go())
+
+
+def test_R_before_the_first_snapshot_reads_nothing_and_the_snapshot_then_reads(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            app._ov_inputs = (set(), {}, set(), {})                 # no snapshot yet
+            app.tab = "results"
+            app._og_cache = None
+            app.action_refresh()                                    # (its own snapshot lands later)
+            assert app._og_cache is None and not app.query_one("#rtab").has_class("loading")
+            app.load_now()                                          # the snapshot lands
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app._og_cache is not None and len(app._og_cache["hgs"]) == 3
+    _run(go())
+
+
+def test_repeated_R_during_a_load_leaves_one_spinner_timer(cli, monkeypatch):
+    write_results(_cfg())
+    gate = _gated_read_ogs(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _key(pilot, "tab")
+            spin = app.query_one("#status")
+            for _ in range(4):
+                await _key(pilot, "R")
+            assert spin.running and len(spin._timers) == 1
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not spin.running and len(spin._timers) == 0
+    _run(go())
+
+
+def test_sort_state_does_not_shadow_datatable_sort(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            t = app.query_one("#overview")
+            assert t.sort_state is None
+            assert t.sort.__func__ is tui.DataTable.sort            # the method is intact
+    _run(go())
+
+
+def test_header_mode_refreshes_the_footer_bindings(cli, monkeypatch):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            calls = []
+            real = app.refresh_bindings
+            monkeypatch.setattr(app, "refresh_bindings", lambda *a, **k: (calls.append(1), real(*a, **k)))
+            await _key(pilot, "up")
+            assert app.query_one("#overview").header and len(calls) >= 1
+            n = len(calls)
+            await _key(pilot, "down")
+            assert not app.query_one("#overview").header and len(calls) > n
     _run(go())
