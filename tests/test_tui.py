@@ -354,10 +354,12 @@ def test_no_duplicate_submit_from_same_dialog(cli, monkeypatch):
             await pilot.press("y")
             await _settle(app, pilot)
             assert scr.submitted == ["12345"] and len(_calls()) == n0 + 1
+            # a successful submit closes the dialog (and the app refreshes), so the same
+            # dialog can no longer be re-run: enter / y now reach the HG list, not a submit
+            assert not isinstance(app.screen, tui.ResubmitScreen)
             await pilot.press("enter", "y")
             await _settle(app, pilot)
             assert len(_calls()) == n0 + 1 and scr.submitted == ["12345"]
-            assert "already submitted" in scr._shown and "12345" in scr._shown
     _run(go())
 
 
@@ -430,8 +432,11 @@ def test_escape_during_submit_waits_for_result(cli, monkeypatch):
             await pilot.press("y", "escape")
             assert isinstance(app.screen, tui.ResubmitScreen)       # not dismissed mid-flight
             await _settle(app, pilot)
-            assert isinstance(app.screen, tui.ResubmitScreen)
-            assert scr.submitted == ["12345"] and "12345" in scr._shown
+            # the submit finished: the dialog closed on success (not because of the escape)
+            # and the job id is in the notification
+            assert not isinstance(app.screen, tui.ResubmitScreen)
+            assert scr.submitted == ["12345"]
+            assert any("12345" in str(n.message) for n in app._notifications)
     _run(go())
 
 
@@ -519,7 +524,8 @@ def test_submit_result_shows_notes_and_uses_given_raw(cli, monkeypatch):
             await _settle(app, pilot)
             await pilot.press("y")
             await _settle(app, pilot)
-            assert "12345" in scr._shown and "resources.tsv: row found" in scr._shown
+            msgs = [str(n.message) for n in app._notifications]
+            assert any("12345" in m and "resources.tsv: row found" in m for m in msgs), msgs
     _run(go())
     run = sorted((_state["runs"]).glob("*_align*"))[-1]
     assert "marker_key: from-the-command" in (run / "config.yaml").read_text()
@@ -889,11 +895,13 @@ def test_edit_value_enter_then_y_submits(cli, monkeypatch):
             await pilot.press("y")
             await _settle(app, pilot)
             assert scr.submitted and set(scr.submitted) == {"12345"}, scr._shown
-            assert scr.query_one("#mem-0").value == "2G"
             n_arrays = len(scr.submitted)
             return n_arrays
     n_arrays = asyncio.run(go())
     assert len(_calls()) == n0 + n_arrays
+    # the typed 2G (not a y-overwritten value) reached the submitted script
+    scripts = [p.read_text() for p in _state["runs"].glob("*_align*/array_*.sbatch")]
+    assert any("--mem=2048M" in s for s in scripts)
 
 
 def test_panes_are_named_top_left(cli):
@@ -991,4 +999,46 @@ def test_hg_view_headers_follow_the_unit(cli):
             await pilot.pause()
             assert heads(app, "#hgs")[1:3] == ["HG", "seqs"]
             assert "ids" in heads(app, "#arrays") and "HGs" not in heads(app, "#arrays")
+    _run(go())
+
+
+def test_successful_submit_closes_dialog_and_refreshes(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+    loads = {"n": 0}
+    real = tui.PhyloApp.load_bg
+
+    async def go():
+        async with app.run_test() as pilot:
+            scr = await _open_dialog(app, pilot)
+            monkeypatch.setattr(app, "load_bg", lambda: (loads.__setitem__("n", loads["n"] + 1), real(app)))
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert not isinstance(app.screen, tui.ResubmitScreen)
+            assert loads["n"] >= 1                      # the app refreshed after the submit
+            assert app.selected == set()
+            assert any("12345" in str(n.message) for n in app._notifications)
+    _run(go())
+
+
+def test_partial_sbatch_failure_keeps_dialog_open(cli, monkeypatch):
+    app = _failed_app(cli, monkeypatch)
+    from phylocli import model
+
+    def half(w, submitted=None):
+        submitted = submitted if submitted is not None else []
+        submitted.append("12345")
+        return submitted, "sbatch failed for array_1.sbatch: boom"
+    monkeypatch.setattr(model, "sbatch_all", half)
+
+    async def go():
+        async with app.run_test() as pilot:
+            scr = await _open_dialog(app, pilot)
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert isinstance(app.screen, tui.ResubmitScreen)
+            assert "boom" in scr._shown and scr.submitted == ["12345"]
     _run(go())

@@ -227,10 +227,12 @@ class PhyloApp(App):
         ar = self.query_one("#arrays", DataTable)
         keep_row = ar.cursor_row
         ar.clear()
-        for a in self._array_rows:
+        for i, a in enumerate(self._array_rows):
             c = a.counts
+            # keyed by position + run + job: a job id can repeat (fake sbatch, a duplicated
+            # jobs.tsv line), and a duplicate DataTable key raises on the UI thread
             ar.add_row(a.job, a.stage, str(a.n), str(c["done"]), str(c["running"]),
-                       str(c["pending"]), str(c["failed"]), key=a.job)
+                       str(c["pending"]), str(c["failed"]), key=f"{i}:{a.run.name}:{a.job}")
         if self._array_rows:
             ar.move_cursor(row=min(keep_row, len(self._array_rows) - 1))
 
@@ -651,7 +653,17 @@ class ResubmitScreen(ModalScreen):
         work(per)
 
     def _finish(self, text: str, dry_ok: bool = False, jids: "list | None" = None,
-                per: "dict | None" = None) -> None:
+                per: "dict | None" = None, done: bool = False) -> None:
+        """`done`: every array was submitted — close the dialog, say so, and let the app refresh
+        (its dismiss callback reloads); a partial failure keeps the dialog open with the error."""
+        if done:
+            self.submitted = list(jids or [])
+            self._busy = False
+            from rich.text import Text      # the notes (e.g. skipped HGs) travel with the toast
+            self.app.notify(Text.from_markup(text).plain, title=f"resubmit · {self.stage}",
+                            markup=False, timeout=15)
+            self.dismiss(self.submitted)
+            return
         self._busy = False
         self._dry_ok = dry_ok
         self._dry_per = per if dry_ok else None
@@ -735,7 +747,7 @@ class ResubmitScreen(ModalScreen):
         lines = notes + ([f"[green]submitted {' '.join(jids)}[/] · run dir {w.run_dir}"] if jids else [])
         if err:
             lines.append(f"[red]{escape(err)}[/]")
-        self._post(self._finish, "\n".join(lines), False, jids)
+        self._post(self._finish, "\n".join(lines), False, jids, None, bool(jids) and not err)
 
     def action_cancel(self) -> None:
         if self._busy:                             # dismissing now would drop the result
