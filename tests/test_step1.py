@@ -820,7 +820,7 @@ def test_tui_overview_step1_step2_separator(cli, monkeypatch):
     asyncio.run(go())
 
 
-def test_tui_banner_on_duplicate_ids(cli, results_tree):
+def test_tui_notifies_on_duplicate_ids(cli, results_tree):
     tui = _tui()
     _, root = results_tree
     g = root / "gene_families_searchinfo.csv"
@@ -831,7 +831,8 @@ def test_tui_banner_on_duplicate_ids(cli, results_tree):
         async with app.run_test() as pilot:
             app.load_now()
             await pilot.pause()
-            assert "duplicate family ids" in app._banner_text and "slc.NEW" in app._banner_text
+            msgs = [str(n.message) for n in app._notifications]
+            assert any("duplicate family ids" in m and "slc.NEW" in m for m in msgs)
             assert app.view == "overview"                              # a warning; the app goes on
             assert app.ov_rows[0].n_fams == 5                       # still counted, de-duplicated
             assert "search" in [str(c.label).split("\n")[-1] for c in app.query_one("#overview").columns.values()]

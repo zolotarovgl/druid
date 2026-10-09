@@ -127,10 +127,12 @@ class PhyloApp(App):
     CSS = """
     #hgview { grid-size: 2 2; grid-columns: 1fr 1fr; grid-rows: 1fr 1fr; }
     #hgview DataTable, #detail { border: round $primary; height: 100%; }
-    #banner { height: auto; color: $warning; }
+    #strip { height: 9; }
+    #logo { width: 10; height: 9; margin: 0 2 0 1; }
+    #helpbox { width: 1fr; height: 9; }
+    #help { height: 1fr; }
+    #status { height: 1; color: $warning; }
     #ov { height: 1fr; }
-    #logo { width: 21; height: auto; padding: 1 1 0 1; }
-    #ovmain { width: 1fr; height: 1fr; }
     #overview { height: 1fr; border: round $primary; }
     #ovfoot { height: auto; }
     #hgview { height: 1fr; }
@@ -189,7 +191,10 @@ class PhyloApp(App):
         self.ov_rows: list = []
         self._ov_inputs: tuple = (set(), {}, set(), {})    # exp, HG states, families, family states
         self.hg_count: dict[str, int] = {}                 # family id -> expected HGs
-        self._banner_text = ""
+        self._warned: set = set()               # notifications already shown this session
+        self._help_text = ""
+        self._status = ""                       # the strip's one-line status area
+        self._hist_loading = False
         self.res_from = "overview"              # the view esc returns to from Results
         self.res_group = ""
         self.res_hgs: list[str] = []
@@ -214,12 +219,14 @@ class PhyloApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        yield Static("", id="banner")
-        with Horizontal(id="ov"):
-            yield Static("\n".join(logo.render_logo()), id="logo")    # first screen only
-            with Vertical(id="ovmain"):
-                yield DataTable(id="overview", cursor_type="cell", header_height=2)   # step1/step2 header
-                yield Static("", id="ovfoot")
+        with Horizontal(id="strip"):                 # all views: logo + key help + status line
+            yield Static("\n".join(logo.render_logo()), id="logo")
+            with Vertical(id="helpbox"):
+                yield Static("", id="help")
+                yield Static("", id="status")
+        with Vertical(id="ov"):
+            yield DataTable(id="overview", cursor_type="cell", header_height=2)   # step1/step2 header
+            yield Static("", id="ovfoot")
         with Grid(id="hgview"):
             yield DataTable(id="stages", cursor_type="row")
             yield DataTable(id="hgs", cursor_type="row")
@@ -303,15 +310,59 @@ class PhyloApp(App):
             snap = self._collect()
         except Exception as e:               # keep the old snapshot; never let a worker kill the app
             if not worker.is_cancelled:
-                self.call_from_thread(self.notify, str(e), severity="error", markup=False)
+                self.call_from_thread(self._notify_once, str(e), "error")
             return
         if worker.is_cancelled:              # superseded by a newer refresh
             return
         self.call_from_thread(self._apply, snap)
 
-    def _set_banner(self, text: str) -> None:
-        self._banner_text = text
-        self.query_one("#banner", Static).update(text)
+    def _notify_once(self, msg: str, severity: str = "warning") -> None:
+        """A warning is shown once per session per distinct message (it used to sit in a banner
+        that took a line of every view)."""
+        if msg in self._warned:
+            return
+        self._warned.add(msg)
+        self.notify(msg, severity=severity, markup=False)
+
+    # key help in the top strip: per view, replaces the footers' legend lines
+    def _help_for(self, view: str) -> str:
+        glyphs = " ".join(f"[{fg}]{ch}[/] {name}" for (ch, fg), name in
+                          zip(self.OV_GLYPHS, ("done", "running", "ready/failed", "blocked")))
+        if view == "hgs":
+            return "\n".join([
+                "[b]HG view[/]",
+                "tab / shift+tab: next pane · up/down: move · enter on stages: pick the stage",
+                "space: select HG · a: select all · r: resubmit selected · l: log of the HG",
+                "f: cycle the filter (" + ", ".join(FILTERS) + ")",
+                "o: results of the HG's group · esc: back to the overview · R: refresh · q: quit",
+                "default filter: failed+ready; the states are " + " · ".join(STATE_STYLE)])
+        if view == "results":
+            return "\n".join([
+                "[b]Results[/]",
+                "/: filter this pane · p: possvm ↔ possvm_prev · tab: pane",
+                "esc: clear filters, then back · R: refresh · q: quit"])
+        return "\n".join([
+            "[b]Overview[/]",
+            glyphs,
+            "search/cluster count families, the other stages HGs",
+            "enter: open the group at that stage · o: results · c/f: category/family",
+            "s: sort by the column · h: only actionable at the column · R: refresh · q: quit",
+            "default view: failed+ready"])
+
+    def _update_help(self) -> None:
+        self._help_text = self._help_for(self.view)
+        self.query_one("#help", Static).update(self._help_text)
+        self._update_status()
+
+    def _update_status(self) -> None:
+        if self.view == "results":
+            text = self._res_note if self._res_note.startswith("loading") else ""
+        elif self.view == "hgs":
+            text = "loading history…" if self._hist_loading else ""
+        else:
+            text = ""
+        self._status = text
+        self.query_one("#status", Static).update(text)
 
     def _apply(self, snap: dict) -> None:
         self._ov_inputs = snap["ov_inputs"]
@@ -321,15 +372,14 @@ class PhyloApp(App):
         else:
             self._fill_overview(snap["ov_rows"])
         hg = snap["hg"]
-        banner = []
         if not snap["known"]:
-            banner.append("squeue not on PATH: running jobs not detected")
-        banner += [escape(w) for w in snap["fam_warn"]]
+            self._notify_once("squeue not on PATH: running jobs not detected")
+        for w in snap["fam_warn"]:
+            self._notify_once(w)
         if hg is not None and not hg["sacct_known"]:
-            banner.append("sacct not on PATH: task states unknown")
-        if hg is None and self.view == "hgs" and not self.by_stage:
-            banner.append("loading history…")
-        self._set_banner(" · ".join(banner))
+            self._notify_once("sacct not on PATH: task states unknown")
+        self._hist_loading = hg is None and self.view == "hgs" and not self.by_stage
+        self._update_status()
         if self.view != "results":
             self.sub_title = f"{self.stage} · {self.filter} · {snap['when']:%H:%M:%S}"
         if hg is None:
@@ -397,6 +447,7 @@ class PhyloApp(App):
         self.query_one("#hgview").display = self.view == "hgs"
         self.query_one("#resv").display = self.view == "results"
         self.query_one({"overview": "#overview", "hgs": "#hgs", "results": "#res"}[self.view]).focus()
+        self._update_help()
 
     def _fill_overview(self, rows: list) -> None:
         self.ov_rows = rows                      # as computed; ov_shown is what the table shows
@@ -457,10 +508,7 @@ class PhyloApp(App):
         parts = [f"{st} {c[0]}/{c[1]}/{c[2]}/{c[3]}" for st, c in r.per_stage.items() if c]
         self.query_one("#ovfoot", Static).update(
             f"[b]{escape(r.group)}[/] {r.total} HGs · {r.n_fams} families · "
-            "done/running/ready/blocked: " + " · ".join(parts)
-            + "\n█ done ▒ running ▓ ready/failed ░ blocked · search/cluster count families · "
-              "enter: open · o: results · c/f: category/family · s: sort · h: only actionable"
-            + " · default view: failed+ready")
+            "done/running/ready/blocked: " + " · ".join(parts))
 
     def _regroup(self) -> None:
         exp, states, fams, fstates = self._ov_inputs
@@ -517,9 +565,8 @@ class PhyloApp(App):
         self.rows = self.by_stage.get(self.stage, [])
         self._auto_filter = True
         self._auto_pick_filter()
+        self._hist_loading = not self.by_stage
         self._show_view()
-        if not self.by_stage:
-            self._set_banner("loading history…")
         self.query_one("#hgview").set_class(not self.by_stage, "loading")   # grey until data
         self._fill_stages()
         self._fill_hgs(keep="")
@@ -957,9 +1004,10 @@ class PhyloApp(App):
         if self.res_missing:
             parts.append(f"{self.res_missing} HG{'' if self.res_missing == 1 else 's'} without output")
         lines = ([head] if head else []) + [
-            " · ".join(parts), "/: filter this pane · p: possvm ↔ possvm_prev · tab: pane · esc: back"]
+            " · ".join(parts)]
         self._res_foot = "\n".join(lines)
         self.query_one("#resfoot", Static).update(escape(self._res_foot))
+        self._update_status()
 
     def action_toggle_source(self) -> None:
         if self.view != "results" or self.res_source is None:   # first load still running

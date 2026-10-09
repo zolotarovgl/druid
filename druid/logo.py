@@ -1,10 +1,11 @@
 """The phylocli logo (Grygoriy, 09/10/2026), drawn with half blocks: one text line = two pixel
 rows, so the 35 x 19 pixel art fits in 18 lines x 19 columns. ⬜ is transparent (the terminal's
 own background), so the logo works on dark and light themes. Source pixels:
-docs/superpowers/specs/assets/druid-logo.txt."""
+docs/superpowers/specs/assets/druid-logo.txt (PIXELS_FULL);
+PIXELS is the hand-drawn small one, druid-logo-small.txt (9 lines x 10 columns), the default."""
 from __future__ import annotations
 
-PIXELS = """\
+PIXELS_FULL = """\
 ⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜🟩⬜⬛⬜⬜⬜⬜⬜⬜
 ⬜⬜🟩⬜⬜🟩⬛⬜⬛⬜⬜⬛⬛⬜⬛⬜⬜⬜⬜
 ⬜⬜⬜⬛⬜⬛⬛🟩🟧⬛⬛🟩⬛⬛⬛🟩⬜⬜⬜
@@ -41,8 +42,28 @@ PIXELS = """\
 ⬜⬜⬜⬜⬜⬜⬛⬜⬜⬜⬜⬛⬜⬜⬜⬜⬜⬜⬜
 ⬜⬜⬜⬜⬜⬜⬛⬛⬛⬛⬛⬛⬜⬜⬜⬜⬜⬜⬜"""
 
+PIXELS = """\
+⬜⬜⬜🟩⬜⬛⬜⬜🟩⬜
+⬜🟩⬛⬜⬛⬛⬜⬛🟩⬜
+⬜⬛🟧⬛🟧🟫🟧⬛⬜⬜
+⬜⬛🟧🟧🟧🟧🟧🟧⬛⬜
+⬜⬛🟧🟧🟧🟧🟧🟧⬛⬜
+⬜⬛🟧⬛🟧🟧⬛🟧⬛⬜
+⬜⬛🟧🟧🟧🟧🟧🟧⬛⬜
+⬜⬛🟧⬛⬛⬛⬛🟧⬛🟩
+⬜⬜⬛🟧🟧🟧🟧⬛⬜⬛
+⬜⬜⬜⬛🟧🟧⬛⬜⬛🟧
+🟩⬜⬛⬜⬛🟫⬛⬛🟧⬜
+⬛🟧⬛⬛🟧🟫⬜⬜⬜⬜
+⬜⬛🟧⬜⬛🟧⬛⬜⬜⬜
+⬜⬜⬜⬛🟧🟫⬛⬜⬜⬜
+⬜⬛⬛⬛⬛⬛⬛⬛⬛⬜
+⬜⬛⬜⬜⬜⬜⬜⬜⬛⬜
+⬜⬜⬛⬜⬜⬜⬜⬛⬜⬜
+⬜⬜⬜⬛⬛⬛⬛⬜⬜⬜"""   # hand-drawn small one: 18 rows -> 9 lines x 10 columns
+
 # ⬛ is drawn dark grey, not pure black, so the outline stays visible on a black terminal
-COLOURS = {"⬜": None, "⬛": "#303030", "🟩": "#3cb043", "🟧": "#f28c28", "🟫": "#8b5a2b"}
+COLOURS = {"⬜": None, "⬛": "#6e6e6e", "🟩": "#3cb043", "🟧": "#f28c28", "🟫": "#8b5a2b"}
 
 
 def render_logo(pixels: str = PIXELS) -> list[str]:

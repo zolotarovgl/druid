@@ -683,11 +683,12 @@ def test_open_group_before_hg_data_shows_loading(cli, monkeypatch):
             app.open_group("tfs")
             await pilot.pause()
             assert app.visible() == []
-            assert "loading history" in app._banner_text
+            assert "loading history" in app._status
+            assert "loading history" in str(app.query_one("#status").render())
             gate.set()
             await app.workers.wait_for_complete()
             await pilot.pause()
-            assert "loading history" not in app._banner_text
+            assert "loading history" not in app._status
             assert app.by_stage
     _run(go())
 
@@ -977,7 +978,7 @@ def test_unreadable_genefam_does_not_fail_hg_view_collect(cli, monkeypatch):
             await pilot.pause()
             assert app.by_stage["align"]
             assert app.by_stage["search"] == []
-            assert "unreadable genefam" in app._banner_text
+            assert any("unreadable genefam" in str(n.message) for n in app._notifications)
     _run(go())
 
 
@@ -2011,21 +2012,59 @@ def test_esc_outside_box_clears_all_filters_then_leaves(cli):
     _run(go())
 
 
-def test_logo_is_18_lines_of_19_cells_and_only_on_the_first_screen(cli):
+def test_logo_is_9_lines_of_10_cells():
     from rich.text import Text
     from phylocli import logo
     lines = logo.render_logo()
-    assert len(lines) == 18
-    assert {Text.from_markup(l).cell_len for l in lines} == {19}
+    assert len(lines) == 9
+    assert {Text.from_markup(l).cell_len for l in lines} == {10}
     assert "white" not in "".join(lines)                          # ⬜ is transparent
+    assert logo.COLOURS["⬛"] == "#6e6e6e"
+    assert len(logo.render_logo(logo.PIXELS_FULL)) == 18
 
+
+def test_strip_with_logo_and_help_is_in_every_view(cli):
     async def go():
         app = tui.PhyloApp(_cfg(), refresh_s=3600)
         async with app.run_test(size=(150, 40)) as pilot:
             app.load_now()
             await pilot.pause()
-            assert app.query_one("#logo").display and app.query_one("#ov").display
-            app.open_group("tfs")
+            helps = {}
+            for view in ("overview", "hgs", "results"):
+                if view == "hgs":
+                    app.open_group("tfs")
+                elif view == "results":
+                    app.action_open_results()
+                await pilot.pause()
+                assert app.view == view
+                strip = app.query_one("#strip")
+                assert strip.display and strip.size.height == 9
+                assert app.query_one("#logo").display and app.query_one("#logo").size.width == 10
+                assert not app.query("#banner")
+                helps[view] = app._help_text
+            assert len(set(helps.values())) == 3
+            from rich.text import Text
+            assert "o: results" in helps["overview"]
+            assert "█ done" in Text.from_markup(helps["overview"]).plain
+            assert "resubmit" in helps["hgs"]
+            assert "possvm_prev" in helps["results"]
+            assert "enter: open" not in app.query_one("#ovfoot").render().plain
+    _run(go())
+
+
+def test_warning_is_notified_once_per_session(cli, monkeypatch):
+    def boom(*a, **k):
+        raise OSError("unreadable genefam")
+    monkeypatch.setattr(core, "family_ids", boom)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
             await pilot.pause()
-            assert not app.query_one("#ov").display                # HG view: no logo
+            n = lambda: sum("unreadable genefam" in str(x.message) for x in app._notifications)
+            assert n() == 1
+            app.load_now()                                       # next refresh: same message
+            await pilot.pause()
+            assert n() == 1
     _run(go())
