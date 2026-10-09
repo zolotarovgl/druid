@@ -799,13 +799,21 @@ def hg_sort_key(hg: str) -> tuple:
     return (fam, int(m.group(1)) if m else -1, last)
 
 
-def group_ogs(cfg: core.Config, hgs, source: str) -> tuple[list[HGOgs], int]:
+def group_ogs(cfg: core.Config, hgs, source: str, progress=None,
+              cancelled=None) -> tuple[list[HGOgs], int]:
     """(one HGOgs per HG with output, sorted by HG id; number of HGs without output).
-    Lists <outdir>/<source>/ once (NFS); an unreadable file becomes that HG's error."""
+    Lists <outdir>/<source>/ once (NFS); an unreadable file becomes that HG's error.
+    Optional `progress(k, n)` is called before each HG; `cancelled()` true stops early
+    (the partial result is returned; the caller discards it)."""
     names = core.report_status.nonempty_files(str(cfg.outdir / source))
     rows: list[HGOgs] = []
     missing = 0
-    for hg in sorted(hgs, key=hg_sort_key):
+    todo = sorted(hgs, key=hg_sort_key)
+    for k, hg in enumerate(todo):
+        if cancelled is not None and cancelled():
+            break
+        if progress is not None:
+            progress(k, len(todo))
         try:
             ogs = read_ogs(cfg, hg, source, names)
         except ModelError as e:

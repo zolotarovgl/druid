@@ -59,9 +59,28 @@ def _short_og(og_id: str) -> str:
     return ".".join(og_id.rsplit(".", 2)[-2:])
 
 
-def species_lines(stats: list, outside: list) -> list[str]:
-    """The species pane: per phylum with members `k/m spp  n genes` and its species, then the
-    absent phyla, then member species that are not tips of the species tree."""
+def _trunc(s: str, n: int = 24) -> str:
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def _wrap(items: list, width: int, indent: str = "  ", sep: str = " · ") -> list[str]:
+    """Join `items` with `sep` into lines of at most `width` chars, each indented."""
+    lines, cur = [], ""
+    for it in items:
+        add = it if not cur else cur + sep + it
+        if cur and len(indent) + len(add) > width:
+            lines.append(indent + cur)
+            cur = it
+        else:
+            cur = add
+    if cur:
+        lines.append(indent + cur)
+    return lines
+
+
+def species_lines(stats: list, outside: list, width: int = 60) -> list[str]:
+    """The species pane: per phylum with members `k/m spp  n genes` and its species (wrapped to
+    `width`), then the absent phyla, then member species that are not tips of the species tree."""
     present = [r for r in stats if r.covered]
     absent = [r for r in stats if not r.covered]
     w = max((len(r.phylum) for r in present), default=0)
@@ -69,11 +88,13 @@ def species_lines(stats: list, outside: list) -> list[str]:
     for r in present:
         out.append(f"{r.phylum.ljust(w)}  {r.covered}/{r.total} spp  "
                    f"{r.n_genes} gene{'' if r.n_genes == 1 else 's'}")
-        out.append("  " + " · ".join(f"{sp} {n}" for sp, n in r.species))
+        out.extend(_wrap([f"{sp} {n}" for sp, n in r.species], width))
     if absent:
         out.append("absent: " + ", ".join(r.phylum for r in absent))
     if outside:
-        out.append("not in species tree: " + ", ".join(f"{sp} {n}" for sp, n in outside))
+        w = _wrap([f"{sp} {n}" for sp, n in outside], width, sep=", ")
+        out.append("not in species tree: " + w[0].strip())
+        out.extend(w[1:])
     return out
 
 
@@ -103,7 +124,7 @@ class PhyloApp(App):
     #resfoot { height: auto; }
     """
     BINDINGS = [
-        Binding("escape", "back", "overview"),
+        Binding("escape", "back", "back"),
         Binding("c", "by_category", "category"),
         Binding("f", "cycle_filter", "filter / family"),
         Binding("space", "toggle", "select"),
@@ -187,8 +208,8 @@ class PhyloApp(App):
         self.query_one("#stages", DataTable).add_columns("stage", "done", "run", "ready", "blk", "total")
         self._set_units(force=True)
         self.query_one("#res", DataTable).add_columns("HG", "OGs", "genes", "⚠")
-        self.query_one("#ogs", DataTable).add_columns("OG", "name", "genes", "spp", "support",
-                                                       "ref", "ref sup")
+        self.query_one("#ogs", DataTable).add_columns("OG", "genes", "spp", "support", "ref sup",
+                                                       "ref", "name")
         self.query_one("#members", DataTable).add_columns("gene", "sp", "ref.orth", "sup")
         self.query_one("#memfilter").display = False
         for wid, title in PANE_TITLES.items():   # names in the top-left border, to refer to them
@@ -274,7 +295,8 @@ class PhyloApp(App):
         if hg is None and self.view == "hgs" and not self.by_stage:
             banner.append("loading history…")
         self._set_banner(" · ".join(banner))
-        self.sub_title = f"{self.stage} · {self.filter} · {snap['when']:%H:%M:%S}"
+        if self.view != "results":
+            self.sub_title = f"{self.stage} · {self.filter} · {snap['when']:%H:%M:%S}"
         if hg is None:
             return
         self.atts, self.by_stage = hg["atts"], hg["by_stage"]
@@ -474,6 +496,7 @@ class PhyloApp(App):
             self._res_gen += 1                   # a load still running is dropped when it lands
             self.view = self.res_from
             self._show_view()
+            self.load_bg()                       # the refresh skipped the HG history meanwhile
         elif self.view == "hgs":
             self.view = "overview"
             self._show_view()
@@ -653,6 +676,7 @@ class PhyloApp(App):
         self.res_rows = []
         self.query_one("#resv").add_class("loading")
         self._res_note = "loading…"
+        self.sub_title = f"Results · {self.res_group} · {self.res_source or '…'}"
         self._fill_ogs()
         self._load_results(list(self.res_hgs), self.res_source, self._res_gen)
 
@@ -666,7 +690,12 @@ class PhyloApp(App):
                     universe=self._universe, phyla=self._phyla, sp_note="")
         try:
             snap["source"] = source or model.default_source(self.cfg)
-            snap["rows"], snap["missing"] = model.group_ogs(self.cfg, hgs, snap["source"])
+            def progress(k: int, n: int) -> None:   # throttled: ~every 50 files
+                if k and k % 50 == 0 and not worker.is_cancelled:
+                    self.call_from_thread(self._res_progress, gen, k, n)
+            snap["rows"], snap["missing"] = model.group_ogs(
+                self.cfg, hgs, snap["source"], progress=progress,
+                cancelled=lambda: worker.is_cancelled)
         except Exception as e:                   # never let a worker kill the app
             snap["note"] = f"cannot read {snap['source']}/: {e}"
         notes = []
@@ -685,9 +714,15 @@ class PhyloApp(App):
             return
         self.call_from_thread(self._apply_results, snap)
 
+    def _res_progress(self, gen: int, k: int, n: int) -> None:
+        if gen == self._res_gen and self.query_one("#resv").has_class("loading"):
+            self._res_note = f"loading {k}/{n}…"
+            self._results_footer()
+
     def _apply_results(self, snap: dict) -> None:
         if snap["gen"] != self._res_gen:         # superseded: esc, another o, or p meanwhile
             return
+        self.sub_title = f"Results · {self.res_group} · {snap['source']}"
         self.query_one("#resv").remove_class("loading")
         self.res_source, self.res_rows, self.res_missing = snap["source"], snap["rows"], snap["missing"]
         self._universe, self._phyla, self._sp_note = snap["universe"], snap["phyla"], snap["sp_note"]
@@ -728,9 +763,9 @@ class PhyloApp(App):
         for og in (r.ogs if r else []):
             sup = ("–" if og.support is None else "0.0 ⚠" if og.support == 0
                    else f"{og.support:.1f}")
-            t.add_row(_short_og(og.id), escape(og.name), str(len(og.genes)),
-                      str(len({m.species for m in og.genes})), sup, escape(og.ref),
-                      escape(og.ref_support), key=og.id)
+            t.add_row(_short_og(og.id), str(len(og.genes)),
+                      str(len({m.species for m in og.genes})), sup, escape(og.ref_support),
+                      escape(_trunc(og.ref)), escape(_trunc(og.name)), key=og.id)
         if t.row_count:
             t.move_cursor(row=0)
         self._show_og()
@@ -749,8 +784,9 @@ class PhyloApp(App):
             text = self._res_note
         else:
             uni = self._universe or []
+            w = self.query_one("#species_box").size.width - 4      # 0 while hidden: default
             lines = species_lines(model.og_species_stats(og, uni, self._phyla or {}),
-                                  model.og_outside(og, uni))
+                                  model.og_outside(og, uni), **({"width": w} if w > 20 else {}))
             text = "\n".join(([self._sp_note, ""] if self._sp_note else []) + lines)
         self._species_text = text
         self.query_one("#species", Static).update(text)
