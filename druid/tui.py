@@ -199,8 +199,9 @@ class PhyloApp(App):
         self._res_note = ""
         self._res_foot = ""
         self._species_text = ""
-        self._mem_filter = ""
-        self._universe: "list | None" = None    # species tree tips, read once by the worker
+        self._flt = {"res": "", "ogs": "", "members": ""}   # `/` filter per Results pane
+        self._flt_pane = "members"              # the pane the filter box is editing
+        self._universe:"list | None" = None    # species tree tips, read once by the worker
         self._phyla: "dict | None" = None       # species -> phylum, read once by the worker
         self._sp_note = ""                      # why the universe / phyla could not be read
         self._hg_unit: "str | None" = None                 # unit the #hgs / #arrays headers show
@@ -537,12 +538,13 @@ class PhyloApp(App):
     def action_back(self) -> None:
         if self.view == "results":
             inp = self.query_one("#memfilter", Input)
-            if inp.display:                      # esc with the filter box open: clear it first
+            pane = self._flt_pane if inp.display else self._focused_pane()
+            if inp.display or self._flt[pane]:   # esc: clear the pane's filter first
                 inp.value = ""
                 inp.display = False
-                self._mem_filter = ""
-                self._fill_members()
-                self.query_one("#members").focus()
+                self._flt[pane] = ""
+                self._refilter(pane)
+                self.query_one(self._PANE_ID[pane]).focus()
                 return
             self._res_gen += 1                   # a load still running is dropped when it lands
             self.workers.cancel_group(self, "results")   # ... and stops reading files
@@ -742,12 +744,12 @@ class PhyloApp(App):
                               key=model.hg_sort_key)
         self.res_from, self.res_group, self._res_focus = self.view, group, focus
         self.res_source, self.res_rows, self.res_missing = None, [], 0
-        self._mem_filter = ""
+        self._flt = {"res": "", "ogs": "", "members": ""}
         inp = self.query_one("#memfilter", Input)
         inp.value = ""
         inp.display = False
         self.query_one("#res", DataTable).clear()
-        self.query_one("#res").border_title = f"Results · {group}"
+        self._set_res_title()
         self.view = "results"
         self._show_view()
         self._reload_results()
@@ -817,17 +819,49 @@ class PhyloApp(App):
         if focus and focus not in {r.hg for r in self.res_rows}:
             self.notify(f"{focus}: no output in {self.res_source}", severity="warning")
             keep = None
+        self._fill_res(keep)
+        self._fill_ogs()
+
+    def _fill_res(self, keep: "str | None") -> None:
+        """Results table: the loaded HGs whose id contains the `/` filter (in memory)."""
+        t = self.query_one("#res", DataTable)
+        q = self._flt["res"].lower()
+        rows = [r for r in self.res_rows if q in r.hg.lower()]
         t.clear()
-        for r in self.res_rows:
+        for r in rows:
             if r.error:
                 t.add_row(r.hg, "–", "–", "!", key=r.hg)
             else:
                 t.add_row(r.hg, str(len(r.ogs)), str(sum(len(o.genes) for o in r.ogs)),
                           str(sum(1 for o in r.ogs if o.support == 0)), key=r.hg)
-        keys = [r.hg for r in self.res_rows]
+        keys = [r.hg for r in rows]
         if keys:
             t.move_cursor(row=keys.index(keep) if keep in keys else 0)
-        self._fill_ogs()
+        self._set_res_title()
+
+    def _ftag(self, pane: str) -> str:
+        return f" · /{self._flt[pane]}" if self._flt[pane] else ""
+
+    def _set_res_title(self) -> None:
+        self.query_one("#res").border_title = f"Results · {self.res_group}{self._ftag('res')}"
+
+    _PANE_ID = {"res": "#res", "ogs": "#ogs", "members": "#members"}
+    _PANE_NAME = {"res": "Results", "ogs": "OGs", "members": "members"}
+
+    def _focused_pane(self) -> str:
+        f = self.focused
+        return {"res": "res", "ogs": "ogs"}.get(getattr(f, "id", None), "members")
+
+    def _refilter(self, pane: str) -> None:
+        """Redraw `pane` after its filter changed and re-point the panes to its right (memory)."""
+        if pane == "res":
+            self._fill_res(self._key_at_cursor(self.query_one("#res", DataTable)))
+            self._fill_ogs()
+        elif pane == "ogs":
+            self._fill_ogs()
+        else:
+            self._fill_members()
+            self._results_footer()
 
     def _cur_res(self):
         key = self._key_at_cursor(self.query_one("#res", DataTable))
@@ -845,8 +879,9 @@ class PhyloApp(App):
         r = self._cur_res()
         t = self.query_one("#ogs", DataTable)
         t.clear()
-        t.border_title = f"OGs · {r.hg if r else '–'} · {self.res_source or '…'}"
-        for og in (r.ogs if r else []):
+        t.border_title = f"OGs · {r.hg if r else '–'} · {self.res_source or '…'}{self._ftag('ogs')}"
+        q = self._flt["ogs"].lower()
+        for og in ([o for o in r.ogs if q in o.id.lower() or q in o.name.lower()] if r else []):
             sup = ("–" if og.support is None else "0.0 ⚠" if og.support == 0
                    else f"{og.support:.1f}")
             t.add_row(_short_og(og.id), str(len(og.genes)),
@@ -860,7 +895,8 @@ class PhyloApp(App):
         """members + species panes for the OG under the OGs cursor (in memory, no file access)."""
         r, og = self._cur_res(), self._cur_og()
         self.query_one("#members").border_title = (
-            f"members · {_short_og(og.id)} {escape(og.name)}" if og else "members")
+            (f"members · {_short_og(og.id)} {escape(og.name)}" if og else "members")
+            + self._ftag("members"))
         self.query_one("#species_box").border_title = (
             f"species · {_short_og(og.id)}" if og else "species")
         self._fill_members()
@@ -884,7 +920,10 @@ class PhyloApp(App):
         og = self._cur_og()
         t = self.query_one("#members", DataTable)
         t.clear()
-        q = self._mem_filter.lower()
+        q = self._flt["members"].lower()
+        self.query_one("#members").border_title = (
+            (f"members · {_short_og(og.id)} {escape(og.name)}" if og else "members")
+            + self._ftag("members"))
         for i, m in enumerate(og.genes if og else []):
             cells = (m.gene, m.species, m.ref, m.ref_support)
             if q and not any(q in c.lower() for c in cells):
@@ -895,13 +934,22 @@ class PhyloApp(App):
     def _results_footer(self) -> None:
         r = self._cur_res()
         head = r.error if r is not None and r.error else self._res_note
+        empty = {"res": self.query_one("#res", DataTable).row_count == 0 and bool(self.res_rows),
+                 "ogs": self.query_one("#ogs", DataTable).row_count == 0 and r is not None
+                        and not r.error and bool(r.ogs),
+                 "members": self.query_one("#members", DataTable).row_count == 0
+                            and self._cur_og() is not None}
+        nm = [f"no match: {self._PANE_NAME[p]} /{self._flt[p]}" for p in empty
+              if empty[p] and self._flt[p]]
+        if nm:
+            head = "; ".join(([head] if head else []) + nm)
         hint = "⚠ = support 0 (GeneRax bug case" + ("; check possvm_prev)" if self.res_source == "possvm" else ")")
         parts = ([f"{len(r.ogs)} OGs"] if r is not None and not r.error else []) + [
             self.res_source or "…", hint]
         if self.res_missing:
             parts.append(f"{self.res_missing} HG{'' if self.res_missing == 1 else 's'} without output")
         lines = ([head] if head else []) + [
-            " · ".join(parts), "/: filter members · p: possvm ↔ possvm_prev · tab: pane · esc: back"]
+            " · ".join(parts), "/: filter this pane · p: possvm ↔ possvm_prev · tab: pane · esc: back"]
         self._res_foot = "\n".join(lines)
         self.query_one("#resfoot", Static).update(escape(self._res_foot))
 
@@ -914,18 +962,28 @@ class PhyloApp(App):
     def action_member_filter(self) -> None:
         if self.view != "results":
             return
+        pane = self._focused_pane()
         inp = self.query_one("#memfilter", Input)
+        self._flt_pane = pane
+        inp.placeholder = f"filter {self._PANE_NAME[pane]}: (enter: keep · esc: clear)"
+        inp.border_title = f"filter {self._PANE_NAME[pane]}"
+        inp.value = self._flt[pane]
         inp.display = True
         inp.focus()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "memfilter":        # (the resubmit dialog's Inputs have other ids)
-            self._mem_filter = event.value
-            self._fill_members()
+            pane = self._flt_pane
+            if event.value != self._flt[pane]:
+                self._flt[pane] = event.value
+                self._refilter(pane)
+                if pane != "members":            # the other panes' titles follow the new filter
+                    self._set_res_title()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "memfilter":        # enter: keep the filter, back to the rows
-            self.query_one("#members").focus()
+        if event.input.id == "memfilter":        # enter: keep the filter, back to the pane
+            event.input.display = False
+            self.query_one(self._PANE_ID[self._flt_pane]).focus()
 
 
 def resource_groups(cfg: core.Config, stage: str, rows: list, nseq: "dict | None" = None) -> list:

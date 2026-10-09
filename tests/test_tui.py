@@ -1203,9 +1203,10 @@ def test_slash_filters_members_and_esc_clears(cli):
             assert len(_member_genes(app)) == 3
             inp = app.query_one("#memfilter")
             assert not inp.display
+            await _press(pilot, "tab", "tab")                      # `/` filters the focused pane
             await _press(pilot, "slash")
             assert inp.display and app.focused is inp
-            await _press(pilot, "h", "s", "a", "p")               # `p` is text here, not a switch
+            await _press(pilot, "h", "s", "a", "p")             # `p` is text here, not a switch
             assert app.res_source == "possvm" and inp.value == "hsap"
             assert _member_genes(app) == ["Hsap_ENSP1"]
             await _press(pilot, "escape")                          # clears; stays in Results
@@ -1216,6 +1217,99 @@ def test_slash_filters_members_and_esc_clears(cli):
             assert _member_genes(app) == ["Mlei_v05_G1", "Mlei_v05_G2"]
             await _press(pilot, "escape", "escape")
             assert app.view == "overview"
+    _run(go())
+
+
+def _tcol(app, table, c=0):
+    t = app.query_one(table)
+    return [str(t.get_cell_at((i, c))) for i in range(t.row_count)]
+
+
+def test_slash_filters_results_pane_and_repoints(cli, monkeypatch):
+    write_results(_cfg())
+
+    def boom(*a, **k):
+        raise AssertionError("file read on a filter keystroke")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            for name in ("read_ogs", "group_ogs", "species_universe", "phyla"):
+                monkeypatch.setattr(tui.model, name, boom)
+            inp = app.query_one("#memfilter")
+            assert app.focused is app.query_one("#res")
+            await _press(pilot, "slash")
+            assert inp.display and app.focused is inp and "filter Results" in inp.placeholder
+            await _press(pilot, "q", "p", "R", "h", "o", "s")            # all text, no app keys
+            assert app.view == "results" and inp.value == "qpRhos" and app.res_source == "possvm"
+            await _press(pilot, "ctrl+u")
+            assert inp.value == ""
+            await _press(pilot, "1", "1")
+            assert _tcol(app, "#res") == ["tfs.A.HG11"]
+            assert app.query_one("#ogs").border_title.startswith("OGs · tfs.A.HG11")
+            assert _tcol(app, "#ogs") == ["HG11.0"] and _member_genes(app) == ["Bova_x1", "Mlei_v05_G9"]
+            assert app.query_one("#res").border_title == "Results · tfs · /11"
+            await _press(pilot, "enter")
+            assert app.focused is app.query_one("#res") and app.view == "results"
+            await _press(pilot, "tab", "tab")                            # pane moves keep it
+            assert app.query_one("#res").border_title == "Results · tfs · /11"
+            assert _tcol(app, "#res") == ["tfs.A.HG11"]
+            await _press(pilot, "shift+tab", "shift+tab", "slash")
+            assert inp.value == "11"
+            await _press(pilot, "escape")                                # esc in the box clears
+            assert _tcol(app, "#res") == ["tfs.A.HG1", "tfs.A.HG11"]
+            assert app.query_one("#res").border_title == "Results · tfs"
+            assert app.focused is app.query_one("#res") and app.view == "results"
+            await _press(pilot, "slash", "T", "X", "Z")                  # no match: no crash
+            assert _tcol(app, "#res") == [] and _tcol(app, "#ogs") == [] and _member_genes(app) == []
+            assert "no match" in app._res_foot
+    _run(go())
+
+
+def test_slash_filters_ogs_pane_by_id_and_name(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            await _press(pilot, "tab", "slash")                          # focus: OGs
+            inp = app.query_one("#memfilter")
+            assert app.focused is inp and "filter OGs" in inp.placeholder
+            await _press(pilot, "e", "O", "M", "E", "S")                 # name, case-insensitive
+            assert _tcol(app, "#ogs") == ["HG1.1"]
+            assert _member_genes(app) == ["Hsap_ENSP2", "Nvec_v1_g3"]    # re-pointed at HG1.1
+            assert app.query_one("#members").border_title.startswith("members · HG1.1")
+            assert app.query_one("#ogs").border_title.endswith(" · /eOMES")
+            await _press(pilot, "ctrl+u", "h", "g", "1", "full_stop", "0")    # id
+            assert _tcol(app, "#ogs") == ["HG1.0"]
+            await _press(pilot, "ctrl+u", "q", "q", "q")
+            assert _tcol(app, "#ogs") == [] and _member_genes(app) == []
+            assert "no match" in app._res_foot
+            await _press(pilot, "escape")
+            assert _tcol(app, "#ogs") == ["HG1.0", "HG1.1"]
+    _run(go())
+
+
+def test_pane_filters_are_independent(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            await _press(pilot, "slash", "1", "1", "enter")              # Results /11
+            await _press(pilot, "tab", "tab", "slash", "b", "o", "v", "enter")   # members /bov
+            assert _member_genes(app) == ["Bova_x1"]
+            assert app.query_one("#members").border_title.endswith("/bov")
+            assert app.query_one("#res").border_title == "Results · tfs · /11"
+            assert _tcol(app, "#res") == ["tfs.A.HG11"]
+            await _press(pilot, "slash")
+            assert app.query_one("#memfilter").value == "bov"            # box shows this pane's
+            await _press(pilot, "escape")
+            assert _member_genes(app) == ["Bova_x1", "Mlei_v05_G9"]
+            assert _tcol(app, "#res") == ["tfs.A.HG11"]                   # Results filter untouched
     _run(go())
 
 
