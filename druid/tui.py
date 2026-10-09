@@ -26,6 +26,8 @@ def load_raw() -> dict:
 
 FILTERS = ("actionable", "failed", "ready", "running", "blocked", "done")
 ACTIONABLE = ("failed", "ready")      # the "actionable" filter shows failed + ready HGs
+PANE_TITLES = {"#overview": "Overview", "#stages": "1 Stages", "#hgs": "2 HGs",
+               "#arrays": "3 Arrays", "#detail": "4 Detail"}
 STATE_STYLE = {"done": "green", "running": "cyan", "ready": "yellow", "failed": "red",
                "blocked": "bright_black"}
 
@@ -96,6 +98,8 @@ class PhyloApp(App):
         self.query_one("#hgs", DataTable).add_columns(" ", "HG", "seqs", "state", "last", "req", "used")
         self.query_one("#arrays", DataTable).add_columns("job", "stage", "HGs", "done", "run",
                                                           "pend", "fail")
+        for wid, title in PANE_TITLES.items():   # names in the top-left border, to refer to them
+            self.query_one(wid).border_title = title
         self._show_view()
         self.load_bg()
         self.set_interval(self.refresh_s, self.load_bg)

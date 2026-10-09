@@ -886,3 +886,15 @@ def test_edit_value_enter_then_y_submits(cli, monkeypatch):
             return n_arrays
     n_arrays = asyncio.run(go())
     assert len(_calls()) == n0 + n_arrays
+
+
+def test_panes_are_named_top_left(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600, start="hgs")
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            for wid, title in tui.PANE_TITLES.items():
+                w = app.query_one(wid)
+                assert w.border_title == title
+                assert w.styles.border_title_align == "left"
+    _run(go())
