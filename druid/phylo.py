@@ -59,8 +59,8 @@ _category = model.category
 
 
 def _check_stage(stage: str) -> str:
-    if stage not in core.HG_STAGES:
-        raise typer.BadParameter(f"stage must be one of {', '.join(core.HG_STAGES)}")
+    if stage not in core.STAGES:
+        raise typer.BadParameter(f"stage must be one of {', '.join(core.STAGES)}")
     return stage
 
 
@@ -96,6 +96,39 @@ def _missing(cfg: core.Config, stage: str, ids: Path | None, ready: bool = False
     return out
 
 
+def _warn_families(cfg: core.Config, collisions: bool) -> None:
+    """genefam warnings on stderr -- duplicates (and, with `collisions`, a name under several
+    prefixes) are warnings, never errors (decided by Grygoriy 09/10/2026)."""
+    for w in core.family_warnings(cfg, collisions):
+        typer.echo(w, err=True)
+
+
+def _families(cfg: core.Config, ids: Path | None, fam: str | None = None) -> set[str]:
+    """Family ids for a family-stage command (no genefam file = exit 1; duplicates proceed)."""
+    try:
+        fams = core.family_ids(cfg)
+    except core.FamilyError as e:
+        _fail(str(e), 1)
+    if ids is not None:
+        fams &= set(core.read_ids(ids))
+    if fam:
+        fams = core.filter_fam(fams, fam)
+        if not fams:
+            _fail(f"no families match --fam {fam}", 1)
+    return fams
+
+
+def _missing_fams(cfg: core.Config, stage: str, ids: Path | None, ready: bool = False,
+                  fam: str | None = None) -> list[str]:
+    fams = _families(cfg, ids, fam)
+    out = sorted(fams - core.family_done(cfg, fams)[stage])
+    if ready:
+        busy = (_live(set()) or {}).get(stage, set())   # family tags need no HG set
+        ok = core.ready_set(cfg, stage, [f for f in out if f not in busy])
+        out = [f for f in out if f in ok]
+    return out
+
+
 BAR_WIDTH = 30
 
 
@@ -117,10 +150,37 @@ def _bar(done: int, running: int, ready: int, blocked: int, mode: str = "status"
     return "".join(typer.style(ch * k, fg=fg) for (ch, fg), k in zip(BAR_STYLES[mode], n))
 
 
+def _summary_sets(cfg: core.Config, ids: Path | None,
+                  fam: str | None) -> tuple[set[str], set[str], list[str]]:
+    """(HGs, families, warnings) for the summary: every genefam warning (duplicates, name
+    collisions); a missing genefam file is a warning here too, so the HG stages stay visible."""
+    exp = core.expected(cfg)
+    warn: list[str] = []
+    if not cfg.params.get("genefam_info"):
+        fams: set[str] = set()
+    else:
+        try:
+            fams = core.family_ids(cfg)
+            warn = core.family_warnings(cfg)
+        except core.FamilyError as e:
+            fams, warn = set(), [f"warning: {e}"]
+    if ids is not None:
+        keep = set(core.read_ids(ids))
+        exp &= keep
+        fams &= keep
+    if fam:
+        exp, fams = core.filter_fam(exp, fam), core.filter_fam(fams, fam)
+        if not exp and not fams:
+            _fail(f"no HGs match --fam {fam}", 1)
+    return exp, fams, warn
+
+
 def _summary(cfg: core.Config, ids: Path | None, mode: str = "status",
              fam: str | None = None) -> tuple[set[str], dict]:
-    exp = _selected(cfg, ids, fam)
-    rows, known, done = _guard(model.stage_rows)(cfg, exp)
+    exp, fams, warn = _summary_sets(cfg, ids, fam)
+    for w in warn:
+        typer.echo(w, err=True)
+    rows, known, done = _guard(model.stage_rows)(cfg, exp, fams)
     if not known:
         typer.echo("squeue not on PATH: running jobs not detected")
     legend = [typer.style(f"{ch} {name}", fg=fg) for (ch, fg), name
@@ -128,11 +188,16 @@ def _summary(cfg: core.Config, ids: Path | None, mode: str = "status",
     typer.echo(f"{'stage':<12} {'done':>6} {'running':>7} {'ready':>6} {'blocked':>8} {'total':>6}  "
                + " ".join(legend))
     for r in rows:
+        if r.stage == core.HG_STAGES[0] and fams:     # families above, HGs below
+            typer.echo("")
         if not r.applicable:
             typer.echo(f"{r.stage:<12} {'n/a':>6}")
             continue
-        typer.echo(f"{r.stage:<12} {r.done:>6} {r.running:>7} {r.ready:>6} {r.blocked:>8} {r.total:>6}  "
-                   + _bar(r.done, r.running, r.ready, r.blocked, mode))
+        line = (f"{r.stage:<12} {r.done:>6} {r.running:>7} {r.ready:>6} {r.blocked:>8} {r.total:>6}  "
+                + _bar(r.done, r.running, r.ready, r.blocked, mode))
+        if r.stage == "cluster":
+            line += f"  {r.no_hits} no hits"
+        typer.echo(line)
     return exp, done
 
 
@@ -150,55 +215,98 @@ def _status_cell(a: history.Attempt) -> str:
     return f"[{c}]{a.status}[/]" + (f" ({why})" if why else "")
 
 
-def _hg_status(cfg: core.Config, hg: str, show_history: bool):
-    """`status HG`: last attempt per stage, or (--history) every attempt, oldest first."""
-    from rich.console import Console
+def _print_history(con, atts: list) -> None:
     from rich.markup import escape
     from rich.table import Table
-
-    exp = core.expected(cfg)
-    if hg not in exp:
-        _fail(f"unknown HG id: {hg}", 1)
-    # not a terminal (pipe, file): wide enough that table cells and log paths are not wrapped
-    con = Console(highlight=False, width=None if sys.stdout.isatty() else 400)
-    atts = history.attempts(cfg, hg, warn=lambda m: con.print(f"[yellow]{m}[/]"))
-    con.print(f"{hg}  ({core.nseq(cfg, hg)} seqs)")
     t = Table(box=None, header_style="bold")
-    if show_history:
-        for col in ("stage", "source", "run", "submitted", "att", "status (reason)", "requested",
-                    "used", "log"):
-            t.add_column(col, no_wrap=True)
-        for a in atts:
-            t.add_row(a.stage, a.source, a.run, a.submitted, str(a.attempt), _status_cell(a),
-                      _requested(a), _used(a), escape(a.log))
-        con.print(t)
-        return
-    done = core.report_status.done_by_stage(str(cfg.outdir), exp)
-    live = _live(core.expected(cfg)) or {}
-    latest = history.latest_by_stage(atts)
+    for col in ("stage", "source", "run", "submitted", "att", "status (reason)", "requested",
+                "used", "log"):
+        t.add_column(col, no_wrap=True)
+    for a in atts:
+        t.add_row(a.stage, a.source, a.run, a.submitted, str(a.attempt), _status_cell(a),
+                  _requested(a), _used(a), escape(a.log))
+    con.print(t)
+
+
+def _print_latest(con, states: dict, latest: dict) -> None:
+    """One row per stage of `states` (stage -> rich-markup state, in display order) with its
+    latest attempt, then the log of every stage whose latest attempt did not complete."""
+    from rich.markup import escape
+    from rich.table import Table
+    t = Table(box=None, header_style="bold")
     for col in ("stage", "state", "source", "run", "status (reason)", "requested", "used"):
         t.add_column(col)
-    for st in core.HG_STAGES:
-        if not core.applicable(cfg, st):
-            state = "n/a"
-        elif hg in done[st]:
-            state = "[green]done[/]"
-        elif hg in live.get(st, set()):
-            state = "[cyan]running[/]"
-        elif hg in core.ready_set(cfg, st, [hg]):
-            state = "[yellow]ready[/]"
-        else:
-            state = "[bright_black]blocked[/]"
+    for st, state in states.items():
         a = latest.get(st)
         if a is None:
             t.add_row(st, state, "–", "–", "–", "–", "–")
         else:
             t.add_row(st, state, a.source, a.run, _status_cell(a), _requested(a), _used(a))
     con.print(t)
-    for st in core.HG_STAGES:
+    for st in states:
         a = latest.get(st)
         if a is not None and a.status != "COMPLETED":
             con.print(f"log ({st}): {escape(a.log)}", soft_wrap=True)
+
+
+def _console():
+    from rich.console import Console
+    # not a terminal (pipe, file): wide enough that table cells and log paths are not wrapped
+    return Console(highlight=False, width=None if sys.stdout.isatty() else 400)
+
+
+def _hg_status(cfg: core.Config, hg: str, show_history: bool):
+    """`status HG`: last attempt per stage, or (--history) every attempt, oldest first."""
+    exp = core.expected(cfg)
+    if hg not in exp:
+        _fail(f"unknown HG id: {hg}", 1)
+    con = _console()
+    atts = history.attempts(cfg, hg, warn=lambda m: con.print(f"[yellow]{m}[/]"))
+    con.print(f"{hg}  ({core.nseq(cfg, hg)} seqs)")
+    if show_history:
+        _print_history(con, atts)
+        return
+    done = core.report_status.done_by_stage(str(cfg.outdir), exp)
+    live = _live(core.expected(cfg)) or {}
+    states = {}
+    for st in core.HG_STAGES:
+        if not core.applicable(cfg, st):
+            states[st] = "n/a"
+        elif hg in done[st]:
+            states[st] = "[green]done[/]"
+        elif hg in live.get(st, set()):
+            states[st] = "[cyan]running[/]"
+        elif hg in core.ready_set(cfg, st, [hg]):
+            states[st] = "[yellow]ready[/]"
+        else:
+            states[st] = "[bright_black]blocked[/]"
+    _print_latest(con, states, history.latest_by_stage(atts))
+
+
+def _family_status(cfg: core.Config, fam: str, show_history: bool):
+    """`status FAMILY`: last search / cluster attempt (step1.nf SEARCH/CLUSTER + phylocli)."""
+    _families(cfg, None)                                  # no genefam file: exit 1
+    _warn_families(cfg, collisions=False)                 # duplicates: a warning, then proceed
+    con = _console()
+    atts = history.family_attempts(cfg, fam, warn=lambda m: con.print(f"[yellow]{m}[/]"))
+    exp = core.expected(cfg)
+    con.print(f"{fam}  ({sum(1 for h in exp if h.rsplit('.', 1)[0] == fam)} HGs)")
+    if show_history:
+        _print_history(con, atts)
+        return
+    fd = core.family_done(cfg, [fam])
+    live = _live(exp) or {}
+    states = {}
+    for st in core.FAMILY_STAGES:
+        if fam in fd[st]:
+            states[st] = "[green]done[/]" + (" (no hits)" if st == "cluster" and fam in fd["no_hits"] else "")
+        elif fam in live.get(st, set()):
+            states[st] = "[cyan]running[/]"
+        elif fam in core.ready_set(cfg, st, [fam]):
+            states[st] = "[yellow]ready[/]"
+        else:
+            states[st] = "[bright_black]blocked[/]"
+    _print_latest(con, states, history.latest_by_stage(atts))
 
 
 @app.command()
@@ -216,7 +324,10 @@ def status(hg: str = typer.Argument(None, help="HG id: show its last attempt per
     if hg is not None:
         if ids is not None or fam:
             _fail("status HG cannot be combined with --ids / --fam", 2)
-        _hg_status(cfg, hg, history_)
+        if hg in core.family_ids(cfg, strict=False):     # a family id is never an HG id
+            _family_status(cfg, hg, history_)
+        else:
+            _hg_status(cfg, hg, history_)
         return
     if history_:
         _fail("--history needs an HG id", 2)
@@ -241,6 +352,13 @@ def missing(stage: str = typer.Argument(None, help="stage; omit for a per-stage 
         return
     _check_stage(stage)
     cfg = _cfg()
+    if stage in core.FAMILY_STAGES:
+        if per_fam:
+            _fail(f"--per-fam does not apply to {stage}: each row is already a family", 2)
+        _warn_families(cfg, collisions=False)
+        for f in _missing_fams(cfg, stage, ids, ready=not all_, fam=fam):
+            typer.echo(f)
+        return
     todo = _missing(cfg, stage, ids, ready=not all_, fam=fam)
     if not per_fam:
         for hg in todo:
@@ -256,8 +374,8 @@ def missing(stage: str = typer.Argument(None, help="stage; omit for a per-stage 
         typer.echo(f"{f:<{w}}  {n_todo[f]}/{total[f]}")
 
 
-def _preflight(stage: str):
-    msg = model.preflight(stage)
+def _preflight(stage: str, cfg: "core.Config | None" = None):
+    msg = model.preflight(stage, cfg)
     if msg:
         _fail(msg, 78)
 
@@ -274,13 +392,15 @@ def _print_dry_run(stage: str, run_dir: Path, plan: list, qos: str | None, notes
         shown = run_dir.relative_to(ROOT)
     except ValueError:
         shown = run_dir
-    body = [f"[bold]run dir[/]  {shown}", f"[bold]HGs[/]      {n} in {len(plan)} array(s)"]
+    unit = core.unit(stage)
+    body = [f"[bold]run dir[/]  {shown}",
+            f"[bold]{unit}[/]{' ' * (9 - len(unit))}{n} in {len(plan)} array(s)"]
     body += [f"[dim]{note}[/]" for note in notes]
     con.print(Panel.fit("\n".join(body), title=f"dry run · {stage}", title_align="left",
                         border_style="cyan"))
     t = Table(box=None, header_style="bold")
-    for col in ("array", "HGs", "cpus", "memory", "time", "qos", "signal"):
-        t.add_column(col, justify="right" if col in ("HGs", "cpus", "memory") else "left")
+    for col in ("array", unit, "cpus", "memory", "time", "qos", "signal"):
+        t.add_column(col, justify="right" if col in (unit, "cpus", "memory") else "left")
     for k, (res, ids_, _f, _s) in enumerate(plan):
         t.add_row(str(k), str(len(ids_)), str(res.cpus), _fmt_mem(res.mem_mb),
                   _fmt_time(res.time_min), qos or res.qos, res.signal or "–")
@@ -330,6 +450,8 @@ def submit(stage: str = typer.Argument(...),
     except ValueError as e:
         _fail(f"ERROR: {e}", 2)
     cfg = core.config_from_raw(raw)
+    if stage in core.FAMILY_STAGES:                # duplicates (search: also name collisions)
+        _warn_families(cfg, collisions=stage == "search")
     if not core.applicable(cfg, stage):
         _fail(f"not_applicable: stage {stage} does not run with run_generax="
               f"{cfg.params.get('run_generax')}, gxsup={cfg.params.get('gxsup')}; nothing submitted", 2)
@@ -337,7 +459,8 @@ def submit(stage: str = typer.Argument(...),
     if (missing_ + (ids is not None) + bool(hgs)) != 1:
         raise typer.BadParameter("give exactly one of --missing, --ids FILE, or HG ids")
     if missing_:
-        selected = _missing(cfg, stage, None)
+        selected = (_missing_fams(cfg, stage, None) if stage in core.FAMILY_STAGES
+                    else _missing(cfg, stage, None))
     elif ids is not None:
         selected = core.read_ids(ids)
     else:
@@ -346,7 +469,7 @@ def submit(stage: str = typer.Argument(...),
         keep = core.filter_fam(selected, fam)
         selected = [hg for hg in selected if hg in keep]
         if not selected:
-            _fail(f"no HGs match --fam {fam}", 1)
+            _fail(f"no {core.unit(stage)} match --fam {fam}", 1)
     try:
         sel = model.select(cfg, stage, selected, all_=all_, dry_run=dry_run)
     except model.ModelError as e:
@@ -361,7 +484,7 @@ def submit(stage: str = typer.Argument(...),
             typer.echo(note)
         typer.echo("nothing to submit")
         raise typer.Exit(0)
-    _preflight(stage)
+    _preflight(stage, cfg)
     over = [f"{k}={v}" for k, v in (("--mem", mem), ("--time", time), ("--cpus", cpus)) if v]
     p = model.plan(cfg, stage, sel, override, over_flags=over)
     if p.errors:
@@ -378,7 +501,8 @@ def submit(stage: str = typer.Argument(...),
     typer.echo(f"run dir: {w.run_dir}")
     jids, err = model.sbatch_all(w)
     for jid, (res, ids_, _f, _s) in zip(jids, w.arrays):
-        typer.echo(f"submitted {jid}: {len(ids_)} HGs ({res.cpus} cpus, {res.mem_mb}M, {res.time_min} min)")
+        typer.echo(f"submitted {jid}: {len(ids_)} {core.unit(stage)} ({res.cpus} cpus, {res.mem_mb}M, "
+                   f"{res.time_min} min)")
     if err:
         for line in err.splitlines():
             typer.echo(line, err=True)

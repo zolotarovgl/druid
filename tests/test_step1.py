@@ -514,3 +514,199 @@ def test_write_run_search_snapshots_genefam(cli, results_tree):
     p = model.plan(cfg, "align", model.Selection(["tfs.C_x.HG1"], [], set()))
     w = model.write_run(cfg, _raw(), p, dry_run=True)
     assert not (w.run_dir / "genefam.csv").exists()               # HG stages: no snapshot
+
+
+# ---- Task 5: CLI -----------------------------------------------------------------------------
+
+def test_summary_family_rows_first(cli, results_tree):
+    cfg, _ = results_tree
+    step1_outputs(cfg.outdir)
+    out = cli(["missing"]).output.splitlines()
+    assert [l.split()[0] if l.strip() else "" for l in out][:5] == ["stage", "search", "cluster", "", "align"]
+    rows = {l.split()[0]: l.split()[1:6] for l in out[1:] if l.strip()}
+    assert rows["search"] == ["3", "0", "2", "0", "5"]            # done running ready blocked total
+    assert rows["cluster"] == ["2", "0", "1", "2", "5"]
+    assert out[2].rstrip().endswith("  1 no hits")
+    assert rows["align"] == ["1", "0", "2", "0", "3"]             # HG rows: same numbers as before
+
+
+def test_status_ids_of_hgs_has_no_family_rows(cli, tmp_path):
+    f = tmp_path / "ids.txt"
+    f.write_text("tfs.A.HG1\n")
+    lines = cli(["status", "--ids", str(f)]).output.splitlines()
+    assert lines[0].split()[0] == "stage" and lines[1].split()[0] == "align"
+
+
+def test_status_fam_matching_only_families(cli):
+    r = cli(["status", "-f", "slc"])
+    assert r.exit_code == 0, r.output
+    line = next(l for l in r.output.splitlines() if l.split()[:1] == ["search"])
+    assert line.split()[1:6] == ["0", "0", "1", "0", "1"]
+    assert cli(["status", "-f", "nope"]).exit_code == 1
+
+
+def test_missing_family_stages(cli, results_tree):
+    cfg, _ = results_tree
+    step1_outputs(cfg.outdir)
+    assert cli(["missing", "search"]).output.split() == ["cal.Trail", "slc.NEW"]
+    assert cli(["missing", "cluster"]).output.split() == ["tfs.C_x"]
+    assert cli(["missing", "cluster", "--all"]).output.split() == ["cal.Trail", "slc.NEW", "tfs.C_x"]
+    assert cli(["missing", "search", "-f", "slc"]).output.split() == ["slc.NEW"]
+    r = cli(["missing", "search", "-f", "tfs.C"])
+    assert r.exit_code == 1 and "no families match --fam tfs.C" in r.output
+    r = cli(["missing", "cluster", "--per-fam"])
+    assert r.exit_code == 2 and "--per-fam" in r.output
+
+
+def test_missing_search_skips_queued(cli, monkeypatch):
+    monkeypatch.setenv("FAKE_SQUEUE", "999|nf-SEARCH_(slc.NEW)\n")
+    assert "slc.NEW" not in cli(["missing", "search"]).output.split()
+    assert "slc.NEW" in cli(["missing", "search", "--all"]).output.split()
+
+
+def test_submit_search_missing_dry_run(cli, results_tree):
+    cfg, root = results_tree
+    step1_outputs(cfg.outdir)
+    step1_tools()
+    r = cli(["submit", "search", "--missing", "-n"])
+    assert r.exit_code == 0, r.output
+    assert "families 2 in 1 array(s)" in " ".join(r.output.split())
+    assert "resources: step1 defaults for 2 families" in r.output
+    run = next(dry_dir().glob("*_search"))
+    assert (run / "ids_0.txt").read_text().split() == ["cal.Trail", "slc.NEW"]
+    s = (run / "array_0.sbatch").read_text()
+    assert "#SBATCH --cpus-per-task=4" in s and "#SBATCH --mem=500M" in s and "#SBATCH --time=5\n" in s
+    assert (run / "genefam.csv").read_text() == (root / "gene_families_searchinfo.csv").read_text()
+    assert not calls_txt().exists()
+
+
+def test_submit_cluster_overrides(cli, results_tree):
+    cfg, _ = results_tree
+    step1_outputs(cfg.outdir)
+    (cfg.outdir / "search/slc.NEW.domains.fasta").write_text(">n\nMK\n")
+    step1_tools()
+    r = cli(["submit", "cluster", "slc.NEW", "-n", "--mem", "2G", "--time", "1h"])
+    assert r.exit_code == 0, r.output
+    s = next(dry_dir().glob("*_cluster")).joinpath("array_0.sbatch").read_text()
+    assert "#SBATCH --mem=2048M" in s and "#SBATCH --time=60\n" in s and "#SBATCH --cpus-per-task=4" in s
+
+
+def test_submit_search_real(cli):
+    step1_tools()
+    r = cli(["submit", "search", "slc.NEW"])
+    assert r.exit_code == 0, r.output
+    assert "submitted 12345: 1 families (4 cpus, 500M, 5 min)" in r.output
+    run = next(runs_dir().glob("*_search"))
+    assert yaml.safe_load((run / "config.yaml").read_text())["params"]["genefam_info"] == \
+        str(run / "genefam.csv")
+    assert any(l.split()[1:3] == ["search", "12345"] for l in cli(["jobs"]).output.splitlines()
+               if len(l.split()) > 2)
+
+
+def test_family_rows_states(cli, results_tree, monkeypatch):
+    # here, not in Task 4: it submits through the CLI, which accepts `search` from this task on
+    cfg, _ = results_tree
+    step1_outputs(cfg.outdir)
+    step1_tools()
+    assert cli(["submit", "search", "slc.NEW", "cal.Trail"]).exit_code == 0   # task 0 = cal.Trail
+    monkeypatch.setenv("FAKE_SACCT", SACCT_S1)
+    assert {r.hg: r.state for r in model.hg_rows(_cfg(), "search")} == {
+        "tfs.A": "done", "tfs.B": "done", "tfs.C_x": "done", "cal.Trail": "failed", "slc.NEW": "ready"}
+    assert {r.hg: r.state for r in model.hg_rows(_cfg(), "cluster")} == {
+        "tfs.A": "done", "tfs.B": "done", "tfs.C_x": "ready", "cal.Trail": "blocked", "slc.NEW": "blocked"}
+
+
+def test_submit_family_ids_file_set_and_cpus(cli, results_tree, tmp_path):
+    step1_tools()
+    f = tmp_path / "fams.txt"
+    f.write_text("slc.NEW\n\ncal.Trail\n")
+    r = cli(["submit", "search", "--ids", str(f), "-n", "--set", "domain_expand=50", "--cpus", "2"])
+    assert r.exit_code == 0, r.output
+    assert "domain_expand=50" in r.output
+    run = next(dry_dir().glob("*_search"))
+    assert (run / "ids_0.txt").read_text().split() == ["cal.Trail", "slc.NEW"]
+    assert yaml.safe_load((run / "config.yaml").read_text())["params"]["domain_expand"] == 50
+    assert "#SBATCH --cpus-per-task=2" in (run / "array_0.sbatch").read_text()
+    r = cli(["submit", "cluster", "--ids", str(f), "-n"])          # no domains FASTA yet: both skipped
+    assert r.exit_code == 0 and "skipped 2 families without inputs" in r.output
+    assert "nothing to submit" in r.output
+    r = cli(["submit", "search", "--ids", str(f), "-n", "--set", "s1_ncpu=x"])
+    assert r.exit_code == 2 and "s1_ncpu" in r.output
+
+
+def test_submit_family_errors(cli, results_tree):
+    cfg, _ = results_tree
+    step1_outputs(cfg.outdir)
+    step1_tools()
+    r = cli(["submit", "search", "tfs.A"])
+    assert r.exit_code == 2 and "output_exists (1): tfs.A" in r.output and "nothing submitted" in r.output
+    r = cli(["submit", "cluster", "slc.NOPE", "-n"])
+    assert r.exit_code == 2 and "unknown (1): slc.NOPE" in r.output
+    r = cli(["submit", "cluster", "--missing", "-n"])         # NEW/Trail skipped; C_x: stray HG FASTA
+    assert r.exit_code == 2 and "output_exists (1): tfs.C_x" in r.output
+    r = cli(["submit", "cluster", "--missing", "--all", "-n"])
+    assert r.exit_code == 2 and "input_missing (2): cal.Trail slc.NEW" in r.output
+    r = cli(["submit", "search", "--missing", "-f", "nope", "-n"])
+    assert r.exit_code == 1 and "no families match --fam nope" in r.output
+    assert not calls_txt().exists()
+
+
+def test_submit_search_preflight(cli, monkeypatch):
+    monkeypatch.setenv("PATH", str(_state["bin"]))
+    r = cli(["submit", "search", "slc.NEW", "-n"])
+    assert r.exit_code == 78 and "hmmsearch" in r.output
+
+
+def test_duplicates_warn_and_proceed(cli, results_tree):
+    _, root = results_tree
+    g = root / "gene_families_searchinfo.csv"
+    g.write_text(g.read_text() + "NEW\tPF_N\t1.1\t3\tGA\tslc\tslc\nA\tPF_A\t1.1\t3\tGA\tTF\ttfs\n")
+    r = cli(["missing"])
+    assert r.exit_code == 0 and "warning: duplicate family ids" in r.output and "slc.NEW tfs.A" in r.output
+    firsts = [l.split()[0] for l in r.output.splitlines() if l.strip()]
+    assert "search" in firsts and "align" in firsts
+    step1_tools()
+    r = cli(["missing", "search"])
+    assert r.exit_code == 0 and "slc.NEW tfs.A" in r.output
+    assert {"cal.Trail", "slc.NEW"} <= set(r.output.splitlines())             # ids still listed
+    r = cli(["submit", "search", "slc.NEW", "-n"])
+    assert r.exit_code == 0 and "duplicate family ids" in r.output
+    assert "families 1 in 1 array(s)" in " ".join(r.output.split())
+    r = cli(["status", "slc.NEW"])
+    assert r.exit_code == 0 and "duplicate family ids" in r.output
+    assert any(l.split()[:1] == ["search"] for l in r.output.splitlines())
+    r = cli(["missing", "align"])
+    assert r.exit_code == 0 and "duplicate" not in r.output                   # HG commands: silent
+
+
+def test_name_collision_warnings(cli, results_tree):
+    _, root = results_tree
+    g = root / "gene_families_searchinfo.csv"
+    g.write_text(g.read_text() + "NEW\tPF_N2\t1.1\t3\tGA\tTF\ttfs\n")           # NEW under slc and tfs
+    msg = ("warning: family name NEW is listed under 2 prefixes (slc, tfs); hmmsearch keys rows by "
+           "name, so slc.NEW's hits are written as tfs.NEW.* and slc.NEW looks like \"no hits\"")
+    assert msg in cli(["status"]).output and msg in cli(["missing"]).output
+    step1_tools()
+    r = cli(["submit", "search", "slc.NEW", "tfs.NEW", "-n"])
+    assert r.exit_code == 0 and msg in r.output
+    assert "family name NEW" not in cli(["missing", "search"]).output   # collisions: summaries, TUI, submit search
+    assert "family name NEW" not in cli(["submit", "cluster", "--missing", "-n"]).output
+
+
+def test_status_family_rows(hist):
+    cli, cfg, _calls, tmp = hist
+    (tmp / "nflog/run_s1.tsv").write_text(S1_LOG)
+    step1_outputs(cfg.outdir)
+    r = cli(["status", "tfs.A"])
+    assert r.exit_code == 0, r.output
+    lines = r.output.splitlines()
+    assert lines[0].split()[:3] == ["tfs.A", "(2", "HGs)"]
+    rows = {l.split()[0]: l for l in lines if l.split()[:1] in (["search"], ["cluster"])}
+    assert list(rows) == ["search", "cluster"]
+    assert "done" in rows["search"] and "nextflow" in rows["search"] and "1 GB" in rows["search"]
+    assert "done" in rows["cluster"] and "run_s1" in rows["cluster"]
+    assert not any(l.split()[:1] == ["align"] for l in lines)
+    r = cli(["status", "tfs.B"])
+    assert "done (no hits)" in next(l for l in r.output.splitlines() if l.split()[:1] == ["cluster"])
+    r = cli(["status", "tfs.A", "--history"])
+    assert r.exit_code == 0 and "/w/s1/1/.command.err" in r.output and "killed: out of memory?" in r.output
