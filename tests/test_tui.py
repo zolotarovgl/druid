@@ -2296,3 +2296,58 @@ def test_header_sort_on_empty_results_pane(cli):
             await _key(pilot, "up", "enter", "down")
             assert app.query_one("#res").sort == ("hg", False) and app.view == "results"
     _run(go())
+
+
+# ---- Results cursor fixes (Part C review) -----------------------------------------------------
+def test_filters_keep_the_og_cursor_when_it_still_matches(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            ogs = app.query_one("#ogs")
+            await _key(pilot, "tab", "down")                         # OGs: HG1.1
+            assert app._key_at_cursor(ogs) == "tfs.A.HG1.1"
+            await _key(pilot, "slash", "h", "g", "enter")           # both OGs match: kept
+            assert _tcol(app, "#ogs") == ["HG1.0", "HG1.1"]
+            assert app._key_at_cursor(ogs) == "tfs.A.HG1.1"
+            await _key(pilot, "shift+tab", "slash", "h", "g", "1")  # refine Results /hg1 ...
+            assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG1"
+            assert app._key_at_cursor(ogs) == "tfs.A.HG1.1"          # ... same HG: OG kept
+            await _key(pilot, "1")                                   # /hg11: another HG -> row 0
+            assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG11"
+            assert app._key_at_cursor(ogs) == "tfs.A.HG11.0"
+    _run(go())
+
+
+def test_results_filter_during_load_keeps_cursor(cli, monkeypatch):
+    import threading
+    write_results(_cfg())
+    gate = threading.Event()
+    gate.set()
+    real = tui.model.read_ogs
+
+    def gated(*a, **k):
+        gate.wait(10)
+        return real(*a, **k)
+    monkeypatch.setattr(tui.model, "read_ogs", gated)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            app.query_one("#res").move_cursor(row=1)                 # tfs.A.HG11
+            await pilot.pause()
+            gate.clear()
+            await _key(pilot, "R")                                   # reload, held at the gate
+            assert app.query_one("#resv").has_class("loading") and app.res_rows == []
+            await _key(pilot, "slash", "h", "g", "1", "enter")      # filter while loading
+            assert _tcol(app, "#res") == ["tfs.A.HG1", "tfs.A.HG11"]     # greyed rows stay
+            assert app.query_one("#res").border_title == "Results · tfs · /hg1"
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert _tcol(app, "#res") == ["tfs.A.HG1", "tfs.A.HG11"]
+            assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG11"
+    _run(go())

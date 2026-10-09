@@ -1108,6 +1108,11 @@ class PhyloApp(App):
     def _fill_res(self, keep: "str | None") -> None:
         """Results table: the loaded HGs whose id contains the `/` filter (in memory)."""
         t = self.query_one("#res", DataTable)
+        if self.query_one("#resv").has_class("loading"):
+            # rows not read yet (res_rows is []): redrawing now would empty the table and lose
+            # the cursor's HG; the filter / sort apply when _apply_results lands
+            self._set_res_title()
+            return
         q = self._flt["res"].lower()
         rows = sort_rows([r for r in self.res_rows if q in r.hg.lower()], t.sort, RES_KEYS)
         t.clear()
@@ -1159,9 +1164,12 @@ class PhyloApp(App):
 
     def _fill_ogs(self, keep: "str | None" = None) -> None:
         """OG table of the HG under the Results cursor (in memory), then its members/species.
-        The cursor goes to OG `keep` when shown (a re-sort), else to the first row."""
+        The cursor stays on OG `keep` (default: the OG under the cursor now) when it is still
+        shown, e.g. while typing an OGs or Results filter or after a re-sort; else row 0."""
         r = self._cur_res()
         t = self.query_one("#ogs", SortTable)
+        if keep is None:
+            keep = self._key_at_cursor(t)
         t.clear()
         t.border_title = f"OGs · {r.hg if r else '–'} · {self.res_source or '…'}{self._ftag('ogs')}"
         q = self._flt["ogs"].lower()
