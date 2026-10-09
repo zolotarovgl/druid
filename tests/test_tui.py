@@ -854,3 +854,35 @@ def test_active_pane_border_is_orange(cli):
                     colour = app.query_one(other).styles.border.top[1]
                     assert (colour == Color.parse("orange")) == (other == pane), (pane, other)
     _run(go())
+
+
+def test_edit_value_enter_then_y_submits(cli, monkeypatch):
+    """Typing a value, enter (dry run), then y must submit: a focused Input used to swallow
+    the y as text, replacing the value and voiding the dry run."""
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
+    n0 = len(_calls())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600, start="hgs")
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await pilot.press("a", "r")
+            await pilot.pause()
+            scr = app.screen
+            inp = scr.query_one("#mem-0")
+            inp.focus()
+            await pilot.pause()
+            inp.value = ""
+            await pilot.press("2", "G", "enter")
+            await _settle(app, pilot)
+            assert "dry run" in scr._shown
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert scr.submitted and set(scr.submitted) == {"12345"}, scr._shown
+            assert scr.query_one("#mem-0").value == "2G"
+            n_arrays = len(scr.submitted)
+            return n_arrays
+    n_arrays = asyncio.run(go())
+    assert len(_calls()) == n0 + n_arrays

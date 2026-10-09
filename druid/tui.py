@@ -453,8 +453,9 @@ class _Box(Vertical, can_focus=True):
 class ResubmitScreen(ModalScreen):
     # Focus: the box (not an Input) is focused on mount, so enter / y / escape are screen
     # bindings from the start.  Tab moves into the Inputs to edit; there, enter submits the
-    # Input (-> dry run) and escape still reaches the screen.  `y` is a priority binding:
-    # no valid memory/time value contains a y, so it can never be meant as typed text.
+    # Input (-> dry run) and escape still reaches the screen.  `y` is marked priority, but a
+    # focused Input still takes it as text in Textual 8, so a good dry run moves focus back to
+    # the box (see _finish) and the next `y` submits.
     BINDINGS = [Binding("enter", "dry_run", "dry run"),
                 Binding("y", "submit", "submit", priority=True),
                 Binding("escape", "cancel", "cancel")]
@@ -577,12 +578,17 @@ class ResubmitScreen(ModalScreen):
             self.submitted = jids
             self._result = text
         self._lock(False)
-        if self._refocus is not None:
-            try:
+        try:
+            if dry_ok:
+                # A good dry run: move focus off the Inputs so the next `y` submits.  A focused
+                # Input takes `y` as text (the priority binding does not win over it in
+                # Textual 8), which silently replaced the value and voided the dry run.
+                self.query_one("#box").focus()
+            elif self._refocus is not None:      # a failed run: back to the field to fix it
                 self._refocus.focus()
-            except Exception:
-                pass
-            self._refocus = None
+        except Exception:
+            pass
+        self._refocus = None
         self._out(text)
 
     def action_dry_run(self) -> None:
