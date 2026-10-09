@@ -22,7 +22,10 @@ def stage_env(cfg: Config, stage: str, hg: str, cpus: int) -> dict[str, str]:
     env.update(ID=hg, CPUS=str(cpus), PROJECT_DIR=str(ROOT), OUTDIR=str(cfg.outdir),
                PYTHONNOUSERSITE="1")
     for k, v in cfg.params.items():
-        env[str(k)] = ("true" if v else "false") if isinstance(v, bool) else str(v)
+        if isinstance(v, bool):
+            env[str(k)] = "true" if v else "false"
+        else:
+            env[str(k)] = "" if v is None else str(v)       # hmm_dir: null -> "" (not "None")
     return env
 
 

@@ -197,3 +197,191 @@ def test_passes_is_the_expected_hgs_rule(results_tree):
         assert exp == rule
     assert report_status.passes(str(clu / "tfs.D.HG2.fasta"), 5, 4)
     assert not report_status.passes(str(clu / "tfs.D.HG1.fasta"), 5, 4)
+
+
+# ---- Task 3: stage scripts -----------------------------------------------------------------
+
+# Stand-in for phylogeny/main.py (the worktree's submodule is not checked out). hmmsearch
+# behaves like helper/hmmsearch.py: the row is looked up by NAME (last row wins) and outputs are
+# named after THAT row's prefix; an unknown name writes nothing and exits 0.
+FAKE_MAIN = r'''
+import os, sys
+a = sys.argv[1:]
+with open(os.environ["FAKE_ARGS"], "a") as fh:
+    fh.write(" ".join(a) + "\n")
+if a[0] == "hmmsearch":
+    mode = os.environ.get("FAKE_HMM", "hits")
+    if "--hmm_dir" in a:              # helper/hmmsearch.py fetches missing models INTO hmm_dir
+        with open(os.path.join(a[a.index("--hmm_dir") + 1], "fetched.hmm"), "w") as fh:
+            fh.write("fetched\n")
+    if mode == "notfound":
+        sys.exit(0)
+    fam, gene = a[5], a[a.index("-g") + 1]
+    rows = [l.strip().split("\t") for l in open(gene) if l.strip()]
+    out = [r[-1] for r in rows if r[0] == fam][-1] + "." + fam
+    if mode == "hits":
+        open(out + ".domains.fasta", "w").write(">s1\nMKV\n")
+        open(out + ".domains.csv", "w").write("s1\t1\t3\tPF\n")
+        open(out + ".domains_ummerged.csv", "w").write("s1\t1\t3\tPF\n")
+        open(out + ".genes.list", "w").write("s1\n")
+    else:                             # nohits: helper writes an empty genes.list and stops
+        open(out + ".genes.list", "w").write("")
+elif a[0] == "cluster":               # HG by the first letter of the sequence name: a b c d
+    fasta, out = a[a.index("-f") + 1], a[a.index("--out_file") + 1]
+    names = [l[1:].split()[0] for l in open(fasta) if l.startswith(">")]
+    with open(out, "w") as fh:
+        for n in names:
+            fh.write(f"HG{'abcd'.index(n[0]) + 1}\t{n}\n")
+'''
+
+FAKE_SAMTOOLS = r'''
+import sys
+assert sys.argv[1] == "faidx"
+path, ids = sys.argv[2], sys.argv[3:]
+recs, cur = {}, None
+for line in open(path):
+    line = line.rstrip("\n")
+    if line.startswith(">"):
+        cur = line[1:].split()[0]
+        recs[cur] = []
+    elif cur is not None:
+        recs[cur].append(line)
+if not ids:
+    with open(path + ".fai", "w") as fh:
+        fh.write("".join(f"{k}\t{len(''.join(v))}\n" for k, v in recs.items()))
+else:
+    sys.stdout.write("".join(f">{i}\n" + "\n".join(recs[i]) + "\n" for i in ids))
+'''
+
+DOMAINS = ("".join(f">a{i}\nMKA\n" for i in range(1, 2))               # HG1: 1 seq
+           + "".join(f">b{i}\nMK{'B' * i}\n" for i in range(1, 5))     # HG2: 4 seqs
+           + "".join(f">c{i}\nMK{'C' * i}\n" for i in range(1, 6))     # HG3: 5 distinct
+           + "".join(f">d{i}\nMKDD\n" for i in range(1, 6)))           # HG4: 5 identical
+
+
+def stage_project(tmp_path, monkeypatch) -> Path:
+    """PROJECT_DIR with the stub main.py and the REAL workflow/ (drop_small_hgs.py,
+    report_status.py); PATH with a real `python` and a fake `samtools`. The stage scripts run
+    are the real phylocli/stages/*.sh (runner.STAGES_DIR is left alone)."""
+    proj = tmp_path / "proj"
+    (proj / "phylogeny").mkdir(parents=True)
+    (proj / "phylogeny" / "main.py").write_text(FAKE_MAIN)
+    (proj / "workflow").symlink_to(core.ROOT / "workflow")
+    b = tmp_path / "s1bin"
+    b.mkdir()
+    (b / "python").write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    (b / "samtools.py").write_text(FAKE_SAMTOOLS)
+    (b / "samtools").write_text(f'#!/bin/sh\nexec "{sys.executable}" "{b}/samtools.py" "$@"\n')
+    for n in ("python", "samtools"):
+        (b / n).chmod((b / n).stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", f"{b}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_ARGS", str(tmp_path / "args.txt"))
+    monkeypatch.setattr(runner, "ROOT", proj)              # stage_env: PROJECT_DIR
+    return proj
+
+
+def _spy_replace(monkeypatch) -> list:
+    order, real = [], os.replace
+    monkeypatch.setattr(runner.os, "replace", lambda a, b: (order.append(Path(b).name), real(a, b)))
+    return order
+
+
+def test_stage_env_none_is_empty(results_tree):
+    cfg, _ = results_tree
+    env = runner.stage_env(cfg, "search", "slc.NEW", 4)
+    assert env["hmm_dir"] == "" and env["pfam_db"].endswith("Pfam-A.hmm") and env["ID"] == "slc.NEW"
+
+
+def test_search_publishes_marker_last(results_tree, tmp_path, monkeypatch):
+    cfg, root = results_tree
+    stage_project(tmp_path, monkeypatch)
+    order = _spy_replace(monkeypatch)
+    assert runner.run_one(cfg, "search", "slc.NEW", tmp_path / "work") == 0
+    assert order == ["slc.NEW.domains.csv", "slc.NEW.domains_ummerged.csv", "slc.NEW.genes.list",
+                     "slc.NEW.domains.fasta"]
+    assert (tmp_path / "args.txt").read_text().split() == [
+        "hmmsearch", "-f", "input.fasta", "-g", "gene_families_searchinfo.csv", "NEW", "-o", ".",
+        "--pfam_db", str(root / "Pfam-A.hmm"), "--domain_expand", "30", "--ncpu", "4"]
+    assert core.family_done(cfg, {"slc.NEW"})["hits"] == {"slc.NEW"}
+    assert not (tmp_path / "work" / "slc.NEW").exists()
+
+
+def test_search_trailing_tab_family(results_tree, tmp_path, monkeypatch):
+    cfg, _ = results_tree
+    stage_project(tmp_path, monkeypatch)
+    assert runner.run_one(cfg, "search", "cal.Trail", tmp_path / "work") == 0
+    assert (cfg.outdir / "search/cal.Trail.domains.fasta").read_text() == ">s1\nMKV\n"
+
+
+def test_search_no_hits_publishes_empty_marker(results_tree, tmp_path, monkeypatch):
+    cfg, _ = results_tree
+    stage_project(tmp_path, monkeypatch)
+    monkeypatch.setenv("FAKE_HMM", "nohits")
+    assert runner.run_one(cfg, "search", "slc.NEW", tmp_path / "work") == 0
+    d = core.family_done(cfg, {"slc.NEW"})
+    assert d["no_hits"] == {"slc.NEW"} and d["cluster"] == {"slc.NEW"}
+
+
+def test_search_name_under_two_prefixes_warns_and_publishes_empty(results_tree, tmp_path, monkeypatch,
+                                                                   capfd):
+    cfg, root = results_tree
+    stage_project(tmp_path, monkeypatch)
+    g = root / "gene_families_searchinfo.csv"
+    g.write_text(g.read_text() + "Dup\tPF_D\t1.1\t3\tGA\tRBP\trbp\nDup\tPF_D\t1.1\t3\tGA\tTF\ttfs\n")
+    assert runner.run_one(cfg, "search", "rbp.Dup", tmp_path / "work") == 0   # hits went to tfs.Dup.*
+    err = capfd.readouterr().err
+    assert "WARNING: family name Dup" in err and "rbp.Dup's hits are written as tfs.Dup.*" in err
+    s = cfg.outdir / "search"
+    assert (s / "rbp.Dup.domains.fasta").read_text() == ""                   # step1.nf behaviour
+    assert core.family_done(cfg, {"rbp.Dup"})["no_hits"] == {"rbp.Dup"}
+    assert not list(s.glob("tfs.Dup.*"))                                      # not this task's id
+    monkeypatch.setenv("FAKE_HMM", "notfound")                                # name not found at all
+    assert runner.run_one(cfg, "search", "slc.NEW", tmp_path / "work") == 0
+    assert "WARNING: main.py hmmsearch wrote nothing named slc.NEW.*" in capfd.readouterr().err
+    assert core.family_done(cfg, {"slc.NEW"})["no_hits"] == {"slc.NEW"}
+
+
+def test_search_hmm_dir_is_never_written(results_tree, tmp_path, monkeypatch):
+    cfg, root = results_tree
+    stage_project(tmp_path, monkeypatch)
+    hmms = root / "hmms"
+    hmms.mkdir()
+    (hmms / "PF_N.hmm").write_text("HMMER3/f\n")
+    cfg = dataclasses.replace(cfg, params={**cfg.params, "hmm_dir": str(hmms)})
+    assert runner.run_one(cfg, "search", "slc.NEW", tmp_path / "work") == 0
+    assert sorted(p.name for p in hmms.iterdir()) == ["PF_N.hmm"]       # fetched.hmm went to the copy
+    assert "--hmm_dir hmm_dir.work" in (tmp_path / "args.txt").read_text()
+
+
+def _cluster_cfg(results_tree, domains: str):
+    cfg, _ = results_tree
+    cfg = dataclasses.replace(cfg, params={**cfg.params, "min_seqs": 5, "min_distinct": 4})
+    (cfg.outdir / "search").mkdir(exist_ok=True)
+    (cfg.outdir / "search/slc.NEW.domains.fasta").write_text(domains)
+    return cfg
+
+
+def test_cluster_drops_small_hgs_keeps_full_tsv(results_tree, tmp_path, monkeypatch, capfd):
+    cfg = _cluster_cfg(results_tree, DOMAINS)
+    stage_project(tmp_path, monkeypatch)
+    order = _spy_replace(monkeypatch)
+    assert runner.run_one(cfg, "cluster", "slc.NEW", tmp_path / "work") == 0
+    assert "slc.NEW: skipped 3 HGs below min_seqs/min_distinct (5/4); kept 1" in capfd.readouterr().out
+    assert order == ["slc.NEW.HG3.fasta", "slc.NEW_cluster.tsv"]          # marker last
+    clu = cfg.outdir / "clusters"
+    tsv = (clu / "slc.NEW_cluster.tsv").read_text().splitlines()
+    assert len(tsv) == 15 and sorted({l.split("\t")[0] for l in tsv}) == ["HG1", "HG2", "HG3", "HG4"]
+    assert sorted(p.name for p in clu.glob("slc.NEW.HG*.fasta")) == ["slc.NEW.HG3.fasta"]
+    assert (clu / "slc.NEW.HG3.fasta").read_text().count(">") == 5
+    # step2 sees exactly the files on disk
+    assert {h for h in core.expected(cfg) if h.startswith("slc.NEW.")} == {"slc.NEW.HG3"}
+    assert [h for h in cli_mod._missing(cfg, "align", None) if h.startswith("slc.NEW.")] == ["slc.NEW.HG3"]
+
+
+def test_cluster_all_small_publishes_tsv_only(results_tree, tmp_path, monkeypatch):
+    cfg = _cluster_cfg(results_tree, DOMAINS.split(">c1")[0])                  # HG1 + HG2 only
+    stage_project(tmp_path, monkeypatch)
+    assert runner.run_one(cfg, "cluster", "slc.NEW", tmp_path / "work") == 0
+    assert (cfg.outdir / "clusters/slc.NEW_cluster.tsv").is_file()
+    assert not list((cfg.outdir / "clusters").glob("slc.NEW.HG*.fasta"))
+    assert core.family_done(cfg, {"slc.NEW"})["cluster"] == {"slc.NEW"}
