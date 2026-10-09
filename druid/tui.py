@@ -43,6 +43,7 @@ class PhyloApp(App):
     #ovfoot { height: auto; }
     #hgview { height: 1fr; }
     #hgview DataTable:focus, #overview:focus { border: round orange; }
+    #hgview.loading { opacity: 40%; }
     """
     BINDINGS = [
         Binding("escape", "back", "overview"),
@@ -170,6 +171,7 @@ class PhyloApp(App):
         if hg is None:
             return
         self.atts, self.by_stage = hg["atts"], hg["by_stage"]
+        self.query_one("#hgview").remove_class("loading")
         self.rows = self.by_stage.get(self.stage, [])
         if self.view == "hgs":
             self._auto_pick_filter()
@@ -298,6 +300,7 @@ class PhyloApp(App):
         self._show_view()
         if not self.by_stage:
             self._set_banner("loading history…")
+        self.query_one("#hgview").set_class(not self.by_stage, "loading")   # grey until data
         self._fill_stages()
         self._fill_hgs(keep="")
         self.load_bg()

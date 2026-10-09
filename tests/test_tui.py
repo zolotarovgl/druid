@@ -898,3 +898,31 @@ def test_panes_are_named_top_left(cli):
                 assert w.border_title == title
                 assert w.styles.border_title_align == "left"
     _run(go())
+
+
+def test_panels_grey_while_history_loads(cli, monkeypatch):
+    import threading
+    from phylocli import history
+    gate = threading.Event()
+    real = history.attempts
+
+    def slow(*a, **k):
+        gate.wait(10)
+        return real(*a, **k)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            monkeypatch.setattr(history, "attempts", slow)
+            app.by_stage = {}
+            app.open_group("tfs")
+            await pilot.pause()
+            hv = app.query_one("#hgview")
+            assert hv.has_class("loading") and hv.styles.opacity < 1
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not hv.has_class("loading") and hv.styles.opacity == 1
+    _run(go())
