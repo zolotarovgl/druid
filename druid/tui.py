@@ -402,6 +402,44 @@ class SortTable(DataTable):
             self.leave_header(to_row=False)
 
 
+SPIN_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+class Spinner(Static):
+    """The strip's status line with an animated braille spinner in front (Grygoriy,
+    09/10/2026): ~8 frames/s, light over SSH.  stop() empties the line and stops the timer."""
+
+    def __init__(self, **kwargs):
+        super().__init__("", markup=False, **kwargs)
+        self.text = ""
+        self.frame = 0
+        self._timer = None
+
+    @property
+    def running(self) -> bool:
+        return self._timer is not None
+
+    def start(self, text: str) -> None:
+        self.text = text
+        if self._timer is None:
+            self._timer = self.set_interval(1 / 8, self._tick)
+        self._draw()
+
+    def stop(self) -> None:
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        self.text = ""
+        self.update("")
+
+    def _tick(self) -> None:
+        self.frame = (self.frame + 1) % len(SPIN_FRAMES)
+        self._draw()
+
+    def _draw(self) -> None:
+        self.update(f"{SPIN_FRAMES[self.frame]} {self.text}")
+
+
 class PhyloApp(App):
     TITLE = "phylocli"
     CSS = """
@@ -517,7 +555,7 @@ class PhyloApp(App):
             yield Static("\n".join(logo.render_logo()), id="logo")
             with Vertical(id="helpbox"):
                 yield Static("", id="help")
-                yield Static("", id="status")
+                yield Spinner(id="status")          # Part F: spinner + status text
         with Vertical(id="ov"):
             yield Static("", id="tabbar")
             yield SortTable(id="overview", cursor_type="cell", header_height=2)   # step1/step2 header
@@ -664,10 +702,16 @@ class PhyloApp(App):
             text = self._res_note if self._res_note.startswith("loading") else ""
         elif self.view == "hgs":
             text = "loading history…" if self._hist_loading else ""
+        elif self.tab == "results" and self._rt_loading():     # the first screen's Results tab
+            text = self._rt_note if self._rt_note.startswith("loading") else ""
         else:
             text = ""
         self._status = text
-        self.query_one("#status", Static).update(text)
+        spin = self.query_one("#status", Spinner)
+        if text:
+            spin.start(text)                     # turns until the data are applied ...
+        else:
+            spin.stop()                          # ... or the view no longer waits (esc, tab, R)
 
     def _apply(self, snap: dict) -> None:
         self._ov_inputs = snap["ov_inputs"]
@@ -821,6 +865,7 @@ class PhyloApp(App):
         self.query_one("#rtab").add_class("loading")
         self._rt_note = "loading…"
         self._rt_footer()
+        self._update_status()
         self._load_rtab(sorted(self._ov_inputs[0], key=model.hg_sort_key), self.rt_source,
                         self._rt_gen)
 
@@ -849,9 +894,11 @@ class PhyloApp(App):
         if gen == self._rt_gen and self._rt_loading():
             self._rt_note = f"loading {k}/{n}…"
             self._rt_footer()
+            self._update_status()
 
     def _apply_rtab(self, snap: dict) -> None:
         if snap["gen"] != self._rt_gen:          # superseded by R or p
+            self._update_status()                # (the spinner follows what is still awaited)
             return
         self.query_one("#rtab").remove_class("loading")
         self.rt_source = snap["source"]
@@ -860,6 +907,7 @@ class PhyloApp(App):
                               hgs=frozenset(snap["hgs"]) if ok else frozenset())
         self._rt_note = snap["note"]
         self._fill_rtab()
+        self._update_status()
 
     def _fill_rtab(self) -> None:
         """Results tab rows: the Jobs groups, counted over the cached files (memory only)."""
@@ -1246,6 +1294,7 @@ class PhyloApp(App):
         self.query_one("#rtab").remove_class("loading")
         if self.view == "overview" and self.tab == "results":
             self._reload_rtab()
+        self._update_status()                    # the dropped read no longer holds the spinner
         if self.view == "results" and self.res_source is not None:
             self._reload_results()          # keeps group / source / cursor where possible
         self.load_bg()
@@ -1369,6 +1418,7 @@ class PhyloApp(App):
 
     def _apply_results(self, snap: dict) -> None:
         if snap["gen"] != self._res_gen:         # superseded: esc, another o, or p meanwhile
+            self._update_status()
             return
         self.sub_title = f"Results · {self.res_group} · {snap['source']}"
         self.query_one("#resv").remove_class("loading")

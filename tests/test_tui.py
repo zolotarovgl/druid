@@ -2866,3 +2866,201 @@ def test_stage_sort_and_hide_use_failed_ready_not_the_done_total_text(cli):
             assert all(tui._todo_at(r, "tree") != (0, 0) and tui._todo_at(r, "tree") != (-1, -1)
                        for r in app.ov_shown if r.group != "ALL")
     _run(go())
+
+
+# ---- spinner (F) ------------------------------------------------------------------------------
+def _gated_read_ogs(monkeypatch, start_open=False):
+    import threading
+    gate = threading.Event()
+    if start_open:
+        gate.set()
+    real = tui.model.read_ogs
+
+    def gated(*a, **k):
+        gate.wait(10)
+        return real(*a, **k)
+    monkeypatch.setattr(tui.model, "read_ogs", gated)
+    return gate
+
+
+def test_spinner_turns_while_results_window_loads_and_stops_on_apply(cli, monkeypatch):
+    write_results(_cfg())
+    gate = _gated_read_ogs(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            spin = app.query_one("#status")
+            assert not spin.running and str(spin.render()) == ""        # idle: empty
+            await _key(pilot, "o")
+            assert spin.running and spin.text == "loading…" == app._status
+            f0 = spin.frame
+            await pilot.pause(0.4)                                     # ~8 frames/s
+            assert spin.frame != f0
+            assert str(spin.render()) == f"{tui.SPIN_FRAMES[spin.frame]} loading…"
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not spin.running and str(spin.render()) == "" and app._status == ""
+    _run(go())
+
+
+def test_spinner_stops_on_esc_during_results_load(cli, monkeypatch):
+    write_results(_cfg())
+    gate = _gated_read_ogs(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _key(pilot, "o")                                     # ALL
+            spin = app.query_one("#status")
+            assert spin.running
+            await _key(pilot, "escape")                                # cancel
+            assert app.view == "overview" and not spin.running
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not spin.running and str(spin.render()) == ""
+    _run(go())
+
+
+def test_spinner_on_results_tab_and_for_history(cli, monkeypatch):
+    import threading
+    write_results(_cfg())
+    gate = _gated_read_ogs(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _key(pilot, "tab")
+            spin = app.query_one("#status")
+            assert spin.running and spin.text == "loading…"
+            await _key(pilot, "tab")                                   # Jobs tab: not its wait
+            assert not spin.running
+            await _key(pilot, "tab")
+            assert spin.running
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not spin.running and app._og_cache is not None
+            real = tui.history.attempts
+            hold = threading.Event()
+            monkeypatch.setattr(tui.history, "attempts",
+                                lambda *a, **k: hold.wait(10) and real(*a, **k))
+            app.by_stage = {}                                          # no HG-view history yet
+            app.open_group("tfs")
+            await pilot.pause()
+            assert spin.running and spin.text == "loading history…"
+            hold.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.by_stage and not spin.running
+    _run(go())
+
+
+def test_spinner_stops_on_R_from_jobs_tab_and_restarts_on_results_tab(cli, monkeypatch):
+    write_results(_cfg())
+    gate = _gated_read_ogs(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _key(pilot, "tab")
+            spin = app.query_one("#status")
+            assert spin.running
+            await _key(pilot, "R")                                     # R on the Results tab: re-read
+            assert spin.running and app._status == "loading…"
+            await _key(pilot, "shift+tab")                             # Jobs tab
+            assert not spin.running
+            await _key(pilot, "R")                                     # R drops the read: nothing to wait for
+            assert not spin.running and not app.query_one("#rtab").has_class("loading")
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not spin.running and app._og_cache is None          # the dropped read cached nothing
+    _run(go())
+
+
+def test_spinner_runs_and_stops_on_p_source_switch(cli, monkeypatch):
+    write_results(_cfg())
+    gate = _gated_read_ogs(monkeypatch, start_open=True)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            spin = app.query_one("#status")
+            assert not spin.running
+            gate.clear()
+            await _key(pilot, "p")
+            assert spin.running and spin.text == "loading…"
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not spin.running and app.res_source == "possvm_prev"
+            await _key(pilot, "escape")
+            await _key(pilot, "tab")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            gate.clear()
+            await _key(pilot, "p")                                     # p on the Results tab
+            assert spin.running and app.query_one("#rtab").has_class("loading")
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not spin.running
+    _run(go())
+
+
+def test_spinner_ignores_a_stale_generation(cli, monkeypatch):
+    write_results(_cfg())
+    gate = _gated_read_ogs(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _key(pilot, "tab")
+            spin = app.query_one("#status")
+            assert spin.running
+            app._apply_rtab(dict(gen=app._rt_gen - 1, source="possvm", rows=[], hgs=[], note=""))
+            assert spin.running and app._og_cache is None             # stale: dropped, still waiting
+            app._rt_gen += 1                                           # the live read becomes stale
+            app.query_one("#rtab").remove_class("loading")
+            app._apply_rtab(dict(gen=app._rt_gen - 1, source="possvm", rows=[], hgs=[], note=""))
+            assert not spin.running                                    # nothing is waited for any more
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not spin.running
+    _run(go())
+
+
+def test_spinner_stops_when_a_read_is_cancelled_by_leaving_the_window(cli, monkeypatch):
+    write_results(_cfg())
+    gate = _gated_read_ogs(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _key(pilot, "o")
+            spin = app.query_one("#status")
+            assert spin.running
+            app.workers.cancel_group(app, "results")                  # the worker is cancelled ...
+            gate.set()
+            await pilot.pause(0.5)                                     # (a cancelled worker applies nothing)
+            assert app.res_rows == []
+            await _key(pilot, "escape")                                # ... and the user leaves
+            assert not spin.running and str(spin.render()) == ""
+    _run(go())
