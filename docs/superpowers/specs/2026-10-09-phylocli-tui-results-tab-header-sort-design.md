@@ -83,6 +83,34 @@ stage cell is `<done>/<total>` right-aligned, then a bar of 6 cells (`OV_BAR` 10
 `1800/2014 █████░`; units are families for search/cluster, HGs otherwise. The footer's per-stage
 counts stay. Sorting/hiding semantics are unchanged.
 
+## Part F — spinner while loading
+
+Grygoriy, 09/10/2026: "spinner while loading history and results". While the HG-view attempt
+history loads (today: greyed panes + "loading history…") and while the Results data loads (today:
+`loading k/n…`), show an animated spinner next to the text (Textual's `LoadingIndicator` or a
+timer-driven braille spinner `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`, ~8 frames/s — light enough over SSH). It stops and
+disappears as soon as the data are applied (and on cancel / esc). The grey `.loading` style stays.
+
+## Part G — compact logo replaces the warning banner; warnings removed from it
+
+Grygoriy, 09/10/2026: "remove warnings and make the logo compact", placed "where the warning
+message sits now".
+- The banner line above the panes no longer shows warnings. Warnings (duplicate family ids, the
+  name collision, squeue/sacct missing, worker errors) are shown **once per session as a
+  notification** (toast) when first detected, and are otherwise silent; status messages that the
+  banner carried ("loading history…") move next to the spinner (Part F). (A dedicated warnings
+  window stays TODOs.md 4.)
+- In its place, on the **first screen (Jobs/Results tabs) only**, a compact logo: the pixel art in
+  `docs/superpowers/specs/assets/druid-logo.txt` (35 rows × 19 pixels; colours ⬜ white
+  background, ⬛ black, 🟩 green, 🟧 orange, 🟫 brown) rendered with half-block characters `▀`
+  (foreground = upper pixel, background = lower pixel; one text line = two pixel rows; the odd
+  last row is padded with background) → **18 lines × 19 columns**. ⬜ is drawn as the terminal's
+  default background (transparent), so the logo works on dark and light themes. The logo sits at
+  the left of the banner area; the overview table shifts right of it (or below it if the terminal
+  is narrower than 100 columns). The HG view and the Results window do not show it.
+- The pixel data is shipped as a small module constant (`phylocli/logo.py`), generated from the
+  asset file by a test-checked function (`render_logo(rows) -> list[str]` of Rich markup).
+
 ## Error handling
 - Results tab read errors per HG are counted, not fatal: a footer `n HGs unreadable` and the
   per-HG error shown in the Results window, as today.
@@ -97,6 +125,12 @@ counts stay. Sorting/hiding semantics are unchanged.
 - Header sorting: `↑` from row 0 enters header mode; `←→` move (skipping `│`); `enter`/`s` sorts
   and toggles `▲`/`▼`; `↓` leaves; sort kept across refresh; numeric vs text order; `ALL` pinned;
   no file or SLURM access on these keys.
+
+## Testing (F, G)
+- Spinner: visible while a gated history / Results load is in flight (patch to block), gone after.
+- Logo: `render_logo` on the asset gives 18 lines of 19 cells; ⬜ cells carry no background
+  colour; banner shows the logo on the first screen only; warnings arrive as one notification
+  each, not in the banner.
 
 ## Out of scope
 Warnings window (TODOs.md 4), focal-species columns, chains.
