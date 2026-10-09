@@ -24,7 +24,8 @@ def load_raw() -> dict:
     p = Path(os.environ.get("PHYLOCLI_CONFIG") or core.ROOT / "phylocli/config.yaml")
     return yaml.safe_load(p.read_text())
 
-FILTERS = ("failed", "ready", "running", "blocked", "done")
+FILTERS = ("actionable", "failed", "ready", "running", "blocked", "done")
+ACTIONABLE = ("failed", "ready")      # the "actionable" filter shows failed + ready HGs
 STATE_STYLE = {"done": "green", "running": "cyan", "ready": "yellow", "failed": "red",
                "blocked": "bright_black"}
 
@@ -187,7 +188,10 @@ class PhyloApp(App):
         self._fill_hgs()
 
     def visible(self) -> list:
-        rows = [r for r in self.rows if r.state == self.filter]
+        if self.filter == "actionable":
+            rows = [r for r in self.rows if r.state in ACTIONABLE]
+        else:
+            rows = [r for r in self.rows if r.state == self.filter]
         if self.group is not None:
             rows = [r for r in rows if model.group_key(r.hg, self.by) == self.group]
         return rows
@@ -230,7 +234,8 @@ class PhyloApp(App):
         self.query_one("#ovfoot", Static).update(
             f"[b]{escape(r.group)}[/] {r.total} HGs · done/running/ready/blocked: "
             + " · ".join(parts)
-            + "\n█ done ▒ running ▓ ready/failed ░ blocked · enter: open · c/f: category/family")
+            + "\n█ done ▒ running ▓ ready/failed ░ blocked · enter: open · c/f: category/family"
+            + " · default view: failed+ready")
 
     def _regroup(self) -> None:
         exp, states = self._ov_inputs
@@ -262,7 +267,7 @@ class PhyloApp(App):
 
     def _auto_pick_filter(self) -> None:
         """While the filter is still the automatic one, pick the first filter (FILTERS order)
-        that shows something for this group and stage; "failed" if none does.  Waits for real
+        that shows something for this group and stage; "actionable" if none does.  Waits for real
         data (by_stage) and is done once it has chosen from it."""
         if not self._auto_filter or not self.by_stage:
             return
@@ -271,12 +276,12 @@ class PhyloApp(App):
             self.filter = f
             if self.visible():
                 return
-        self.filter = "failed"
+        self.filter = FILTERS[0]
 
     def open_group(self, name: str, stage: "str | None" = None) -> None:
         self.group = None if name == "ALL" else name
         self.view = "hgs"
-        self.filter = "failed"
+        self.filter = FILTERS[0]
         self.selected.clear()
         if stage is not None and core.applicable(self.cfg, stage):
             self.stage = stage

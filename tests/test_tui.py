@@ -31,7 +31,9 @@ def test_tui_loads_and_filters_failed(cli, monkeypatch):
         async with app.run_test() as pilot:
             app.load_now()
             await pilot.pause()
-            assert app.stage == "align" and app.filter == "failed"
+            assert app.stage == "align" and app.filter == "actionable"
+            await pilot.press("f")
+            assert app.filter == "failed"
             assert [r.hg for r in app.visible()] == ["tfs.C_x.HG1"]
             await pilot.press("f")
             assert app.filter == "ready" and [r.hg for r in app.visible()] == ["tfs.A.HG11"]
@@ -47,7 +49,7 @@ def test_tui_select_all_and_quit(cli, monkeypatch):
         async with app.run_test() as pilot:
             app.load_now()
             await pilot.pause()
-            await pilot.press("a")
+            await pilot.press("f", "a")                     # actionable -> failed
             assert app.selected == {"tfs.C_x.HG1"}
             await pilot.press("q")
     _run(go())
@@ -80,7 +82,9 @@ def _calls():
 def _failed_app(cli, monkeypatch):
     assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
     monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
-    return tui.PhyloApp(_cfg(), refresh_s=3600, start="hgs")
+    app = tui.PhyloApp(_cfg(), refresh_s=3600, start="hgs")
+    app.filter = "failed"          # these tests exercise the failed-only view (default is actionable)
+    return app
 
 
 def test_resource_groups_bump_oom(cli, monkeypatch):
@@ -439,7 +443,7 @@ def test_no_fasta_reads_after_load(cli, monkeypatch):
             await pilot.pause()
             calls = []
             monkeypatch.setattr(core, "nseq", lambda cfg, hg: calls.append(hg) or 0)
-            await pilot.press("f", "f", "f", "f", "down", "up", "space", "a", "f")
+            await pilot.press("f", "f", "f", "f", "down", "up", "space", "a", "f", "f")
             await pilot.press("r")
             await pilot.pause()
             assert isinstance(app.screen, tui.ResubmitScreen)
@@ -615,8 +619,10 @@ def test_enter_on_stage_cell_opens_that_stage_with_failed_filter(cli, monkeypatc
             await pilot.pause()
             app.load_now()
             await pilot.pause()
-            assert app.view == "hgs" and app.stage == "align" and app.filter == "failed"
+            assert app.view == "hgs" and app.stage == "align" and app.filter == "actionable"
             assert app.focused is app.query_one("#hgs")
+            await pilot.press("f")                                         # actionable -> failed
+            assert app.filter == "failed"
             assert [r.hg for r in app.visible()] == ["tfs.C_x.HG1"]
             await pilot.press("space", "r")                                # select and resubmit
             await pilot.pause()
@@ -740,7 +746,7 @@ def test_open_group_with_failures_opens_on_failed(cli, monkeypatch):
             await pilot.pause()
             app.load_now()
             await pilot.pause()
-            assert app.filter == "failed" and app.visible()
+            assert app.filter == "actionable" and app.visible()
     _run(go())
 
 
@@ -758,7 +764,25 @@ def test_open_group_without_failures_picks_first_nonempty_filter(cli):
             app.load_now()
             await pilot.pause()
             assert app.view == "hgs" and app.stage == "align"
-            assert app.filter == "ready" and app.visible()
+            assert app.filter == "actionable" and app.visible()
+    _run(go())
+
+
+def test_default_filter_shows_failed_and_ready_then_f_goes_to_failed(cli, monkeypatch):
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600, start="hgs")
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            assert tui.FILTERS[0] == "actionable" and app.filter == "actionable"
+            assert {r.hg: r.state for r in app.visible()} == {
+                "tfs.C_x.HG1": "failed", "tfs.A.HG11": "ready"}
+            await pilot.press("f")
+            assert app.filter == "failed"
+            assert [r.hg for r in app.visible()] == ["tfs.C_x.HG1"]
     _run(go())
 
 
@@ -781,10 +805,10 @@ def test_f_while_history_loading_keeps_user_filter(cli, monkeypatch):
             app.by_stage = {}
             app.open_group("ALL", "align")
             await pilot.pause()
-            assert app._auto_filter and app.filter == "failed"
-            await pilot.press("f")                          # failed -> ready, by hand
-            assert app.filter == "ready" and not app._auto_filter
-            await pilot.press("f")                          # ready -> running
+            assert app._auto_filter and app.filter == "actionable"
+            await pilot.press("f")                          # actionable -> failed, by hand
+            assert app.filter == "failed" and not app._auto_filter
+            await pilot.press("f", "f")                     # failed -> ready -> running
             user = app.filter
             gate.set()
             await app.workers.wait_for_complete()
