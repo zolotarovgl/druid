@@ -2614,6 +2614,7 @@ def test_results_tab_sort_hide_and_header_keep_all_pinned(cli, monkeypatch):
             await _key(pilot, "s")                                   # s on a cell: group ▲
             assert rt.sort == ("group", False) and [r[0] for r in _rt(app)] == ["ALL", "cal", "slc", "tfs"]
             await _key(pilot, "up", "right", "right", "right", "enter")   # header: OGs ▼
+            assert app.view == "overview"                            # enter in the header never opens
             assert rt.sort == ("ogs", False) and _heads(app, "#rtab")[3] == "OGs ▼"
             assert [r[0] for r in _rt(app)][:2] == ["ALL", "tfs"]
             app.load_now()                                           # refresh: sort kept, no read
@@ -2682,7 +2683,76 @@ def test_results_tab_keys_touch_no_files_or_slurm(cli, monkeypatch):
     _run(go())
 
 
+def test_R_during_a_tab_read_drops_it_and_next_visit_rereads(cli, monkeypatch):
+    import threading
+    write_results(_cfg())
+    gate, started = threading.Event(), threading.Event()
+    real = tui.model.group_ogs
+    calls = []
+
+    def gated(cfg, hgs, source, **k):
+        calls.append(source)
+        if len(calls) == 1:                      # the first read waits for the gate
+            started.set()
+            gate.wait(10)
+        return real(cfg, hgs, source, **k)
+    monkeypatch.setattr(tui.model, "group_ogs", gated)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await pilot.press("tab")             # Results tab: the read starts and blocks
+            for _ in range(100):
+                if started.is_set():
+                    break
+                await pilot.pause(0.05)
+            assert started.is_set() and app._rt_loading()
+            await pilot.press("shift+tab")
+            await pilot.press("R")               # on Jobs, mid-read
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app._og_cache is None and not app._rt_loading()   # stale read dropped
+            await pilot.press("tab")             # next visit reads afresh
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert len(calls) == 2 and app._og_cache is not None
+    _run(go())
+
+
+def test_stale_apply_rtab_is_dropped(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            before = app._og_cache
+            app._apply_rtab(dict(gen=app._rt_gen - 1, source="possvm_prev", rows=[], hgs=[], note=""))
+            assert app._og_cache is before and app.rt_source == "possvm"
+    _run(go())
+
+
+def test_results_tab_footer_counts_the_groups_own_unreadable_hgs(cli):
+    write_results(_cfg())
+    (_cfg().outdir / "possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv").write_text(
+        OG_HEAD + "broken\n")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            rt = app.query_one("#rtab")
+            rt.move_cursor(row=[r.group for r in app.rt_shown].index("cal"), column=0)
+            await pilot.pause()
+            assert "cal:" in app._rt_foot and "unreadable" not in app._rt_foot
+    _run(go())
+
+
 def test_switching_tab_leaves_header_mode(cli):
+    """(on_blur also leaves header mode on this path; _switch_tab does it explicitly.)"""
     write_results(_cfg())
 
     async def go():

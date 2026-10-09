@@ -856,7 +856,7 @@ class PhyloApp(App):
         if r is not None and self._og_cache is not None:
             line = (f"{r.group}: {r.hgs} HGs · {r.with_output} with output · {r.ogs} OGs · "
                     f"{r.genes} genes · {r.zero} OGs with support 0")
-            bad = sum(1 for x in self._og_cache["rows"].values() if x.error)
+            bad = r.unreadable                   # the group's own count
             if bad:
                 line += f" · {bad} HG{'' if bad == 1 else 's'} unreadable"
             lines.append(line)
@@ -1205,6 +1205,9 @@ class PhyloApp(App):
 
     def action_refresh(self) -> None:
         self._og_cache = None                    # R re-reads the ortholog-group files too
+        self._rt_gen += 1                        # a tab read still in flight must not cache pre-R data
+        self.workers.cancel_group(self, "rtab")
+        self.query_one("#rtab").remove_class("loading")
         if self.view == "overview" and self.tab == "results":
             self._reload_rtab()
         if self.view == "results" and self.res_source is not None:
