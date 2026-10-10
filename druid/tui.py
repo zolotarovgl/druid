@@ -21,7 +21,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 from textual.worker import get_current_worker
 
-from phylocli import core, history, logo, model
+from phylocli import core, history, model
 from phylocli.common import fmt_mem, fmt_time
 
 
@@ -453,10 +453,9 @@ class PhyloApp(App):
     CSS = """
     #hgview { grid-size: 2 2; grid-columns: 1fr 1fr; grid-rows: 1fr 1fr; }
     #hgview DataTable, #detail { border: round $primary; height: 100%; }
-    #strip { height: 9; }
-    #logo { width: 10; height: 9; margin: 0 2 0 1; }
-    #helpbox { width: 1fr; height: 9; }
-    #help { height: 1fr; }
+    #strip { height: auto; }
+    #helpbox { width: 1fr; height: auto; margin: 0 1; }
+    #help { height: auto; }
     #status { height: 1; color: $warning; }
     #ov { height: 1fr; }
     #overview { height: 1fr; border: round $primary; }
@@ -560,8 +559,7 @@ class PhyloApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        with Horizontal(id="strip"):                 # all views: logo + key help + status line
-            yield Static("\n".join(logo.render_logo()), id="logo")
+        with Horizontal(id="strip"):                 # all views: key help + status line
             with Vertical(id="helpbox"):
                 yield Static("", id="help")
                 yield Spinner(id="status")          # Part F: spinner + status text

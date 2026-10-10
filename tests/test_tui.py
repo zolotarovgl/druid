@@ -2013,18 +2013,7 @@ def test_esc_outside_box_clears_all_filters_then_leaves(cli):
     _run(go())
 
 
-def test_logo_is_9_lines_of_10_cells():
-    from rich.text import Text
-    from phylocli import logo
-    lines = logo.render_logo()
-    assert len(lines) == 9
-    assert {Text.from_markup(l).cell_len for l in lines} == {10}
-    assert "white" not in "".join(lines)                          # ⬜ is transparent
-    assert logo.COLOURS["⬛"] == "#6e6e6e"
-    assert len(logo.render_logo(logo.PIXELS_FULL)) == 18
-
-
-def test_strip_with_logo_and_help_is_in_every_view(cli):
+def test_strip_with_help_and_no_logo_is_in_every_view(cli):
     async def go():
         app = tui.PhyloApp(_cfg(), refresh_s=3600)
         async with app.run_test(size=(150, 40)) as pilot:
@@ -2039,8 +2028,8 @@ def test_strip_with_logo_and_help_is_in_every_view(cli):
                 await pilot.pause()
                 assert app.view == view
                 strip = app.query_one("#strip")
-                assert strip.display and strip.size.height == 9
-                assert app.query_one("#logo").display and app.query_one("#logo").size.width == 10
+                assert strip.display and 0 < strip.size.height < 9
+                assert not app.query("#logo")             # logo removed (Grygoriy, 10/10/2026)
                 assert not app.query("#banner")
                 helps[view] = app._help_text
             assert len(set(helps.values())) == 3
