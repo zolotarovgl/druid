@@ -40,6 +40,7 @@ def results_tree(tmp_path):
     _w(root / "resources.tsv", HEADER.replace(" ", "\t") + "\n" + ROW.replace(" ", "\t") + "\n")
     _w(root / "refnames.csv", "a,b\n")
     _w(root / "species.newick", "(a,b);\n")
+    _w(root / "origin.newick", "((Mlei:1,Bova:1)Cteno:1,(Hsap:1,Nvec:1)Para:1);\n")
     _w(root / "gene_families_searchinfo.csv", GENEFAM)
     _w(root / "input.fasta", ">p1\nMKV\n")
     _w(root / "Pfam-A.hmm", "HMMER3/f\n")
@@ -51,6 +52,7 @@ def results_tree(tmp_path):
     base["params"].update(resources_tsv=str(root / "resources.tsv"),
                           REFNAMES=str(root / "refnames.csv"),
                           SPECIES_TREE=str(root / "species.newick"),
+                          ORIGIN_TREE=str(root / "origin.newick"),
                           genefam_info=str(root / "gene_families_searchinfo.csv"),
                           infasta=str(root / "input.fasta"),
                           pfam_db=str(root / "Pfam-A.hmm"),

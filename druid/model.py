@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from phylocli import core, history
+import og_origin  # noqa: E402  (core puts workflow/ on sys.path)
 from phylocli.common import FAILED_STATES, RUNNING_STATES, ROOT, expand_indices, ids_path, runs_dir
 
 SLURM_TIMEOUT = 60  # seconds; a stuck slurmctld must not hang the CLI or freeze the TUI
@@ -915,3 +916,23 @@ def og_group_rows(groups, exp, by: str, rows) -> list[OGGroupRow]:
         out.append(OGGroupRow(g, len(hgs), len(rs), len(ogs), sum(len(o.genes) for o in ogs),
                               sum(1 for o in ogs if o.support == 0), len(rs) - len(ok)))
     return out
+
+
+# ---- orthogroup origin (Dollo MRCA on the origin tree) ------------------------------------------
+def origin_tree_path(cfg: core.Config) -> Path:
+    """params.ORIGIN_TREE (already absolute: core.PATH_PARAMS), else data/species_tree.newick
+    under the repo root (a config written before the key existed)."""
+    p = cfg.params.get("ORIGIN_TREE")
+    return Path(p) if p else core.ROOT / "data/species_tree.newick"
+
+
+def origin_tree(cfg: core.Config) -> "og_origin.OriginTree":
+    """The parsed origin tree; OSError / ValueError when it cannot be read or parsed."""
+    return og_origin.OriginTree(origin_tree_path(cfg).read_text())
+
+
+def og_origins(rows, tree) -> dict:
+    """{OG id: Origin(label, depth) or None} for every OG of `rows` ([HGOgs]; rows with an
+    error are skipped).  Species not on the tree are ignored (og_outside lists them)."""
+    return {og.id: tree.origin(m.species for m in og.genes)
+            for r in rows if not r.error for og in r.ogs}

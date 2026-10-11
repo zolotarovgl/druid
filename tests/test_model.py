@@ -452,3 +452,48 @@ def test_og_group_rows_sums_per_group(cli):
     fam = model.og_group_rows(["tfs.A", "tfs.C_x"], exp, "family", rows[:2])
     assert [(r.group, r.hgs, r.with_output, r.ogs) for r in fam] == [("tfs.A", 2, 2, 3),
                                                                      ("tfs.C_x", 1, 0, 0)]
+
+
+def test_origin_tree_path_default(cli):
+    cfg = _cfg()
+    assert model.origin_tree_path(cfg) == Path(cfg.params["ORIGIN_TREE"])
+    import dataclasses
+    bare = dataclasses.replace(cfg, params={k: v for k, v in cfg.params.items() if k != "ORIGIN_TREE"})
+    assert model.origin_tree_path(bare) == core.ROOT / "data/species_tree.newick"
+
+
+def test_config_resolves_origin_tree_relative_to_root():
+    raw = {"outdir": "results", "partition": "p", "qos": "q",
+           "params": {"ORIGIN_TREE": "data/species_tree.newick"}}
+    assert core.config_from_raw(raw).params["ORIGIN_TREE"] == str(core.ROOT / "data/species_tree.newick")
+
+
+def test_og_origins_on_the_fixture(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    rows, _ = model.group_ogs(cfg, ["tfs.A.HG1", "tfs.A.HG11"], "possvm")
+    got = model.og_origins(rows, model.origin_tree(cfg))
+    assert {k: (v.label, v.depth) for k, v in got.items()} == {
+        "tfs.A.HG1.0": ("root", 0), "tfs.A.HG1.1": ("Para", 1), "tfs.A.HG11.0": ("Cteno", 1)}
+
+
+def test_og_origins_ignore_species_off_the_tree(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    rows, _ = model.group_ogs(cfg, ["tfs.A.HG1"], "possvm_prev")      # Mlei + Zzz (not a tip)
+    assert model.og_origins(rows, model.origin_tree(cfg)) == {"tfs.A.HG1.0": ("Mlei", 2)}
+
+
+def test_og_origins_none_and_error_rows(cli):
+    cfg = _cfg()
+    tree = model.origin_tree(cfg)
+    og = model.OG("x.HG1.0", "n", [model.Member("Zzz_1", "Zzz", "NA", "NA")], None, "NA", "NA")
+    rows = [model.HGOgs("x.HG1", [og], None), model.HGOgs("x.HG2", [], "bad file")]
+    assert model.og_origins(rows, tree) == {"x.HG1.0": None}
+
+
+def test_origin_tree_unreadable_raises(cli):
+    cfg = _cfg()
+    Path(cfg.params["ORIGIN_TREE"]).unlink()
+    with pytest.raises(OSError):
+        model.origin_tree(cfg)

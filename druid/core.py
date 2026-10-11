@@ -27,7 +27,7 @@ CLUSTER_SUFFIX = "_cluster.tsv"
 def unit(stage: str) -> str:
     """What one id of `stage` is, as printed in notes: 'families' or 'HGs'."""
     return "families" if stage in FAMILY_STAGES else "HGs"
-PATH_PARAMS = ("REFNAMES", "SPECIES_TREE", "resources_tsv", "genefam_info", "infasta", "pfam_db",
+PATH_PARAMS = ("REFNAMES", "SPECIES_TREE", "ORIGIN_TREE", "resources_tsv", "genefam_info", "infasta", "pfam_db",
                "hmm_dir")
 
 

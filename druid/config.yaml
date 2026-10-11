@@ -10,6 +10,7 @@ params:
   IQTREE2_MODEL: TEST
   SUBS_MODEL: LG
   SPECIES_TREE: data/species_tree.binary.newick
+  ORIGIN_TREE: data/species_tree.newick   # orthogroup origin (Dollo MRCA); keeps polytomies (Grygoriy, 11/10/2026)
   MAX_SPR: 3
   NCPU_GENERAX: 2
   REFNAMES: data/Mmus_gene_names.csv
