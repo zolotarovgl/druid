@@ -231,12 +231,21 @@ RES_KEYS = {"hg": (lambda r: model.hg_sort_key(r.hg), False),     # an unreadabl
 # no reference-ortholog columns in OGs: the reference is per gene (it differs within 19 % of
 # OGs) and is shown per row in `members` (Grygoriy, 09/10/2026)
 OG_COLS = [SortCol("og", "OG"), SortCol("genes", "genes", True), SortCol("spp", "spp", True),
-           SortCol("support", "support", True), SortCol("name", "name")]
+           SortCol("support", "support", True), SortCol("name", "name"),
+           SortCol("origin", "origin")]
 OG_KEYS = {"og": (lambda o: int(o.id.rsplit(".", 1)[1]), False),
            "genes": (lambda o: len(o.genes), True),
            "spp": (lambda o: len({m.species for m in o.genes}), True),
            "support": (lambda o: _finite(o.support), True),
            "name": (lambda o: o.name.lower(), False)}
+
+
+def _origin_key(o) -> tuple:
+    """OGs `origin` sort: oldest (smallest depth) first, then label; no origin (– or ?) last in
+    both directions."""
+    return (0, o.depth, o.label.lower()) if o is not None else (1, 0, "")
+
+
 MEM_COLS = [SortCol("gene", "gene"), SortCol("sp", "sp"), SortCol("ref", "ref.orth"),
             SortCol("sup", "sup", True)]
 MEM_KEYS = {"gene": (lambda p: p[1].gene, False), "sp": (lambda p: p[1].species, False),   # (i, Member)
@@ -540,6 +549,9 @@ class PhyloApp(App):
         self._universe:"list | None" = None    # species tree tips, read once by the worker
         self._phyla: "dict | None" = None       # species -> phylum, read once by the worker
         self._sp_note = ""                      # why the universe / phyla could not be read
+        self._otree = None                      # og_origin.OriginTree, read once by the worker
+        self._otree_err = ""                    # why it could not be read ("" = not tried / ok)
+        self._origins: dict = {}                # OG id -> Origin | None, of the loaded rows
         self._hg_unit: "str | None" = None                 # unit the #hgs / #arrays headers show
         self._array_rows: list = []
         self.ov_hide: "str | None" = None       # stage name; h
@@ -1405,7 +1417,8 @@ class PhyloApp(App):
         load_bg (default group, exclusive) must not cancel it, nor it load_bg."""
         worker = get_current_worker()
         snap = dict(gen=gen, source=source or "possvm", rows=[], missing=0, note="",
-                    universe=self._universe, phyla=self._phyla, sp_note="")
+                    universe=self._universe, phyla=self._phyla, sp_note="",
+                    otree=self._otree, origins={}, otree_err="")
         try:
             snap["source"] = source or model.default_source(self.cfg)
             def progress(k: int, n: int) -> None:   # throttled: ~every 50 files
@@ -1432,6 +1445,13 @@ class PhyloApp(App):
                 snap["phyla"] = model.phyla(self.cfg)
             except Exception as e:
                 notes.append(f"{model.species_info_path(self.cfg)}: {e} (phyla shown as unknown)")
+        if snap["otree"] is None:
+            try:
+                snap["otree"] = model.origin_tree(self.cfg)
+            except Exception as e:
+                snap["otree_err"] = f"origin tree {model.origin_tree_path(self.cfg)}: {e}"
+        if snap["otree"] is not None:
+            snap["origins"] = model.og_origins(snap["rows"], snap["otree"])
         snap["sp_note"] = "; ".join(notes)
         if worker.is_cancelled:
             return
@@ -1450,6 +1470,9 @@ class PhyloApp(App):
         self.query_one("#resv").remove_class("loading")
         self.res_source, self.res_rows, self.res_missing = snap["source"], snap["rows"], snap["missing"]
         self._universe, self._phyla, self._sp_note = snap["universe"], snap["phyla"], snap["sp_note"]
+        self._otree, self._origins = snap["otree"], snap["origins"]
+        if snap["otree_err"]:
+            self._notify_once(snap["otree_err"])
         self._res_note = snap["note"] or ("" if self.res_rows else
                                           f"no ortholog groups yet ({self.res_source} not done)")
         t = self.query_one("#res", DataTable)
@@ -1518,6 +1541,13 @@ class PhyloApp(App):
         key = self._key_at_cursor(self.query_one("#ogs", DataTable))
         return next((o for o in r.ogs if o.id == key), None)
 
+    def _origin_text(self, og_id: str) -> str:
+        """`?` while the origin tree is unreadable, `–` for an OG with no species on it."""
+        if self._otree is None:
+            return "?"
+        o = self._origins.get(og_id)
+        return "–" if o is None else o.label
+
     def _fill_ogs(self, keep: "str | None" = None) -> None:
         """OG table of the HG under the Results cursor (in memory), then its members/species.
         The cursor stays on OG `keep` (default: the OG under the cursor now) when it is still
@@ -1529,14 +1559,21 @@ class PhyloApp(App):
         t.clear()
         t.border_title = f"OGs · {r.hg if r else '–'} · {self.res_source or '…'}{self._ftag('ogs')}"
         q = self._flt["ogs"].lower()
-        ogs = [o for o in r.ogs if q in o.id.lower() or q in o.name.lower()] if r else []
-        ogs = sort_rows(ogs, t.sort_state, OG_KEYS)
+        ogs = [o for o in r.ogs if q in o.id.lower() or q in o.name.lower()
+               or q in self._origin_text(o.id).lower()] if r else []
+        keys = dict(OG_KEYS, origin=(lambda o: _origin_key(self._origins.get(o.id)), False))
+        if t.sort_state is not None and t.sort_state[0] == "origin":
+            placed = [o for o in ogs if self._origins.get(o.id) is not None]
+            ogs = (sort_rows(placed, t.sort_state, keys)
+                   + [o for o in ogs if self._origins.get(o.id) is None])
+        else:
+            ogs = sort_rows(ogs, t.sort_state, keys)
         for og in ogs:
             sup = ("–" if og.support is None else "0.0 ⚠" if og.support == 0
                    else f"{og.support:.1f}")
             t.add_row(_short_og(og.id), str(len(og.genes)),
                       str(len({m.species for m in og.genes})), sup, escape(_trunc(og.name)),
-                      key=og.id)
+                      escape(self._origin_text(og.id)), key=og.id)
         keys = [o.id for o in ogs]
         if keys:
             t.move_cursor(row=keys.index(keep) if keep in keys else 0)
@@ -1549,7 +1586,7 @@ class PhyloApp(App):
             (f"members · {_short_og(og.id)} {escape(og.name)}" if og else "members")
             + self._ftag("members"))
         self.query_one("#species_box").border_title = (
-            f"species · {_short_og(og.id)}" if og else "species")
+            f"species · {_short_og(og.id)} · origin {self._origin_text(og.id)}" if og else "species")
         self._fill_members()
         if r is not None and r.error:
             text = r.error

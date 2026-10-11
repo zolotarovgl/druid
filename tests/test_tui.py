@@ -1094,11 +1094,11 @@ def test_o_on_overview_opens_results_for_that_group(cli):
             assert app.query_one("#res").border_title == "Results · tfs"
             assert _cells(app, "#res", 0) == ["tfs.A.HG1", "2", "5", "1"]
             assert app.query_one("#ogs").border_title == "OGs · tfs.A.HG1 · possvm"
-            assert _cells(app, "#ogs", 0) == ["HG1.0", "3", "2", "78.4", "T/Tbx19"]   # no ref columns
+            assert _cells(app, "#ogs", 0) == ["HG1.0", "3", "2", "78.4", "T/Tbx19", "root"]   # no ref columns; origin last
             assert _cells(app, "#ogs", 1)[3] == "0.0 ⚠"
             assert app.query_one("#members").border_title == "members · HG1.0 T/Tbx19"
             assert _cells(app, "#members", 2) == ["Hsap_ENSP1", "Hsap", "T/Tbx19", "98.2/98.2"]
-            assert app.query_one("#species_box").border_title == "species · HG1.0"
+            assert app.query_one("#species_box").border_title == "species · HG1.0 · origin root"
             assert app._species_text.splitlines() == [
                 "Ctenophora  1/2 spp  2 genes", "  Mlei 2",
                 "Chordata    1/1 spp  1 gene", "  Hsap 1",
@@ -1565,7 +1565,7 @@ def test_long_og_name_truncated_and_support_visible(cli):
             await _open_results(app, pilot, "tfs")
             await _press(pilot, "down")
             cells = _cells(app, "#ogs", 0)
-            assert cells[3] == "0.0 ⚠" and cells[4] == name[:24] + "…" and len(cells) == 5
+            assert cells[3] == "0.0 ⚠" and cells[4] == name[:24] + "…" and len(cells) == 6
             t = app.query_one("#ogs")
             head = sum(c.get_render_width(t) for c in list(t.columns.values())[:4])
             assert head <= t.size.width                  # OG, genes, spp, support visible
@@ -1873,7 +1873,7 @@ def test_long_ref_support_is_truncated_in_ogs_and_members(cli):
         async with app.run_test() as pilot:
             await _open_results(app, pilot, "tfs")
             og = _cells(app, "#ogs", 0)
-            assert len(og) == 5                          # OGs carry no reference columns
+            assert len(og) == 6                          # OGs carry no reference columns; origin last
             mem = _cells(app, "#members", 0)
             assert len(mem[2]) <= 25 and len(mem[3]) <= 13, (len(mem[2]), len(mem[3]))
     _run(go())
@@ -3175,4 +3175,107 @@ def test_header_mode_refreshes_the_footer_bindings(cli, monkeypatch):
             n = len(calls)
             await _key(pilot, "down")
             assert not app.query_one("#overview").header and len(calls) > n
+    _run(go())
+
+
+# ---- OG origin (strict Dollo MRCA on ORIGIN_TREE) ---------------------------------------------
+def test_ogs_show_origin(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert [_cells(app, "#ogs", i)[5] for i in range(2)] == ["root", "Para"]
+            await _press(pilot, "down")                                   # Results: HG11
+            assert _cells(app, "#ogs", 0)[5] == "Cteno"
+            assert app.query_one("#species_box").border_title == "species · HG11.0 · origin Cteno"
+    _run(go())
+
+
+def test_origin_sort_by_depth_and_filter(cli):
+    from pathlib import Path
+    write_results(_cfg())
+    p = _cfg().outdir / "possvm/tfs.A.HG1.generax.support.tree.ortholog_groups.csv"
+    p.write_text(p.read_text() + "Zzz_9\ttfs.A.HG1.2:lonely\t50.0\tNA\tNA\n")   # off-tree only: –
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            app.query_one("#ogs").focus()
+            await pilot.pause()
+            await _press(pilot, "up", "right", "right", "right", "right", "right", "enter")
+            col = [_cells(app, "#ogs", i)[5] for i in range(3)]
+            assert col == ["root", "Para", "–"]                           # oldest first, – last
+            await _press(pilot, "enter")                                  # again: reverse
+            col = [_cells(app, "#ogs", i)[5] for i in range(3)]
+            assert col == ["Para", "root", "–"]                           # – stays last
+            await _press(pilot, "down")                                   # leave header mode
+            await _press(pilot, "slash", "p", "a", "r", "a", "enter")
+            assert app.query_one("#ogs").row_count == 1
+            assert _cells(app, "#ogs", 0)[0] == "HG1.1"
+    _run(go())
+
+
+def test_origin_unreadable_tree_shows_question_mark_and_notifies_once(cli, monkeypatch):
+    from pathlib import Path
+    write_results(_cfg())
+    Path(_cfg().params["ORIGIN_TREE"]).unlink()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        seen = []
+        orig = app.notify
+        monkeypatch.setattr(app, "notify", lambda msg, *a, **k: (seen.append(str(msg)), orig(msg, *a, **k)))
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert _cells(app, "#ogs", 0)[5] == "?"
+            assert app.query_one("#species_box").border_title == "species · HG1.0 · origin ?"
+            await _press(pilot, "escape", "escape")
+            await _open_results(app, pilot, "tfs")                        # second load: no 2nd toast
+            assert sum("origin tree" in m for m in seen) == 1
+    _run(go())
+
+
+def test_origin_tree_read_off_the_ui_thread(cli, monkeypatch):
+    import threading
+    write_results(_cfg())
+    on_main = []
+    real = tui.model.origin_tree
+    monkeypatch.setattr(tui.model, "origin_tree",
+                        lambda cfg: (on_main.append(threading.current_thread() is threading.main_thread()),
+                                     real(cfg))[1])
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            await _press(pilot, "escape", "escape")
+            await _open_results(app, pilot, "tfs")                        # read once per session
+            assert _cells(app, "#ogs", 0)[5] == "root"
+    _run(go())
+    assert on_main == [False]
+
+
+def test_origin_from_results_tab_cache(cli, monkeypatch):
+    write_results(_cfg())
+    calls = []
+    real = tui.model.group_ogs
+    monkeypatch.setattr(tui.model, "group_ogs", lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _press(pilot, "tab")                                    # Results tab: one read
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            app.query_one("#rtab").move_cursor(row=0)                     # ALL
+            await _press(pilot, "enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.view == "results" and len(calls) == 1
+            assert _cells(app, "#ogs", 0)[5] == "root"
     _run(go())
