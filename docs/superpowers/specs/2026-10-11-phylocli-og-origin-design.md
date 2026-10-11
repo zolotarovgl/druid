@@ -52,8 +52,12 @@ lives in one shared module now (approach C).
 3. **`phylocli/tui.py`**: the Results window's species worker (which already reads the universe
    and phyla once) also reads the origin tree once and keeps it; OGs loaded afterwards carry the
    origin.
-   - `OGs` pane: new column `origin` after `spp`.
-   - `members` pane: new column `origin` (the gene's OG's origin).
+   - `OGs` pane: new column `origin` (last, so existing column indices stay).
+   - `members` pane: no column (every row is the same OG: one constant value). The origin is
+     shown in the `species` pane title instead: `species · HG1.0 · origin root` (plan decision,
+     11/10/2026).
+   - Origins are kept in an app-level `{OG id: Origin | None}` computed by the worker for the
+     rows it delivers (also from the Results-tab cache); `OG` gets no new field.
    - Header sorting: `origin` sorts by depth, oldest (smallest depth) first, ties by label; again
      → reverse.
    - `/` filter in `OGs` and `members` also matches the origin label (substring,
