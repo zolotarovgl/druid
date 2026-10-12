@@ -542,6 +542,7 @@ class PhyloApp(App):
         self.res_missing = 0
         self._res_focus: "str | None" = None    # HG to put the Results cursor on after a load
         self._res_gen = 0                       # bumped per load / esc: late snapshots dropped
+        self._tree_gen = 0                      # bumped per t / leaving Results: late trees dropped
         self._res_note = ""
         self._res_foot = ""
         self._species_text = ""
@@ -1150,6 +1151,7 @@ class PhyloApp(App):
                 self.query_one(self._PANE_ID[pane]).focus()
                 return
             self._res_gen += 1                   # a load still running is dropped when it lands
+            self._tree_gen += 1                  # ... and so is a tree still loading
             self.workers.cancel_group(self, "results")   # ... and stops reading files
             self.view = self.res_from
             self._show_view()
@@ -1554,10 +1556,21 @@ class PhyloApp(App):
         if pane == "members":
             key = self._key_at_cursor(self.query_one("#members", DataTable))
             gene = key.split(":", 1)[1] if key else None
-        self._load_tree(r.hg, self.res_source, og, gene)
+        self._tree_gen += 1                      # an earlier, slower load is dropped when it lands
+        self._load_tree(r.hg, self.res_source, og, gene, self._tree_gen)
+
+    def _tree_current(self, gen: int) -> bool:
+        """A load's result may still be shown: it is the latest t, Results is still open, and no
+        tree is on top already."""
+        return (gen == self._tree_gen and self.view == "results"
+                and type(self.screen).__name__ != "TreeScreen")
+
+    def _tree_warn(self, gen: int, msg: str) -> None:
+        if self._tree_current(gen):
+            self.notify(msg, severity="warning")
 
     @work(thread=True, exclusive=True, group="tree")
-    def _load_tree(self, hg: str, source: str, og, gene: "str | None") -> None:
+    def _load_tree(self, hg: str, source: str, og, gene: "str | None", gen: int) -> None:
         """Reads the newick, its ortholog_groups.csv (as metadata) and species_info.tsv (colours)
         off the UI thread.  Any failure is a warning; the TUI never crashes on a bad tree."""
         notes = []
@@ -1581,7 +1594,7 @@ class PhyloApp(App):
                 colours = {}
             m = tvm.TreeModel(tree, sep="_", colours=colours, meta=meta, meta_cols=cols)
         except Exception as e:                 # missing file, bad newick, ...
-            self.call_from_thread(self.notify, f"tree: {e}", severity="warning")
+            self.call_from_thread(self._tree_warn, gen, f"tree: {e}")
             return
         focus, hl, title = 0, [], f"{hg} · {source}"
         if og is not None:
@@ -1598,16 +1611,18 @@ class PhyloApp(App):
             else:
                 focus = i
             title += f" · {gene}"
-        self.call_from_thread(self._push_tree, m, focus, hl, title, path, notes)
+        self.call_from_thread(self._push_tree, gen, m, focus, hl, title, path, notes)
 
-    def _push_tree(self, m, focus: int, hl: list, title: str, path, notes: list) -> None:
+    def _push_tree(self, gen: int, m, focus: int, hl: list, title: str, path, notes: list) -> None:
+        if not self._tree_current(gen):
+            return
         from treeview.widget import TreeScreen
         self.push_screen(TreeScreen(m, title=title, path=path, focus=focus, highlight=hl))
         for n in notes:
             self.notify(n, severity="warning")
 
     def _cur_res(self):
-        key =self._key_at_cursor(self.query_one("#res", DataTable))
+        key = self._key_at_cursor(self.query_one("#res", DataTable))
         return next((r for r in self.res_rows if r.hg == key), None)
 
     def _cur_og(self):

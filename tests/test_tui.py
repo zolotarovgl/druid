@@ -3398,3 +3398,128 @@ def test_phylocli_keys_do_nothing_while_the_tree_is_open(cli):
             assert app.res_source == "possvm" and app._res_gen == gen and app.view == "results"
             assert isinstance(app.screen, TreeScreen)
     _run(go())
+
+
+def _tree_screens(app):
+    return sum(type(s).__name__ == "TreeScreen" for s in app.screen_stack)
+
+
+def _slow_load(monkeypatch, secs=0.3):
+    import time
+    from treeview import model as tvm
+    orig = tvm.load
+    monkeypatch.setattr(tvm, "load", lambda p: (time.sleep(secs), orig(p))[1])
+
+
+def test_t_twice_during_a_slow_load_pushes_one_tree(cli, monkeypatch):
+    write_results(_cfg())
+    _write_trees(_cfg())
+    _slow_load(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            t = app.query_one("#res")
+            t.focus()
+            t.move_cursor(row=0)
+            await pilot.pause()
+            await pilot.press("t")
+            await pilot.press("t")
+            await app.workers.wait_for_complete()
+            for _ in range(10):
+                await pilot.pause(0.1)
+            assert _tree_screens(app) == 1
+            await pilot.press("escape")
+            await pilot.pause()
+            assert _tree_screens(app) == 0 and app.view == "results"
+    _run(go())
+
+
+def test_leaving_results_during_a_slow_load_drops_the_tree(cli, monkeypatch):
+    write_results(_cfg())
+    _write_trees(_cfg())
+    _slow_load(monkeypatch)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            t = app.query_one("#res")
+            t.focus()
+            t.move_cursor(row=0)
+            await pilot.pause()
+            await pilot.press("t")
+            app.action_back()                                  # leave Results before the load ends
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            for _ in range(10):
+                await pilot.pause(0.1)
+            assert _tree_screens(app) == 0 and app.view == "overview"
+    _run(go())
+
+
+def test_t_unreadable_newick_warns_and_opens_nothing(cli, monkeypatch):
+    write_results(_cfg())
+    (_cfg().outdir / "possvm/tfs.A.HG1.generax.support.tree").write_text("(((")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        notes = []
+        orig = app.notify
+        monkeypatch.setattr(app, "notify",
+                            lambda msg, *a, **k: (notes.append(str(msg)), orig(msg, *a, **k)))
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            await _press_t(app, pilot, "#res", 0)
+            assert _tree_screens(app) == 0 and app.view == "results"
+            assert any(n.startswith("tree:") for n in notes)
+    _run(go())
+
+
+def test_t_unreadable_metadata_still_opens_the_tree(cli, monkeypatch):
+    write_results(_cfg())
+    _write_trees(_cfg())
+    from treeview import model as tvm
+
+    def bad(path):
+        raise ValueError("no header row")
+    monkeypatch.setattr(tvm, "load_meta", bad)
+
+    async def go():
+        from treeview.widget import TreeScreen, TreeView
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        notes = []
+        orig = app.notify
+        monkeypatch.setattr(app, "notify",
+                            lambda msg, *a, **k: (notes.append(str(msg)), orig(msg, *a, **k)))
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            await _press_t(app, pilot, "#res", 0)
+            assert isinstance(app.screen, TreeScreen)
+            assert app.screen.query_one(TreeView).model.meta_cols == []
+            assert any("(no metadata)" in n for n in notes)
+    _run(go())
+
+
+def test_t_on_the_overview_results_tab_asks_to_open_a_group(cli, monkeypatch):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        notes = []
+        orig = app.notify
+        monkeypatch.setattr(app, "notify",
+                            lambda msg, *a, **k: (notes.append(str(msg)), orig(msg, *a, **k)))
+        async with app.run_test(size=(160, 50)) as pilot:
+            app.load_now()
+            await pilot.pause()
+            await pilot.press("tab")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.tab == "results" and app.view == "overview"
+            await pilot.press("t")
+            await pilot.pause()
+            assert _tree_screens(app) == 0
+            assert any("open a group's Results (o), then t" in n for n in notes)
+    _run(go())
