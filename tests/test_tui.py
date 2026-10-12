@@ -3400,6 +3400,56 @@ def test_phylocli_keys_do_nothing_while_the_tree_is_open(cli):
     _run(go())
 
 
+def test_t_does_nothing_with_the_cursor_in_the_results_header(cli):
+    write_results(_cfg())
+    _write_trees(_cfg())
+
+    async def go():
+        from treeview.widget import TreeScreen
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            res = app.query_one("#res")
+            res.focus()
+            res.move_cursor(row=0)
+            await pilot.pause()
+            await pilot.press("up")                                # row 0: into the header
+            await pilot.pause()
+            assert res.header
+            await pilot.press("t")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not isinstance(app.screen, TreeScreen) and app.view == "results"
+            await pilot.press("down")                              # out of the header: t works
+            await pilot.pause()
+            assert not res.header
+            await pilot.press("t")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert isinstance(app.screen, TreeScreen)
+    _run(go())
+
+
+def test_phylocli_status_colour_does_not_leak_into_the_tree_status(cli):
+    write_results(_cfg())
+    _write_trees(_cfg())
+
+    async def go():
+        from textual.widgets import Static
+        from treeview.widget import TreeScreen
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        warn = app.theme_variables["warning"]
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            from textual.color import Color
+            assert app.query_one("#strip #status").styles.color.hex6 == Color.parse(warn).hex6
+            await _press_t(app, pilot, "#res", 0)
+            assert isinstance(app.screen, TreeScreen)
+            tree_status = app.screen.query_one("#status", Static)
+            assert tree_status.styles.color.hex6 != Color.parse(warn).hex6
+    _run(go())
+
+
 def _tree_screens(app):
     return sum(type(s).__name__ == "TreeScreen" for s in app.screen_stack)
 

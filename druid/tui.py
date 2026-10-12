@@ -509,7 +509,7 @@ class PhyloApp(App):
     #strip { height: auto; }
     #helpbox { width: 1fr; height: auto; margin: 0 1; }
     #help { height: auto; }
-    #status { height: 1; color: $warning; }
+    #strip #status { height: 1; color: $warning; }
     #ov { height: 1fr; }
     #overview { height: 1fr; border: round $primary; }
     #ovfoot { height: auto; }
@@ -1148,14 +1148,14 @@ class PhyloApp(App):
         """Footer shows only the keys of the current view."""
         if action != "quit" and type(self.screen).__name__ in ("TreeScreen", "KeysScreen"):
             return False                     # the tree / key list owns the keys; q still quits
+        f = self.focused
+        if action in ("toggle", "select_all", "resubmit", "log", "open_results", "open_tree") \
+                and isinstance(f, SortTable) and f.header:
+            return False                         # header mode: the hidden row-0 cursor is not a target
         if action == "open_tree":
             return self.view == "results" or (self.view == "overview" and self.tab == "results")
         if action in ("by_category", "sort", "hide"):
             return self.view == "overview"
-        f = self.focused
-        if action in ("toggle", "select_all", "resubmit", "log", "open_results") \
-                and isinstance(f, SortTable) and f.header:
-            return False                         # header mode: the hidden row-0 cursor is not a target
         if action in ("toggle", "select_all", "resubmit", "log"):
             return self.view == "hgs"
         if action == "back":
