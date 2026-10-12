@@ -36,16 +36,19 @@ def _src_repo(tmp_path):
 def test_update_script_copies_without_tests_and_refuses_dirty(tmp_path):
     src = _src_repo(tmp_path)
     dest = tmp_path / "vendor"
-    env = dict(os.environ, TREEVIEW_SRC=str(src), TREEVIEW_REMOTE_REPO=str(src),
-               VENDOR_DEST=str(dest))
+    env = dict(os.environ, TREEVIEW_REMOTE_REPO=str(src), VENDOR_DEST=str(dest))
+    (src / "treeview/stray.py").write_text("untracked\n")                 # not in the commit
     r = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert (dest / "treeview/model.py").read_text() == "X = 1\n"
     assert not (dest / "treeview/tests").exists()
+    assert not (dest / "treeview/stray.py").exists()                      # bytes come from the commit
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=src, capture_output=True,
                           text=True).stdout.strip()
-    assert f"commit: {head}" in (dest / "treeview/VENDORED").read_text()
+    vendored = (dest / "treeview/VENDORED").read_text()
+    assert f"commit: {head}" in vendored
     (src / "treeview/model.py").write_text("X = 2\n")                     # uncommitted change
     r = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
     assert r.returncode == 1 and "uncommitted" in r.stderr
     assert (dest / "treeview/model.py").read_text() == "X = 1\n"         # nothing copied
+    assert (dest / "treeview/VENDORED").read_text() == vendored          # stamp untouched
