@@ -497,3 +497,13 @@ def test_origin_tree_unreadable_raises(cli):
     Path(cfg.params["ORIGIN_TREE"]).unlink()
     with pytest.raises(OSError):
         model.origin_tree(cfg)
+
+
+def test_hg_tree_files_from_the_og_csv_name(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    tree, csv = model.hg_tree_files(cfg, "tfs.A.HG1", "possvm")
+    assert csv.name == "tfs.A.HG1.generax.support.tree.ortholog_groups.csv"
+    assert tree == cfg.outdir / "possvm/tfs.A.HG1.generax.support.tree"
+    assert model.hg_tree_files(cfg, "tfs.A.HG1", "possvm_prev")[0].name == "tfs.A.HG1.treefile"
+    assert model.hg_tree_files(cfg, "tfs.C_x.HG1", "possvm") is None

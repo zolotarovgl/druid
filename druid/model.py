@@ -753,6 +753,19 @@ def species_of(gene: str) -> str:
     return gene.split("_", 1)[0]
 
 
+def hg_tree_files(cfg: core.Config, hg: str, source: str) -> "tuple[Path, Path] | None":
+    """(tree, ortholog_groups.csv) of one HG in <outdir>/<source>/.  The csv is found as read_ogs
+    finds it (<hg>.<tree file name>.ortholog_groups.csv); the tree is that name without the
+    suffix: <hg>.generax.support.tree in possvm/, <hg>.treefile in possvm_prev/.  None when there
+    is not exactly one non-empty csv; the tree file may still be missing (the caller says so)."""
+    d = cfg.outdir / source
+    names = core.report_status.nonempty_files(str(d))
+    files = sorted(n for n in names if n.startswith(hg + ".") and n.endswith(OG_SUFFIX))
+    if len(files) != 1:
+        return None
+    return d / files[0][:-len(OG_SUFFIX)], d / files[0]
+
+
 def read_ogs(cfg: core.Config, hg: str, source: str, names: set[str] | None = None):
     """The ortholog groups of one HG, largest first, from
     <outdir>/<source>/<hg>.<tree name>.ortholog_groups.csv.  None when there is no non-empty

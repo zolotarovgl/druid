@@ -500,6 +500,7 @@ class PhyloApp(App):
         Binding("r", "resubmit", "resubmit"),
         Binding("l", "log", "log"),
         Binding("o", "open_results", "results"),
+        Binding("t", "open_tree", "tree"),
         Binding("p", "toggle_source", "possvm/prev"),
         Binding("slash", "member_filter", "filter members"),
         Binding("R", "refresh", "refresh"),
@@ -1111,6 +1112,10 @@ class PhyloApp(App):
 
     def check_action(self, action: str, parameters: tuple) -> "bool | None":
         """Footer shows only the keys of the current view."""
+        if action != "quit" and type(self.screen).__name__ in ("TreeScreen", "KeysScreen"):
+            return False                     # the tree / key list owns the keys; q still quits
+        if action == "open_tree":
+            return self.view == "results" or (self.view == "overview" and self.tab == "results")
         if action in ("by_category", "sort", "hide"):
             return self.view == "overview"
         f = self.focused
@@ -1530,8 +1535,79 @@ class PhyloApp(App):
             self._fill_members()
             self._results_footer()
 
+    def action_open_tree(self) -> None:
+        """t in Results: the HG's gene tree in treeview (vendored), from the current p source.
+        Cursor in #res -> the root; #ogs -> the OG's MRCA, its members highlighted; #members ->
+        that member's tip.  esc in the tree comes back here unchanged."""
+        if self.view == "overview" and self.tab == "results":
+            self.notify("open a group's Results (o), then t", severity="warning")
+            return
+        if self.view != "results" or self.res_source is None:
+            return
+        r = self._cur_res()
+        if r is None:
+            self.notify("no HG under the cursor", severity="warning")
+            return
+        pane = getattr(self.focused, "id", None) or "res"
+        og = self._cur_og() if pane == "ogs" else None
+        gene = None
+        if pane == "members":
+            key = self._key_at_cursor(self.query_one("#members", DataTable))
+            gene = key.split(":", 1)[1] if key else None
+        self._load_tree(r.hg, self.res_source, og, gene)
+
+    @work(thread=True, exclusive=True, group="tree")
+    def _load_tree(self, hg: str, source: str, og, gene: "str | None") -> None:
+        """Reads the newick, its ortholog_groups.csv (as metadata) and species_info.tsv (colours)
+        off the UI thread.  Any failure is a warning; the TUI never crashes on a bad tree."""
+        notes = []
+        try:
+            from treeview import model as tvm      # vendored: core puts phylocli/vendor on sys.path
+            files = model.hg_tree_files(self.cfg, hg, source)
+            if files is None:
+                raise FileNotFoundError(f"{hg}: no {source} output")
+            path, csv = files
+            if not path.is_file():
+                raise FileNotFoundError(f"{hg}: no tree {path.name} in {source}/")
+            tree = tvm.load(path)
+            try:
+                cols, meta = tvm.load_meta(csv)
+            except (OSError, ValueError) as e:
+                cols, meta = None, None
+                notes.append(f"{csv.name}: {e} (no metadata)")
+            try:
+                colours = tvm.load_colours(model.species_info_path(self.cfg))
+            except Exception:                  # colours are cosmetic: species hash colours
+                colours = {}
+            m = tvm.TreeModel(tree, sep="_", colours=colours, meta=meta, meta_cols=cols)
+        except Exception as e:                 # missing file, bad newick, ...
+            self.call_from_thread(self.notify, f"tree: {e}", severity="warning")
+            return
+        focus, hl, title = 0, [], f"{hg} · {source}"
+        if og is not None:
+            ids = [m.tip(g.gene) for g in og.genes]
+            hl = [i for i in ids if i is not None]
+            if len(hl) < len(ids):
+                notes.append(f"{len(ids) - len(hl)} of {len(ids)} members not in the tree")
+            focus = m.mrca(hl)
+            title += f" · {og.id}"
+        if gene is not None:
+            i = m.tip(gene)
+            if i is None:
+                notes.append(f"{gene} not in the tree")
+            else:
+                focus = i
+            title += f" · {gene}"
+        self.call_from_thread(self._push_tree, m, focus, hl, title, path, notes)
+
+    def _push_tree(self, m, focus: int, hl: list, title: str, path, notes: list) -> None:
+        from treeview.widget import TreeScreen
+        self.push_screen(TreeScreen(m, title=title, path=path, focus=focus, highlight=hl))
+        for n in notes:
+            self.notify(n, severity="warning")
+
     def _cur_res(self):
-        key = self._key_at_cursor(self.query_one("#res", DataTable))
+        key =self._key_at_cursor(self.query_one("#res", DataTable))
         return next((r for r in self.res_rows if r.hg == key), None)
 
     def _cur_og(self):

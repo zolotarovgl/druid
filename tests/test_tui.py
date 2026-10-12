@@ -3279,3 +3279,122 @@ def test_origin_from_results_tab_cache(cli, monkeypatch):
             assert app.view == "results" and len(calls) == 1
             assert _cells(app, "#ogs", 0)[5] == "root"
     _run(go())
+
+
+TREE_HG1 = ("((Mlei_v05_G1:1,Mlei_v05_G2:1)90:1,"
+            "(Hsap_ENSP1:1,(Hsap_ENSP2:1,Nvec_v1_g3:1)50:1)70:1);\n")
+
+
+def _write_trees(cfg):
+    (cfg.outdir / "possvm/tfs.A.HG1.generax.support.tree").write_text(TREE_HG1)
+    (cfg.outdir / "possvm_prev/tfs.A.HG1.treefile").write_text("(Mlei_v05_G1:1,Zzz_q1:1);\n")
+
+
+async def _press_t(app, pilot, pane, row):
+    t = app.query_one(pane)
+    t.focus()
+    t.move_cursor(row=row)
+    await pilot.pause()
+    await pilot.press("t")
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+    await pilot.pause()
+
+
+def test_t_opens_the_tree_at_the_hg_og_and_member(cli, monkeypatch):
+    write_results(_cfg())
+    _write_trees(_cfg())
+
+    async def go():
+        from treeview.widget import TreeScreen, TreeView
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        notes = []
+        orig = app.notify
+        monkeypatch.setattr(app, "notify",
+                            lambda msg, *a, **k: (notes.append(str(msg)), orig(msg, *a, **k)))
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG1"
+            await _press_t(app, pilot, "#res", 0)                     # HG: whole tree, root
+            assert isinstance(app.screen, TreeScreen)
+            tv = app.screen.query_one(TreeView)
+            m = tv.model
+            assert tv.cursor == 0 and m.highlight == set() and m.meta_cols[0] == "orthogroup"
+            assert "tfs.A.HG1 · possvm" in tv.border_title
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.view == "results" and not isinstance(app.screen, TreeScreen)
+            assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG1"     # state kept
+
+            await _press_t(app, pilot, "#ogs", 1)                     # OG: MRCA, members marked
+            assert app._cur_og().id == "tfs.A.HG1.1"
+            tv = app.screen.query_one(TreeView)
+            m = tv.model
+            want = {m.tip("Hsap_ENSP2"), m.tip("Nvec_v1_g3")}
+            assert m.highlight == want and tv.cursor == m.mrca(want) and m.support[tv.cursor] == 50
+            await pilot.press("escape", "escape")                     # clear highlight, leave
+            await pilot.pause()
+
+            await _press_t(app, pilot, "#members", 0)                 # member: its tip
+            tv = app.screen.query_one(TreeView)
+            assert tv.cursor == tv.model.tip("Hsap_ENSP2") and tv.model.highlight == set()
+            await pilot.press("escape")
+            await pilot.pause()
+
+            app.query_one("#res").focus()
+            await pilot.press("p")                                     # possvm_prev: other file
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await _press_t(app, pilot, "#res", 0)
+            tv = app.screen.query_one(TreeView)
+            assert "possvm_prev" in tv.border_title
+            assert {tv.model.name[i] for i in range(len(tv.model)) if tv.model.is_tip(i)} == {
+                "Mlei_v05_G1", "Zzz_q1"}
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not [n for n in notes if "tree" in n]
+    _run(go())
+
+
+def test_t_missing_tree_and_members_not_in_tree_notify(cli, monkeypatch):
+    write_results(_cfg())
+    (_cfg().outdir / "possvm/tfs.A.HG1.generax.support.tree").write_text("(x_1:1,y_2:1);\n")
+
+    async def go():
+        from treeview.widget import TreeScreen, TreeView
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        notes = []
+        orig = app.notify
+        monkeypatch.setattr(app, "notify",
+                            lambda msg, *a, **k: (notes.append(str(msg)), orig(msg, *a, **k)))
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            await _press_t(app, pilot, "#ogs", 0)                     # 3 members, none in tree
+            assert isinstance(app.screen, TreeScreen)
+            assert app.screen.query_one(TreeView).cursor == 0       # mrca([]) = root
+            assert any("3 of 3 members not in the tree" in n for n in notes)
+            await pilot.press("escape")
+            await pilot.pause()
+            await _press_t(app, pilot, "#res", 1)                     # tfs.A.HG11: no tree file
+            assert not isinstance(app.screen, TreeScreen) and app.view == "results"
+            assert any("no tree" in n and "tfs.A.HG11" in n for n in notes)
+    _run(go())
+
+
+def test_phylocli_keys_do_nothing_while_the_tree_is_open(cli):
+    write_results(_cfg())
+    _write_trees(_cfg())
+
+    async def go():
+        from treeview.widget import TreeScreen
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            await _press_t(app, pilot, "#res", 0)
+            assert isinstance(app.screen, TreeScreen)
+            gen = app._res_gen
+            await pilot.press("p", "R", "o", "f")          # phylocli keys: must not act underneath
+            await pilot.pause()
+            assert app.res_source == "possvm" and app._res_gen == gen and app.view == "results"
+            assert isinstance(app.screen, TreeScreen)
+    _run(go())
