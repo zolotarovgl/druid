@@ -150,3 +150,12 @@ Title: `<HG> · <source> · <OG or member or "">`.
 - Editing trees from phylocli (rename/export work inside treeview as they do standalone, writing
   next to the tree only on `w`, which asks for a path).
 - Vendoring any other tool; a GitHub remote for treeview.
+
+## Amendments (plan, 12/10/2026)
+
+Recorded while writing `docs/superpowers/plans/2026-10-12-phylocli-treeview.md`:
+- The overview's Results tab rows are groups, not HGs: `t` there only says `open a group's Results (o), then t`.
+- Highlighted tips are **bold underline** (reverse is the cursor).
+- The tree file is the `.ortholog_groups.csv` name minus that suffix (same files as the P2 table).
+- `KeysScreen` lives in treeview (`treeview/keys.py`); phylocli imports it from the vendored copy.
+- While a tree or key list is on screen, phylocli's own keys (except `q`) do nothing.
