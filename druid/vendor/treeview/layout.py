@@ -45,7 +45,8 @@ def node_label(m: TreeModel, i: int, mark: bool = True, name_width: int = 40) ->
     return t
 
 
-META_WIDTH = 20                         # metadata values (and column names) cut to this
+MIN_NAME = 12                           # names are cut no shorter than this to fit a narrow view
+META_WIDTH = 20                       # metadata values (and column names) cut to this
 META_GAP = 2                            # blanks after the widest row, and between columns
 
 
@@ -69,7 +70,7 @@ def _row_node(m: TreeModel, key) -> int:
     return next(s[0] for s in key if m.shown_as_leaf(s[0])) if isinstance(key, list) else key
 
 
-def _with_meta(m: TreeModel, rows: list) -> list:
+def with_meta(m: TreeModel, rows: list) -> list:
     """The metadata columns appended to the rows (in place) when the model has any.  They align
     at x = the widest row + META_GAP: every node row is padded to x (fillers are not), then a
     tip's row (a compact row's leaf) gets its values.  Internal nodes, collapsed clades and tips
@@ -104,7 +105,7 @@ def outline_rows(m: TreeModel, lengths: bool = True, name_width: int = 40,
                  meta: bool = False) -> list:
     """One row per visible node in preorder: two spaces per level, ▾ open / ▸ collapsed clade,
     then the label and (dim) `:branch length` (summed over contracted nodes above it).
-    meta=True: the metadata columns to the right (`_with_meta`)."""
+    meta=True: the metadata columns to the right (`with_meta`)."""
     rows, level = [], m.shown_levels()
     for i in m.visible():
         t = Text("  " * level[i])
@@ -116,7 +117,7 @@ def outline_rows(m: TreeModel, lengths: bool = True, name_width: int = 40,
         if lengths and i != 0:
             t.append(f" :{_fmt(m.shown_dist(i))}", style=DIM)
         rows.append((t, i))
-    return _with_meta(m, rows) if meta else rows
+    return with_meta(m, rows) if meta else rows
 
 
 def clado_order(m: TreeModel) -> list:
@@ -159,24 +160,45 @@ def columns(m: TreeModel, order: list, width: int, scaled: bool) -> dict:
     return {i: (end if m.shown_as_leaf(i) else 1 + level[i] * step) for i in order}
 
 
-def fit_width(m: TreeModel, view_width: int, width: int, scaled: bool = False, gap: int = 0,
-              name_width: int = 40) -> int:
-    """The branch width to draw the cladogram with: `width` when the widest row, labels included,
-    fits in `view_width` columns, else the largest smaller width (down to 2) that does.  Metadata
-    columns are not counted (they scroll).  The step per level reaches 1 at the smallest widths;
-    when even 2 overruns (a very deep tree), 2 is returned and the view scrolls."""
-    def fits(w: int) -> bool:
-        rows = _clado_rows(m, w, scaled, gap, name_width)
+def fit_rows(m: TreeModel, view_width: int, width: int, scaled: bool = False, gap: int = 0,
+             name_width: int = 40) -> tuple:
+    """(branch width, rows) to draw the cladogram with: `width` when the widest row, labels
+    included, fits in `view_width` columns, else the largest smaller width (down to 2) that does.
+    The rows are those of the chosen width, as `clado_rows(meta=False)` returns them (add the
+    metadata columns with `with_meta`); each width tried is laid out once, the chosen one is
+    not laid out again.  Metadata columns are not counted (they scroll).  The step per level
+    reaches 1 at the smallest widths; when even 2 overruns, the names are cut shorter (`…`, down
+    to MIN_NAME characters) until the rows fit, with the branch width 2; when even that overruns
+    (a very deep tree), the rows of width 2 with the full `name_width` are returned and the view
+    scrolls."""
+    built: dict = {}                   # (branch width, name width) -> rows
+
+    def fits(w: int, nw: int = name_width) -> bool:
+        built[w, nw] = rows = _clado_rows(m, w, scaled, gap, nw)
         return max(t.cell_len for t, _ in rows) <= view_width
-    if width <= 2 or fits(width):
-        return width
+    if width <= 2:
+        return width, _clado_rows(m, width, scaled, gap, name_width)
+    if fits(width):
+        return width, built[width, name_width]
     if not fits(2):
-        return 2
+        if name_width <= MIN_NAME or not fits(2, MIN_NAME):
+            return 2, built[2, name_width]
+        lo, hi = MIN_NAME, name_width      # fits(2, lo), not fits(2, hi)
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            lo, hi = (mid, hi) if fits(2, mid) else (lo, mid)
+        return 2, built[2, lo]
     lo, hi = 2, width                  # fits(lo), not fits(hi); row width grows with `width`
     while hi - lo > 1:
         mid = (lo + hi) // 2
         lo, hi = (mid, hi) if fits(mid) else (lo, mid)
-    return lo
+    return lo, built[lo, name_width]
+
+
+def fit_width(m: TreeModel, view_width: int, width: int, scaled: bool = False, gap: int = 0,
+              name_width: int = 40) -> int:
+    """The branch width of `fit_rows`, without the rows."""
+    return fit_rows(m, view_width, width, scaled, gap, name_width)[0]
 
 
 def clado_rows(m: TreeModel, width: int = 60, scaled: bool = False, gap: int = 0,
@@ -185,9 +207,9 @@ def clado_rows(m: TreeModel, width: int = 60, scaled: bool = False, gap: int = 0
     `gap` filler rows separate consecutive node rows; a filler is (Text, None) and holds only the
     vertical `│` connectors that run through it.  gap=-1 is the compact cladogram (see
     `_compact_rows`): its rows are (Text, [(node id, x0, x1), ...]) instead.
-    meta=True: the metadata columns to the right (`_with_meta`)."""
+    meta=True: the metadata columns to the right (`with_meta`)."""
     rows = _clado_rows(m, width, scaled, gap, name_width)
-    return _with_meta(m, rows) if meta else rows
+    return with_meta(m, rows) if meta else rows
 
 
 def _clado_rows(m: TreeModel, width: int, scaled: bool, gap: int, name_width: int) -> list:

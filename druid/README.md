@@ -222,6 +222,30 @@ the species and their counts, absent phyla last; the universe is the tips of
 default) ↔ `possvm_prev/` (raw IQ-TREE); `esc` goes back. Support `0.0 ⚠` is the GeneRax bug
 case: check `possvm_prev`. Files are read in the background.
 
+`t` (in a group's Results) opens the gene tree of the highlighted HG in the embedded
+treeview (vendored, below), from the `p` source (`possvm` or `possvm_prev`; the border title says
+which): on the HGs pane the whole tree; on the OGs pane the OG's MRCA with its members bold
+and underlined (`n`/`N` step through them; members missing from the tree are reported); on the
+members pane that member's tip. The `*.ortholog_groups.csv` columns show as metadata (`t` in the
+tree, `c` cycles the colouring). `esc` returns to Results unchanged (first `esc` clears the
+underline/search). Not in the header row of a table: `↓` first. A missing tree is a warning, never a crash.
+
+`?` lists every key, in phylocli and in the tree (`esc`, `?` or `q` closes it); the help line at
+the top of each is one line (`… · ? keys`).
+
+### Vendored treeview
+
+`phylocli/vendor/treeview/` is a generated copy of the treeview repo, imported as `treeview`.
+Never edit it in place: change treeview, commit it there, then run
+
+    TREEVIEW_REMOTE_REPO=host:path/to/treeview bash phylocli/vendor/update_treeview.sh
+
+It copies the bytes of the repo's HEAD commit (`git archive`, tests excluded; refuses a dirty
+repo) and records `source`, `commit` and `date` in `phylocli/vendor/treeview/VENDORED`. After
+re-vendoring run `pytest phylocli/tests/test_vendor.py`. Env: `TREEVIEW_REMOTE_REPO` (`host:path`,
+git runs over ssh, or a local path), `VENDOR_DEST` (directory that gets `treeview/`). While /users is over quota the
+source is the clone at `login1.hpc.crg.es:/no_backup/asebe/gzolotarov/treeview`.
+
 `search` and `cluster` are the first two columns and count FAMILIES (`ALL` = all families, a
 category row = its families, a family row = that family); the `HGs` column stays the group's HG
 count, so a family added to the genefam file shows as its own row with 0 HGs until `cluster`

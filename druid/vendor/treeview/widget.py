@@ -77,7 +77,8 @@ class TreeView(ScrollView, can_focus=True):
         self.pos: dict = {}                  # node id -> index in order
         self.rowof: dict = {}                # node id -> row (fillers excluded)
         self.span: dict = {}                 # compact: node id -> (x0, x1) highlighted on its row
-        self.branch_width = 20               # cladogram branch columns (fit_width)
+        self.branch_width = 20               # cladogram branch columns (fit_rows)
+        self._fit_w = 0                      # the view width the rows were fitted to
         self.show_meta = False               # metadata columns right of the labels (`t`)
         self.header: Optional[Text] = None   # their names: a fixed line 0 above the rows
 
@@ -96,15 +97,18 @@ class TreeView(ScrollView, can_focus=True):
         its nearest visible ancestor when it was collapsed or contracted away."""
         m = self.model
         was = self.cursor
-        view_w = self.size.width or 80
+        # the columns the rows can use: inside the border and the vertical scrollbar, which is
+        # 2 narrower than `size` on a tree taller than the screen
+        view_w = self.scrollable_content_region.width or 80
+        self._fit_w = view_w
         width = max(view_w - 40, 20)
-        if self.view == "clado":            # names never off-screen: shorter branches instead
-            width = layout.fit_width(m, view_w, width, scaled=self.scaled, gap=self.gap)
-        self.branch_width = width
         meta = self.show_meta and bool(m.meta_cols)
-        self.rows = (layout.outline_rows(m, meta=meta) if self.view == "outline"
-                     else layout.clado_rows(m, width=width, scaled=self.scaled, gap=self.gap,
-                                            meta=meta))
+        if self.view == "outline":
+            self.rows = layout.outline_rows(m, meta=meta)
+        else:                                # names never off-screen: shorter branches instead
+            width, rows = layout.fit_rows(m, view_w, width, scaled=self.scaled, gap=self.gap)
+            self.rows = layout.with_meta(m, rows) if meta else rows
+        self.branch_width = width
         self.header = layout.meta_header(m, self.rows) if meta else None
         if self.compact:                     # several nodes per row; the order is the cladogram's
             self.order = layout.clado_order(m)
@@ -122,7 +126,8 @@ class TreeView(ScrollView, can_focus=True):
             anc = [a for a in m.ancestors(self.cursor) if a in self.rowof]
             self.cursor = anc[0] if anc else self.order[0]
         w = max([t.cell_len for t, _ in self.rows] + [self.header.cell_len if self._hd else 1])
-        self.virtual_size = Size(w + 1, len(self.rows) + self._hd)
+        # exactly as wide as the widest line: a row that fills the view does not scroll
+        self.virtual_size = Size(w, len(self.rows) + self._hd)
         self.refresh()
         self.show_cursor()
         if self.cursor != was:                   # moved to an ancestor: the status line follows
@@ -133,6 +138,16 @@ class TreeView(ScrollView, can_focus=True):
 
     def on_resize(self) -> None:
         if self.view == "clado":
+            self.rebuild()
+
+    def watch_show_vertical_scrollbar(self, old: bool, new: bool) -> None:
+        """The scrollbar appears (or goes) after the rows are set, narrowing (widening) the view
+        without a resize: fit the cladogram to the width it has now."""
+        if self.view == "clado" and self.scrollable_content_region.width != self._fit_w:
+            self.call_after_refresh(self._refit)
+
+    def _refit(self) -> None:
+        if self.view == "clado" and self.scrollable_content_region.width != self._fit_w:
             self.rebuild()
 
     def render_line(self, y: int) -> Strip:
