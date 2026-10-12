@@ -14,7 +14,7 @@
 
 - Python 3.9 (cluster `phylo` env 3.9.21). No `match`, no `X | Y` types at runtime (string annotations only, with `from __future__ import annotations`).
 - Test interpreter, both repos: `PY=/tmp/claude-1000/-home-grygoriyzolotarov-Documents-projects-phylogenies/3dad6ea4-c859-4fe6-b319-93a358944ac8/scratchpad/py39/bin/python` (has textual 8.2.8, ete3, typer, yaml, pytest).
-- treeview repo: edit files through the mount `/home/grygoriyzolotarov/ant/gzolotarov/projects/treeview`; run tests there with `cd /home/grygoriyzolotarov/ant/gzolotarov/projects/treeview && $PY -m pytest treeview/tests -q -p no:cacheprovider`; **commit only via ssh**: `ssh -o BatchMode=yes login1.hpc.crg.es 'cd ~/projects/treeview && git add -A treeview && git commit -m "..."'` (git on the mount fails with "dubious ownership"; do not change `safe.directory`).
+- treeview repo: edit files through the mount `/home/grygoriyzolotarov/no_backup/treeview`; run tests there with `cd /home/grygoriyzolotarov/no_backup/treeview && $PY -m pytest treeview/tests -q -p no:cacheprovider`; **commit only via ssh**: `ssh -o BatchMode=yes login1.hpc.crg.es 'cd /no_backup/asebe/gzolotarov/treeview && git add -A treeview && git commit -m "..."'` (git on the mount fails with "dubious ownership"; do not change `safe.directory`).
 - phylocli repo: `/home/grygoriyzolotarov/Documents/projects/phylogenies/phylocli-wt`, branch `phylocli`; tests `cd <repo> && $PY -m pytest phylocli/tests -q -p no:cacheprovider`. Never write into v3 (`~/ant/gzolotarov/projects/2022_scRNAseq_Mlei/Phylogenies_v3`); never run Nextflow.
 - Edit code with the Edit/Write tools, never `sed -i` or python string-replace.
 - Commit only when the parsed pytest summary shows 0 failed (do not chain `pytest ... | tail && git commit`).
@@ -28,7 +28,7 @@
 3. The tree file is found from the `.ortholog_groups.csv` name, which is `<HG>.<tree file name>.ortholog_groups.csv` (as `read_ogs` already finds it): tree = csv name minus `.ortholog_groups.csv`. This gives `<HG>.generax.support.tree` in `possvm/` and `<HG>.treefile` in `possvm_prev/`, as the spec's table says, without hard-coding either.
 4. From the members pane, `t` focuses the member's tip with **no** highlight (spec table); from the OGs pane it highlights the OG's members.
 5. The key-coverage tests check that **every binding of the app appears in the union of its key tables**, plus spot checks per view (not every binding is live in every view).
-6. ⚠ `/users/asebe` is out of quota (12/10/2026: every write on the cluster fails with "No space left on device"). treeview commits (Tasks 1–4) need it fixed. Before Task 1, test: `ssh -o BatchMode=yes login1.hpc.crg.es 'touch ~/projects/treeview/.w && rm ~/projects/treeview/.w && echo OK'`. If it fails, STOP and report to the controller; do not develop treeview anywhere else.
+6. ⚠ `/users/asebe` is out of quota (12/10/2026: every write there fails with "No space left on device"; SIT has not rescanned). Grygoriy, 12/10/2026: "use no_backup". treeview Tasks 1–4 run in a temporary clone at cluster `/no_backup/asebe/gzolotarov/treeview` (origin = `~/projects/treeview`, cloned at b2f33c4; 62 tests pass), mounted locally at `/home/grygoriyzolotarov/no_backup/treeview` (sshfs). When `/users` writes again, the controller pulls it back: `ssh login1.hpc.crg.es 'cd ~/projects/treeview && git pull /no_backup/asebe/gzolotarov/treeview main'`. Task 5 vendors from the clone: `TREEVIEW_SRC=/home/grygoriyzolotarov/no_backup/treeview TREEVIEW_REMOTE_REPO=login1.hpc.crg.es:/no_backup/asebe/gzolotarov/treeview bash phylocli/vendor/update_treeview.sh` (same commits, so `VENDORED` stays valid after the pull-back).
 
 ## Review Focus
 
@@ -91,7 +91,7 @@ def test_highlighted_tip_label_is_bold_underline():
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `cd /home/grygoriyzolotarov/ant/gzolotarov/projects/treeview && $PY -m pytest treeview/tests/test_model.py treeview/tests/test_layout.py -q -p no:cacheprovider`
+Run: `cd /home/grygoriyzolotarov/no_backup/treeview && $PY -m pytest treeview/tests/test_model.py treeview/tests/test_layout.py -q -p no:cacheprovider`
 Expected: FAIL — `cols []` for the POSSVM file, `AttributeError: 'TreeModel' object has no attribute 'tip'`, `highlight`.
 
 - [ ] **Step 3: Implement**
@@ -155,13 +155,13 @@ After `ancestors` add:
 
 - [ ] **Step 4: Run the whole suite**
 
-Run: `cd /home/grygoriyzolotarov/ant/gzolotarov/projects/treeview && $PY -m pytest treeview/tests -q -p no:cacheprovider`
+Run: `cd /home/grygoriyzolotarov/no_backup/treeview && $PY -m pytest treeview/tests -q -p no:cacheprovider`
 Expected: all pass (62 before this task + 2 new = 64; the edited `test_meta_csv_and_bad_files` counts once).
 
 - [ ] **Step 5: Commit (via ssh)**
 
 ```bash
-ssh -o BatchMode=yes login1.hpc.crg.es 'cd ~/projects/treeview && git add -A treeview && git commit -q -m "model: POSSVM tab-separated .csv as --meta; mrca, tip, highlight
+ssh -o BatchMode=yes login1.hpc.crg.es 'cd /no_backup/asebe/gzolotarov/treeview && git add -A treeview && git commit -q -m "model: POSSVM tab-separated .csv as --meta; mrca, tip, highlight
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git log --oneline -1'
 ```
@@ -281,7 +281,7 @@ Edit existing tests in `treeview/tests/test_app.py` (they test the old prompt an
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `cd /home/grygoriyzolotarov/ant/gzolotarov/projects/treeview && $PY -m pytest treeview/tests/test_app.py -q -p no:cacheprovider`
+Run: `cd /home/grygoriyzolotarov/no_backup/treeview && $PY -m pytest treeview/tests/test_app.py -q -p no:cacheprovider`
 Expected: FAIL — `ModuleNotFoundError: treeview.keys`.
 
 - [ ] **Step 3: Implement `treeview/keys.py`**
@@ -412,13 +412,13 @@ The `?` typed into an open prompt: the `Input` has focus and consumes printable 
 
 - [ ] **Step 5: Run the whole suite**
 
-Run: `cd /home/grygoriyzolotarov/ant/gzolotarov/projects/treeview && $PY -m pytest treeview/tests -q -p no:cacheprovider`
+Run: `cd /home/grygoriyzolotarov/no_backup/treeview && $PY -m pytest treeview/tests -q -p no:cacheprovider`
 Expected: all pass (64 + 4 new = 68).
 
 - [ ] **Step 6: Commit (via ssh)**
 
 ```bash
-ssh -o BatchMode=yes login1.hpc.crg.es 'cd ~/projects/treeview && git add -A treeview && git commit -q -m "? key screen (keys.py), one-line help, c cycles colour modes
+ssh -o BatchMode=yes login1.hpc.crg.es 'cd /no_backup/asebe/gzolotarov/treeview && git add -A treeview && git commit -q -m "? key screen (keys.py), one-line help, c cycles colour modes
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git log --oneline -1'
 ```
@@ -490,7 +490,7 @@ Add `from treeview import layout` to the imports of `test_app.py` if it is not t
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `cd /home/grygoriyzolotarov/ant/gzolotarov/projects/treeview && $PY -m pytest treeview/tests/test_layout.py treeview/tests/test_app.py -q -p no:cacheprovider -k "fit"`
+Run: `cd /home/grygoriyzolotarov/no_backup/treeview && $PY -m pytest treeview/tests/test_layout.py treeview/tests/test_app.py -q -p no:cacheprovider -k "fit"`
 Expected: FAIL — `AttributeError: module 'treeview.layout' has no attribute 'fit_width'`.
 
 - [ ] **Step 3: Implement**
@@ -530,14 +530,14 @@ with
 
 - [ ] **Step 4: Run the whole suite**
 
-Run: `cd /home/grygoriyzolotarov/ant/gzolotarov/projects/treeview && $PY -m pytest treeview/tests -q -p no:cacheprovider`
+Run: `cd /home/grygoriyzolotarov/no_backup/treeview && $PY -m pytest treeview/tests -q -p no:cacheprovider`
 Expected: all pass (68 + 2 = 70). If an existing layout test pinned a 2-column step at a narrow `width`, it encoded the overflow this task removes: update its expected value to the new drawing and say so in the report (quote the old and new expectation).
 
 - [ ] **Step 5: Check the real terminal case**
 
 Run (headless, prints the widest row at 80 and 200 columns):
 ```bash
-cd /home/grygoriyzolotarov/ant/gzolotarov/projects/treeview && $PY - <<'EOF'
+cd /home/grygoriyzolotarov/no_backup/treeview && $PY - <<'EOF'
 import asyncio
 from treeview import model
 from treeview.app import TreeApp
@@ -558,7 +558,7 @@ Expected: `80 76 <n ≤ 76>` and `200 196 181`.
 - [ ] **Step 6: Commit (via ssh)**
 
 ```bash
-ssh -o BatchMode=yes login1.hpc.crg.es 'cd ~/projects/treeview && git add -A treeview && git commit -q -m "cladogram: shorter branches so tip names fit the terminal
+ssh -o BatchMode=yes login1.hpc.crg.es 'cd /no_backup/asebe/gzolotarov/treeview && git add -A treeview && git commit -q -m "cladogram: shorter branches so tip names fit the terminal
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git log --oneline -1'
 ```
@@ -616,7 +616,7 @@ def test_pushed_screen_focus_highlight_and_esc():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cd /home/grygoriyzolotarov/ant/gzolotarov/projects/treeview && $PY -m pytest treeview/tests/test_app.py -q -p no:cacheprovider -k pushed_screen_focus`
+Run: `cd /home/grygoriyzolotarov/no_backup/treeview && $PY -m pytest treeview/tests/test_app.py -q -p no:cacheprovider -k pushed_screen_focus`
 Expected: FAIL — `TypeError: __init__() got an unexpected keyword argument 'focus'`.
 
 - [ ] **Step 3: Implement**
@@ -680,13 +680,13 @@ with
 
 - [ ] **Step 4: Run the whole suite**
 
-Run: `cd /home/grygoriyzolotarov/ant/gzolotarov/projects/treeview && $PY -m pytest treeview/tests -q -p no:cacheprovider`
+Run: `cd /home/grygoriyzolotarov/no_backup/treeview && $PY -m pytest treeview/tests -q -p no:cacheprovider`
 Expected: all pass (71).
 
 - [ ] **Step 5: Commit (via ssh)**
 
 ```bash
-ssh -o BatchMode=yes login1.hpc.crg.es 'cd ~/projects/treeview && git add -A treeview && git commit -q -m "TreeScreen: focus= and highlight= for embedding callers
+ssh -o BatchMode=yes login1.hpc.crg.es 'cd /no_backup/asebe/gzolotarov/treeview && git add -A treeview && git commit -q -m "TreeScreen: focus= and highlight= for embedding callers
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" && git log --oneline -1'
 ```
@@ -820,7 +820,8 @@ sys.path.insert(0, str(ROOT / "phylocli" / "vendor"))   # vendored treeview (ven
 
 - [ ] **Step 5: Vendor for real**
 
-Run: `cd /home/grygoriyzolotarov/Documents/projects/phylogenies/phylocli-wt && bash phylocli/vendor/update_treeview.sh && cat phylocli/vendor/treeview/VENDORED && ls phylocli/vendor/treeview`
+Run (the temporary `/no_backup` clone, plan-time ruling 6):
+`cd /home/grygoriyzolotarov/Documents/projects/phylogenies/phylocli-wt && TREEVIEW_SRC=/home/grygoriyzolotarov/no_backup/treeview TREEVIEW_REMOTE_REPO=login1.hpc.crg.es:/no_backup/asebe/gzolotarov/treeview bash phylocli/vendor/update_treeview.sh && cat phylocli/vendor/treeview/VENDORED && ls phylocli/vendor/treeview`
 Expected: `commit:` = the Task 4 commit; files `__init__.py __main__.py app.py keys.py layout.py model.py widget.py VENDORED`, no `tests/`.
 
 - [ ] **Step 6: Run the whole phylocli suite**
