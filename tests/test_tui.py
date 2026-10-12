@@ -2034,10 +2034,10 @@ def test_strip_with_help_and_no_logo_is_in_every_view(cli):
                 helps[view] = app._help_text
             assert len(set(helps.values())) == 3
             from rich.text import Text
-            assert "o: results" in helps["overview"]
-            assert "█ done" in Text.from_markup(helps["overview"]).plain
-            assert "resubmit" in helps["hgs"]
-            assert "possvm_prev" in helps["results"]
+            plain = {v: Text.from_markup(h).plain for v, h in helps.items()}
+            assert all("? keys" in p and "\n" not in p for p in plain.values())
+            assert "█ done" in plain["overview"]                     # the glyph legend stays
+            assert plain["hgs"].startswith("HG view") and plain["results"].startswith("Results")
             assert "enter: open" not in app.query_one("#ovfoot").render().plain
     _run(go())
 
@@ -3523,3 +3523,33 @@ def test_t_on_the_overview_results_tab_asks_to_open_a_group(cli, monkeypatch):
             assert _tree_screens(app) == 0
             assert any("open a group's Results (o), then t" in n for n in notes)
     _run(go())
+
+
+def test_every_binding_is_in_a_key_table_and_question_mark_opens_it(cli):
+    from textual.binding import Binding
+    from treeview.keys import KeysScreen, missing_keys
+    groups = [g for _, gs in tui.KEYS.values() for g in gs]
+    bindings = [b if isinstance(b, Binding) else Binding(*b)
+                for b in tui.PhyloApp.BINDINGS + tui.SortTable.BINDINGS]
+    assert missing_keys(bindings, groups) == []
+    assert set(tui.KEYS) == {"overview", "overview_results", "hgs", "results"}
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(150, 40)) as pilot:
+            app.load_now()
+            await pilot.pause()
+            await pilot.press("question_mark")
+            await pilot.pause()
+            assert isinstance(app.screen, KeysScreen)
+            text = app.screen.query_one("#keys").render().plain
+            assert "results of the group" in text
+            await pilot.press("q")                                   # closes the list only
+            await pilot.pause()
+            assert not isinstance(app.screen, KeysScreen) and app.is_running
+    _run(go())
+
+
+def test_results_key_table_lists_t():
+    _, groups = tui.KEYS["results"]
+    assert any(k == "t" for _, rows in groups for k, _ in rows)

@@ -457,6 +457,50 @@ class Spinner(Static):
         self.update(f"{SPIN_FRAMES[self.frame]} {self.text}", layout=False)
 
 
+# The `?` key screens (Grygoriy, 12/10/2026): one table per view; the help strip is one line.
+KEYS = {
+    "overview": ("Overview · Jobs", [
+        ("Move", [("↑ ↓ ← →", "move · ↑ on the first row: the header (←/→ column, enter/s sort)"),
+                  ("tab shift+tab", "Results tab")]),
+        ("Open", [("enter", "open the group at that stage (HG view)"),
+                  ("o", "results of the group")]),
+        ("Group & sort", [("c", "group by category"), ("f", "group by family"),
+                          ("s", "sort by the column"), ("h", "only actionable at the column")]),
+        ("Other", [("R", "refresh"), ("?", "this list"), ("q", "quit")]),
+        ("Notes", [("", "search/cluster count families, the other stages HGs"),
+                   ("", "default view: failed+ready")])]),
+    "overview_results": ("Overview · Results tab", [
+        ("Move", [("↑ ↓ ← →", "move · ↑ on the first row: the header (←/→ column, enter/s sort)"),
+                  ("tab shift+tab", "Jobs tab")]),
+        ("Open", [("enter o", "open the group's Results"),
+                  ("t", "trees open from a group's Results (o, then t)")]),
+        ("Source", [("p", "possvm ↔ possvm_prev")]),
+        ("Group & sort", [("c", "group by category"), ("f", "group by family"),
+                          ("s", "sort by the column"), ("h", "hide rows with 0 in the column")]),
+        ("Other", [("R", "re-read"), ("?", "this list"), ("q", "quit")]),
+        ("Notes", [("⚠", "sup 0 = OGs with support 0 (GeneRax bug case)")])]),
+    "hgs": ("HG view", [
+        ("Move", [("tab shift+tab", "next / previous pane"), ("↑ ↓", "move"),
+                  ("enter", "on stages: pick the stage")]),
+        ("Select & act", [("space", "select the HG"), ("a", "select all"),
+                          ("r", "resubmit the selected"), ("l", "log of the HG")]),
+        ("Filter", [("f", "cycle the filter (" + ", ".join(FILTERS) + ")")]),
+        ("Other", [("o", "results of the HG's group"), ("esc", "back to the overview"),
+                   ("R", "refresh"), ("?", "this list"), ("q", "quit")]),
+        ("Notes", [("", "default filter: failed+ready; the states are "
+                    + " · ".join(STATE_STYLE))])]),
+    "results": ("Results", [
+        ("Move", [("tab shift+tab", "next / previous pane"), ("↑ ↓", "move"),
+                  ("s", "sort (↑ on the first row: the header)")]),
+        ("Look", [("/", "filter this pane"), ("p", "possvm ↔ possvm_prev"),
+                  ("t", "gene tree: HG → whole tree · OG → its MRCA, members marked · "
+                        "member → its tip")]),
+        ("Other", [("esc", "clear filters, then back"), ("R", "refresh"), ("?", "this list"),
+                   ("q", "quit")]),
+        ("Notes", [("⚠", "support 0 = GeneRax bug case; check possvm_prev")])]),
+}
+
+
 class PhyloApp(App):
     TITLE = "phylocli"
     CSS = """
@@ -504,6 +548,7 @@ class PhyloApp(App):
         Binding("p", "toggle_source", "possvm/prev"),
         Binding("slash", "member_filter", "filter members"),
         Binding("R", "refresh", "refresh"),
+        Binding("question_mark", "keys", "keys"),
         Binding("q", "quit", "quit"),
     ]
 
@@ -683,35 +728,23 @@ class PhyloApp(App):
 
     # key help in the top strip: per view, replaces the footers' legend lines
     def _help_for(self, view: str) -> str:
-        glyphs = " ".join(f"[{fg}]{ch}[/] {name}" for (ch, fg), name in
-                          zip(self.OV_GLYPHS, ("done", "running", "ready/failed", "blocked")))
-        if view == "hgs":
-            return "\n".join([
-                "[b]HG view[/]",
-                "tab / shift+tab: next pane · up/down: move · enter on stages: pick the stage",
-                "space: select HG · a: select all · r: resubmit selected · l: log of the HG",
-                "f: cycle the filter (" + ", ".join(FILTERS) + ")",
-                "o: results of the HG's group · esc: back to the overview · R: refresh · q: quit",
-                "default filter: failed+ready; the states are " + " · ".join(STATE_STYLE)])
-        if view == "results":
-            return "\n".join([
-                "[b]Results[/]",
-                "/: filter this pane · p: possvm ↔ possvm_prev · tab: pane",
-                "esc: clear filters, then back · R: refresh · q: quit"])
-        if self.tab == "results":                # the first screen's Results tab
-            return "\n".join([
-                "[b]Overview · Results tab[/]  POSSVM output per group",
-                "enter / o: open the group's Results · p: possvm ↔ possvm_prev · tab: Jobs",
-                "s: sort by the column · h: hide rows with 0 in the column · c/f: category/family",
-                "↑ on the first row: header (←/→ column, enter/s sort) · R: re-read · q: quit",
-                "⚠ sup 0 = OGs with support 0 (GeneRax bug case)"])
-        return "\n".join([
-            "[b]Overview[/]",
-            glyphs,
-            "search/cluster count families, the other stages HGs",
-            "enter: open the group at that stage · o: results · c/f: category/family · tab: Results",
-            "s: sort by the column · h: only actionable at the column · R: refresh · q: quit",
-            "default view: failed+ready"])
+        key = "overview_results" if view == "overview" and self.tab == "results" else view
+        title = KEYS.get(key, KEYS["overview"])[0]
+        if key == "overview":
+            glyphs = " ".join(f"[{fg}]{ch}[/] {name}" for (ch, fg), name in
+                              zip(self.OV_GLYPHS, ("done", "running", "ready/failed", "blocked")))
+            return f"[b]{title}[/]  {glyphs}  · ? keys"
+        return f"[b]{title}[/]  · ? keys"
+
+    def _keys_view(self) -> str:
+        if self.view == "overview":
+            return "overview_results" if self.tab == "results" else "overview"
+        return self.view
+
+    def action_keys(self) -> None:
+        from treeview.keys import KeysScreen     # vendored (core puts phylocli/vendor on sys.path)
+        title, groups = KEYS[self._keys_view()]
+        self.push_screen(KeysScreen(f"phylocli keys · {title}", groups))
 
     def _update_help(self) -> None:
         self._help_text = self._help_for(self.view)
