@@ -12,6 +12,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "workflow"))
+sys.path.insert(0, str(ROOT / "phylocli" / "vendor"))   # vendored treeview (vendor/update_treeview.sh)
 import report_status  # noqa: E402
 
 FAMILY_STAGES = ["search", "cluster"]                 # unit: gene family <pref>.<family> (step1)
