@@ -244,6 +244,7 @@ It copies the bytes of the repo's HEAD commit (`git archive`, tests excluded; re
 repo) and records `source`, `commit` and `date` in `phylocli/vendor/treeview/VENDORED`. After
 re-vendoring run `pytest phylocli/tests/test_vendor.py`. Env: `TREEVIEW_REMOTE_REPO` (`host:path`,
 git runs over ssh, or a local path), `VENDOR_DEST` (directory that gets `treeview/`).
+
 `search` and `cluster` are the first two columns and count FAMILIES (`ALL` = all families, a
 category row = its families, a family row = that family); the `HGs` column stays the group's HG
 count, so a family added to the genefam file shows as its own row with 0 HGs until `cluster`
