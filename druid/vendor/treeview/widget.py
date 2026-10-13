@@ -23,11 +23,14 @@ KEYS = [
     ("Move", [("↑ ↓", "move the cursor"), ("pgup pgdn", "page up / down"),
               ("home end", "first / last node"), ("← →", "scroll sideways")]),
     ("Views", [("v", "outline ↔ cladogram"), ("l", "branch lengths to scale (cladogram)"),
-               ("+ -", "tip spacing (- below 0: compact cladogram)"),
-               ("t", "metadata columns on / off")]),
+               ("+ -", "tip spacing (starts compact: one row per leaf; + spreads the rows)"),
+               ("t", "metadata columns on / off"),
+               ("[ ]", "metadata columns narrower / wider")]),
     ("Collapse", [("enter space", "collapse / expand the clade"),
                   ("s", "contract branches with support < x (polytomies)"),
-                  ("m", "collapse single-species clades"), ("e", "expand all")]),
+                  ("m", "collapse single-species clades"),
+                  ("g", "collapse orthogroups (else the first metadata column)"),
+                  ("e", "expand all")]),
     ("Search", [("/", "search names and metadata"), ("n N", "next / previous hit")]),
     ("Colour", [("c", "cycle colour: species → each metadata column → species")]),
     ("Edit & export", [("r", "rename the clade"), ("w", "write the tree as shown (newick)")]),
@@ -59,17 +62,23 @@ class TreeView(ScrollView, can_focus=True):
         Binding("plus", "gap(1)", "spacing +", show=False),
         Binding("minus", "gap(-1)", "spacing -", show=False),
         Binding("m", "collapse_species", "single-species"),
+        Binding("g", "collapse_groups", "orthogroups"),
         Binding("e", "expand_all", "expand all"),
         Binding("t", "toggle_meta", "metadata"),
+        Binding("left_square_bracket", "meta_width(-1)", "metadata narrower", show=False),
+        Binding("right_square_bracket", "meta_width(1)", "metadata wider", show=False),
     ]
+    META_STEP = 5                            # `[` `]`: columns per press
+    META_MIN = 4
 
     def __init__(self, model: TreeModel, view: str = "clado", **kwargs):
         super().__init__(**kwargs)
         self.model = model
         self.view = view
         self.scaled = False                  # cladogram: branch lengths to scale
-        self.gap = 0                         # cladogram: filler rows between node rows (0-3);
-        #                                      -1 = compact (one row per leaf)
+        self.gap = -1                        # cladogram: filler rows between node rows (0-3);
+        #                                      -1 = compact (one row per leaf), the default
+        #                                      (Grygoriy, 13/10/2026)
         self.cursor = 0                      # node id
         self.rows: list = []                 # (Text, node id); id None = a filler row.  Compact:
         #                                      (Text, [(node id, x0, x1), ...])
@@ -243,6 +252,31 @@ class TreeView(ScrollView, can_focus=True):
         self.rebuild()
         self.post_message(TreeView.Note(self, f"{n} single-species clades collapsed"))
 
+    def action_collapse_groups(self) -> None:
+        """g: collapse the maximal clades of one orthogroup (model.collapse_by_group)."""
+        m = self.model
+        if not m.meta_cols:
+            self.post_message(TreeView.Note(self, "no metadata (--meta)"))
+            return
+        n = m.collapse_by_group()
+        self.rebuild()
+        self.post_message(TreeView.Note(self, f"{n} {m.group_column()} clades collapsed"))
+
+    def action_meta_width(self, d: int) -> None:
+        """[ / ]: metadata values and column names cut META_STEP narrower / wider, from META_MIN
+        up to the width that cuts nothing."""
+        m = self.model
+        if not m.meta_cols:
+            self.post_message(TreeView.Note(self, "no metadata (--meta)"))
+            return
+        full = max(m.meta_width_max(), self.META_MIN)
+        m.meta_width = min(max(m.meta_width + d * self.META_STEP, self.META_MIN), full)
+        self.rebuild()
+        note = f"metadata width {m.meta_width}" + (" (full)" if m.meta_width == full else "")
+        if not self.show_meta:
+            note += " · columns off (t)"
+        self.post_message(TreeView.Note(self, note))
+
     def action_expand_all(self) -> None:
         self.model.expand_all()
         self._changed()
@@ -284,6 +318,8 @@ def describe(m: TreeModel, i: int) -> str:
         head = f"{m.name[i]} · {m.species(i)}"
     else:
         head = f"{m.name[i] or 'clade'} · {m.ntips[i]} tips"
+        if i in m.collapsed and m.group.get(i):
+            head += f" · group {m.group[i]}"
         if m.support[i] is not None:
             head += f" · support {m.support[i]:g}"
     head += f" · length {m.shown_dist(i):g}" if i else ""

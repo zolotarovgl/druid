@@ -5,7 +5,7 @@ from __future__ import annotations
 from rich.cells import cell_len
 from rich.text import Text
 
-from treeview.model import TreeModel
+from treeview.model import TreeModel, hash_colour
 
 DIM = "bright_black"
 
@@ -21,7 +21,9 @@ def _cut(s: str, width: int) -> str:
 
 def node_label(m: TreeModel, i: int, mark: bool = True, name_width: int = 40) -> Text:
     """A node's text: tip name (species colour); a collapsed clade `▶ name (n tips)` (no ▶ with
-    mark=False: the outline has its own ▸); an internal node its name and support (dim).
+    mark=False: the outline has its own ▸), named by its group when `g` collapsed it (in the
+    group's colour while colouring by the group column); an internal node its name and support
+    (dim).
     Tip and clade names are cut to `name_width` characters with `…` (the full name is in the
     status line)."""
     t = Text()
@@ -33,7 +35,12 @@ def node_label(m: TreeModel, i: int, mark: bool = True, name_width: int = 40) ->
     if i in m.collapsed:
         if mark:
             t.append("▶ ", style="bold")
-        t.append(nm or "clade", style="bold")
+        g = m.group.get(i)
+        if g:
+            style = "bold " + hash_colour(g) if m.colour_by == m.group_column() else "bold"
+            t.append(_cut(g[len(m.group_prefix):], name_width), style=style)
+        else:
+            t.append(nm or "clade", style="bold")
         t.append(f" ({m.ntips[i]} tips)", style=DIM)
         if m.support[i] is not None:
             t.append(f" {_fmt(m.support[i])}", style=DIM)
@@ -46,21 +53,20 @@ def node_label(m: TreeModel, i: int, mark: bool = True, name_width: int = 40) ->
 
 
 MIN_NAME = 12                           # names are cut no shorter than this to fit a narrow view
-META_WIDTH = 20                       # metadata values (and column names) cut to this
 META_GAP = 2                            # blanks after the widest row, and between columns
 
 
 def _meta_widths(m: TreeModel) -> list:
     """Width of each metadata column: its name or its longest value over the visible tips,
-    whichever is longer, at most META_WIDTH."""
+    whichever is longer, at most m.meta_width."""
     tips = [m.meta[i] for i in m.visible() if i in m.meta]
-    return [min(max([len(c)] + [len(r[k]) for r in tips]), META_WIDTH)
+    return [min(max([len(c)] + [len(r[k]) for r in tips]), m.meta_width)
             for k, c in enumerate(m.meta_cols)]
 
 
 def _meta_cells(values: list, widths: list) -> str:
-    """Values cut to META_WIDTH with `…`, each padded to its column (the last one is not)."""
-    cells = [_cut(v, META_WIDTH) for v in values]
+    """Values cut to their column's width with `…`, each padded to it (the last one is not)."""
+    cells = [_cut(v, w) for v, w in zip(values, widths)]
     padded = [c.ljust(w) for c, w in zip(cells[:-1], widths)] + cells[-1:]
     return (" " * META_GAP).join(padded)
 

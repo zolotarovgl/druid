@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -154,6 +155,9 @@ class TreeModel:
             if not self.children[i] and meta and self.name[i] in meta:
                 self.meta[i] = (list(meta[self.name[i]]) + [""] * n)[:n]
         self.meta_matched = len(self.meta)
+        self.meta_width = 20             # metadata values and column names cut to this (`[` `]`)
+        self.group: dict = {}            # clade collapsed by `g` -> its group value
+        self.group_prefix = ""           # the part of the group values not shown in the labels
         self.colour_by = ""              # a metadata column, or "" = species colours
         self.highlight: set = set()      # node ids drawn bold underline (an embedding caller's
         #                                  selection, e.g. phylocli's OG members)
@@ -357,7 +361,48 @@ class TreeModel:
         self.collapsed |= hit
         return len(hit)
 
+    def group_column(self) -> str:
+        """The column `g` collapses by: `orthogroup` when there is one, else the first metadata
+        column ("" without metadata)."""
+        if "orthogroup" in self.meta_cols:
+            return "orthogroup"
+        return self.meta_cols[0] if self.meta_cols else ""
+
+    def collapse_by_group(self) -> int:
+        """Collapse every maximal shown clade (not the root, not contracted) whose tips all carry
+        one non-empty value of group_column(); maximal = its shown parent's tips do not.  A group
+        that is not a clade gives one collapsed clade per maximal piece; single tips and tips
+        without a value stay.  Each collapsed clade's value goes to `group`; `group_prefix` is the
+        start every value shares, less its last dotted part (`tfs.T-box.HG1.0:T/Tbx19` and
+        `tfs.T-box.HG1.12:Tbx2/Tbx3` -> `tfs.T-box.`), which the labels leave out."""
+        col = self.group_column()
+        if not col:
+            return 0
+        k = len(self.name)
+        val = [""] * k                   # the one value of a node's tips, or "" if mixed / none
+        for i in range(k - 1, -1, -1):
+            if self.is_tip(i):
+                val[i] = self.meta_value(i, col)
+            else:
+                s = {val[c] for c in self.children[i]}
+                val[i] = s.pop() if len(s) == 1 else ""
+        hit = {i for i in range(1, k) if self.children[i] and val[i]
+               and i not in self.contracted and not val[self.shown_parent(i)]}
+        c = self.meta_cols.index(col)
+        p = os.path.commonprefix(sorted({r[c] for r in self.meta.values() if r[c]}))
+        p = p[:p.rfind(".") + 1]         # whole dotted parts only
+        self.group_prefix = p[:p[:-1].rfind(".") + 1]       # less the last one (HG1.)
+        self.collapsed |= hit
+        self.group.update({i: val[i] for i in hit})
+        return len(hit)
+
+    def meta_width_max(self) -> int:
+        """The longest metadata value or column name: the width that cuts nothing."""
+        return max([len(c) for c in self.meta_cols]
+                   + [len(v) for r in self.meta.values() for v in r] + [1])
+
     def expand_all(self) -> None:
         """Clear both the collapsed and the contracted nodes."""
         self.collapsed.clear()
         self.contracted.clear()
+        self.group.clear()
