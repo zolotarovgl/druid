@@ -165,7 +165,7 @@ Sources (code: `druid/history.py`):
 - **druid**: `<runs_dir>/*/jobs.tsv` + `ids_<k>.txt` + `array_<k>.sbatch` (requested), one `sacct`
   call for state / MaxRSS / elapsed (no `sacct`: state "unknown"). Log =
   `<runs_dir>/<run>/logs/<stage>_<job>_<task>.err`.
-- **Cache**: parsed attempts of FINISHED Nextflow runs are stored in `<project>/history/nf_<run>.tsv`
+- **Cache**: parsed attempts of FINISHED Nextflow runs are stored in `<runs_dir>/../history/nf_<run>.tsv`
   (`$DRUID_HISTORY` overrides the dir; it must be inside the project) and read instead of calling
   nextflow again; runs still marked running (`-`) are re-queried every time. The first call on a
   long history is slow (one nextflow start per run, ~2.5 min for 25 runs on 02/10/2026); later

@@ -112,3 +112,43 @@ def test_a_flag_the_tool_rejects_is_not_reported_as_its_version(tmp_path, monkey
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", str(fake.parent) + ":" + __import__("os").environ["PATH"])
     assert doctor._version("hmmlike") == "# HMMER 3.4 (Aug 2023)"
+
+
+def test_version_probe_gets_no_stdin(monkeypatch):
+    seen = {}
+
+    class R:
+        returncode, stdout, stderr = 0, "tool 1.2\n", ""
+
+    def fake_run(cmd, **kw):
+        seen.update(kw)
+        return R()
+    monkeypatch.setattr(doctor.subprocess, "run", fake_run)
+    assert doctor._version("whatever") == "tool 1.2"
+    assert seen.get("stdin") is doctor.subprocess.DEVNULL
+
+
+def test_relative_proteomes_dir_is_resolved_against_the_project(results_tree, tmp_path, monkeypatch):
+    import yaml
+    cfg, root = results_tree
+    (root / "prot").mkdir()
+    (root / "prot" / "Mlei_long.pep.fasta").write_text(">Mlei_1\nM\n")
+    raw = yaml.safe_load((root / "druid.yaml").read_text())
+    raw.update(proteomes_dir="prot", proteome_glob="{sp}_long.pep.fasta", species=["Mlei"])
+    (root / "druid.yaml").write_text(yaml.safe_dump(raw))
+    monkeypatch.chdir(tmp_path)                       # not the project dir
+    c = _names(doctor.checks())["proteomes"]
+    assert c.ok and "1/1" in c.detail
+
+
+def test_bad_proteome_glob_is_a_fail_line_not_a_crash(results_tree, tmp_path):
+    import yaml
+    cfg, root = results_tree
+    prot = tmp_path / "prot"
+    prot.mkdir()
+    for glob in ("{typo}_long.pep.fasta", "{}_long.pep.fasta", "{sp", "/abs/{sp}.fasta"):
+        raw = yaml.safe_load((root / "druid.yaml").read_text())
+        raw.update(proteomes_dir=str(prot), proteome_glob=glob, species=["Mlei"])
+        (root / "druid.yaml").write_text(yaml.safe_dump(raw))
+        c = _names(doctor.checks())["proteomes"]
+        assert not c.ok and "proteome_glob" in c.detail, glob

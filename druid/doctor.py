@@ -33,7 +33,8 @@ class Check:
 def _version(tool: str) -> str:
     for flag in ("--version", "-version", "-h"):
         try:
-            r = subprocess.run([tool, flag], capture_output=True, text=True, errors="replace", timeout=10)
+            r = subprocess.run([tool, flag], capture_output=True, text=True, errors="replace",
+                               timeout=10, stdin=subprocess.DEVNULL)
         except (OSError, subprocess.TimeoutExpired):
             continue
         if r.returncode != 0:                       # "No such option --version" is not a version
@@ -109,16 +110,24 @@ def _project() -> list:
                                            f"hmmpress (druid never writes there)"))
     else:
         out.append(Check(True, "pfam_db", str(pf)))
-    prot = Path(raw.get("proteomes_dir") or "")
+    prot = Path(raw.get("proteomes_dir") or "").expanduser()
+    if not prot.is_absolute():                      # relative to the project, like the other paths
+        prot = paths.project_root() / prot
     sps = list(raw.get("species") or [])
     if not (prot.is_dir() and os.access(prot, os.R_OK | os.X_OK)):
         out.append(Check(False, "proteomes", f"not readable: {prot}"))
     else:
         glob = raw.get("proteome_glob") or "{sp}_long.pep.fasta"
-        lost = [s for s in sps if not list(prot.glob(glob.format(sp=s)))]
-        out.append(Check(not lost, "proteomes",
-                         f"{len(sps) - len(lost)}/{len(sps)} species have a file in {prot}"
-                         + (f"; missing: {', '.join(lost)}" if lost else "")))
+        try:
+            lost = [s for s in sps if not list(prot.glob(glob.format(sp=s)))]
+        except (KeyError, IndexError, ValueError, NotImplementedError) as e:
+            out.append(Check(False, "proteomes",
+                             f"proteome_glob {glob!r} unusable ({type(e).__name__}: {e}); "
+                             f"it is a relative pattern with {{sp}} as the only placeholder"))
+        else:
+            out.append(Check(not lost, "proteomes",
+                             f"{len(sps) - len(lost)}/{len(sps)} species have a file in {prot}"
+                             + (f"; missing: {', '.join(lost)}" if lost else "")))
     tree = Path(cfg.params.get("SPECIES_TREE") or "")
     try:
         from ete3 import Tree
