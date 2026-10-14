@@ -14,9 +14,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from druid import core, history
+from druid import core, history, paths
 import og_origin  # noqa: E402  (core puts workflow/ on sys.path)
-from druid.common import FAILED_STATES, RUNNING_STATES, ROOT, expand_indices, ids_path, runs_dir
+from druid.common import FAILED_STATES, RUNNING_STATES, expand_indices, ids_path, runs_dir
 
 SLURM_TIMEOUT = 60  # seconds; a stuck slurmctld must not hang the CLI or freeze the TUI
 
@@ -582,7 +582,7 @@ def write_run(cfg: core.Config, raw: dict, p: Plan, dry_run: bool, max_running: 
             cpus=res.cpus, mem_mb=res.mem_mb, time_min=res.time_min,
             n_minus_1=len(ids_) - 1, max_running=max_running, run_dir=run_dir,
             signal_line=f"#SBATCH --signal={res.signal}" if res.signal else "",
-            ids_file=ids_file, root=ROOT))
+            ids_file=ids_file, root=paths.DRUID_HOME))
         arrays.append((res, ids_, ids_file, script))
     return Written(run_dir, arrays)
 
@@ -856,11 +856,11 @@ def species_universe(cfg: core.Config) -> list[str]:
 
 
 def species_info_path(cfg: core.Config) -> Path:
-    """params.species_info if set (relative = to the repo root), else species_info.tsv next to
+    """params.species_info if set (relative = to the project root), else species_info.tsv next to
     the species tree (data/species_info.tsv)."""
     p = cfg.params.get("species_info")
     if p:
-        return Path(p) if Path(p).is_absolute() else core.ROOT / p
+        return Path(p) if Path(p).is_absolute() else paths.project_root() / p
     return Path(cfg.params.get("SPECIES_TREE", "")).parent / "species_info.tsv"
 
 
@@ -934,9 +934,9 @@ def og_group_rows(groups, exp, by: str, rows) -> list[OGGroupRow]:
 # ---- orthogroup origin (Dollo MRCA on the origin tree) ------------------------------------------
 def origin_tree_path(cfg: core.Config) -> Path:
     """params.ORIGIN_TREE (already absolute: core.PATH_PARAMS), else data/species_tree.newick
-    under the repo root (a config written before the key existed)."""
+    under the project root (a config written before the key existed)."""
     p = cfg.params.get("ORIGIN_TREE")
-    return Path(p) if p else core.ROOT / "data/species_tree.newick"
+    return Path(p) if p else paths.project_root() / "data/species_tree.newick"
 
 
 def origin_tree(cfg: core.Config) -> "og_origin.OriginTree":

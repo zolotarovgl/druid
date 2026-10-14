@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("textual")
 
-from druid import core, tui  # noqa: E402
+from druid import core, paths, tui  # noqa: E402
 from tests.test_cli import _state, cli  # noqa: E402,F401
 from tests.test_model import OG_HEAD, write_results  # noqa: E402
 
@@ -18,7 +18,7 @@ SACCT_OOM = ("12345_0|COMPLETED|10M|00:01:00|0:0\\n"
 
 
 def _cfg():
-    return core.load_config(os.environ["PHYLOCLI_CONFIG"])
+    return core.load_config(paths.config_file())
 
 
 def _run(coro):
@@ -505,7 +505,7 @@ def test_finished_hg_leaves_selection_on_refresh(cli, monkeypatch):
             await pilot.pause()
             await pilot.press("a")
             assert app.selected == {"tfs.C_x.HG1"}
-            out = core.load_config(os.environ["PHYLOCLI_CONFIG"]).outdir
+            out = core.load_config(paths.config_file()).outdir
             (out / "align" / "tfs.C_x.HG1.aln.fasta").write_text(">a\nAA\n")
             app.load_now()
             await pilot.pause()

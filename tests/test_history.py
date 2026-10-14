@@ -5,7 +5,7 @@ import stat
 import pytest
 import yaml
 
-from druid import core, history
+from druid import core, history, paths
 from tests.test_cli import _state, cli  # noqa: F401  (fixture)
 
 HG = "tfs.A.HG1"
@@ -53,7 +53,7 @@ def hist(cli, results_tree, tmp_path, monkeypatch):   # noqa: F811
     nf = tmp_path / "nf"
     (nf / ".nextflow").mkdir(parents=True)
     (nf / ".nextflow/history").write_text(HISTORY)
-    cfgfile = root / "config.yaml"
+    cfgfile = root / "druid.yaml"
     raw = yaml.safe_load(cfgfile.read_text())
     raw["nextflow_dir"] = str(nf)
     cfgfile.write_text(yaml.safe_dump(raw))
@@ -74,7 +74,7 @@ def hist(cli, results_tree, tmp_path, monkeypatch):   # noqa: F811
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv("FAKE_NFLOG_DIR", str(nflog))
     monkeypatch.delenv("NXF_VER", raising=False)
-    monkeypatch.delenv("PHYLOCLI_HISTORY", raising=False)
+    monkeypatch.delenv("DRUID_HISTORY", raising=False)
     monkeypatch.setenv("PATH", f"{nfbin}{os.pathsep}{_state['bin']}{os.pathsep}/usr/bin{os.pathsep}/bin")
     runs = _state["runs"]
     _run(runs, "20260930-120000_generax", "generax", "777", ["tfs.B.HG2", HG], _sbatch(2, "500M", 30))
@@ -155,8 +155,8 @@ def test_cache_finished_not_running(hist):
     history.attempts(cfg, HG)
     names = [l.split()[0] for l in calls.read_text().splitlines()]
     assert names.count("run_ok") == 1 and names.count("run_live") == 2 and "run_s1" not in names
-    assert (tmp / "history/nf_run_ok.tsv").is_file()
-    assert not (tmp / "history/nf_run_live.tsv").exists()
+    assert (paths.project_root() / "history/nf_run_ok.tsv").is_file()
+    assert not (paths.project_root() / "history/nf_run_live.tsv").exists()
     first = calls.read_text().splitlines()[0].split()
     assert first[1] == str(cfg.nextflow_dir) and first[2] == "25.04.2"   # cwd, pinned NXF_VER
 
@@ -174,8 +174,8 @@ def test_old_dash_run_cached_newest_not(hist):
     history.attempts(cfg, HG)
     names = [l.split()[0] for l in calls.read_text().splitlines()]
     assert names.count("run_old") == 1 and names.count("run_live") == 2
-    assert (tmp / "history/nf_run_old.tsv").is_file()
-    assert not (tmp / "history/nf_run_live.tsv").exists()
+    assert (paths.project_root() / "history/nf_run_old.tsv").is_file()
+    assert not (paths.project_root() / "history/nf_run_live.tsv").exists()
     # a newer finished run makes run_live old -> it is cached too
     hf.write_text(hf.read_text() + "2026-10-01 09:00:00\t1h\trun_new\tOK\th4\tu1\tnextflow run step2.nf\n")
     (tmp / "nflog/run_new.tsv").write_text("")
@@ -183,12 +183,12 @@ def test_old_dash_run_cached_newest_not(hist):
     history.attempts(cfg, HG)
     names = [l.split()[0] for l in calls.read_text().splitlines()]
     assert names.count("run_live") == 3 and names.count("run_new") == 1
-    assert (tmp / "history/nf_run_live.tsv").is_file()
+    assert (paths.project_root() / "history/nf_run_live.tsv").is_file()
 
 
 def test_history_env_dir(hist, monkeypatch, tmp_path):
     _cli, cfg, _c, _t = hist
-    monkeypatch.setenv("PHYLOCLI_HISTORY", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("DRUID_HISTORY", str(tmp_path / "elsewhere"))
     history.attempts(cfg, HG)
     assert (tmp_path / "elsewhere/nf_run_ok.tsv").is_file()
 

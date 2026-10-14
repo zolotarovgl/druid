@@ -7,7 +7,7 @@ import stat
 
 import pytest
 
-from druid import core, model
+from druid import core, model, paths
 from tests.test_cli import _state, cli  # noqa: F401  (fixture)
 
 
@@ -51,7 +51,7 @@ def test_submissions_newest_first(cli):
 
 
 def _cfg():
-    return core.load_config(os.environ["PHYLOCLI_CONFIG"])
+    return core.load_config(paths.config_file())
 
 
 def test_stage_rows_counts(cli):
@@ -163,7 +163,7 @@ import yaml  # noqa: E402
 
 
 def _raw():
-    return yaml.safe_load(open(os.environ["PHYLOCLI_CONFIG"]).read())
+    return yaml.safe_load(paths.config_file().read_text())
 
 
 def test_select_skips_unready_and_queued(cli, monkeypatch):
@@ -459,13 +459,13 @@ def test_origin_tree_path_default(cli):
     assert model.origin_tree_path(cfg) == Path(cfg.params["ORIGIN_TREE"])
     import dataclasses
     bare = dataclasses.replace(cfg, params={k: v for k, v in cfg.params.items() if k != "ORIGIN_TREE"})
-    assert model.origin_tree_path(bare) == core.ROOT / "data/species_tree.newick"
+    assert model.origin_tree_path(bare) == paths.project_root() / "data/species_tree.newick"
 
 
-def test_config_resolves_origin_tree_relative_to_root():
+def test_config_resolves_origin_tree_relative_to_root(results_tree):
     raw = {"outdir": "results", "partition": "p", "qos": "q",
            "params": {"ORIGIN_TREE": "data/species_tree.newick"}}
-    assert core.config_from_raw(raw).params["ORIGIN_TREE"] == str(core.ROOT / "data/species_tree.newick")
+    assert core.config_from_raw(raw).params["ORIGIN_TREE"] == str(paths.project_root() / "data/species_tree.newick")
 
 
 def test_og_origins_on_the_fixture(cli):

@@ -1,11 +1,9 @@
 """Helpers shared by phylo.py and history.py (kept here to avoid a circular import)."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-
+from druid import paths
 
 # SLURM job states.
 FAILED_STATES = {"FAILED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "CANCELLED", "PREEMPTED",
@@ -13,8 +11,8 @@ FAILED_STATES = {"FAILED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "CANCELLED",
 RUNNING_STATES = {"RUNNING", "COMPLETING", "CONFIGURING", "STAGE_OUT", "SUSPENDED"}
 
 
-def runs_dir()-> Path:
-    return Path(os.environ.get("PHYLOCLI_RUNS") or ROOT / "runs")
+def runs_dir() -> Path:
+    return paths.runs_dir()
 
 
 def ids_path(run: Path, recorded: str) -> Path:

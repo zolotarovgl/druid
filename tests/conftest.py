@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "druid" / "helpers"))
 
-from druid import core  # noqa: E402
+from druid import core, paths  # noqa: E402
 
 HEADER = "id aln_mem aln_time gr_mem gr_time gr_watcher_mem gr_watcher_time phy_mem phy_time pvm_mem pvm_time"
 ROW = "tfs.A.HG11 800.MB 45.min 3100.MB 120.min 3100.MB 180.min 800.MB 1140.min 800.MB 9.min"
@@ -25,8 +25,18 @@ def _w(p, text):
     p.write_text(text)
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_project(monkeypatch):
+    """No test sees a project it did not set up: druid.yaml discovery, DRUID_* env, --project."""
+    for k in ("DRUID_PROJECT", "DRUID_CONFIG"):
+        monkeypatch.delenv(k, raising=False)
+    paths.use(None)
+    yield
+    paths.use(None)
+
+
 @pytest.fixture
-def results_tree(tmp_path):
+def results_tree(tmp_path, monkeypatch):
     root = tmp_path / "v3"
     out = root / "results"
     _w(out / "clusters/tfs.A.HG1.fasta", ">a\nAA\n>b\nAA\n>c\nAA\n")
@@ -44,9 +54,10 @@ def results_tree(tmp_path):
     _w(root / "gene_families_searchinfo.csv", GENEFAM)
     _w(root / "input.fasta", ">p1\nMKV\n")
     _w(root / "Pfam-A.hmm", "HMMER3/f\n")
-    cfg_file = root / "config.yaml"
-    base = yaml.safe_load((ROOT / "druid/config.yaml").read_text())
+    cfg_file = root / "druid.yaml"
+    base = yaml.safe_load((ROOT / "druid/templates/druid.yaml").read_text())
     base["outdir"] = str(out)
+    base["runs_dir"] = "runs"
     # Never read the real project's .nextflow/ run history (slow, and not a fixture).
     base["nextflow_dir"] = str(root)
     base["params"].update(resources_tsv=str(root / "resources.tsv"),
@@ -58,4 +69,5 @@ def results_tree(tmp_path):
                           pfam_db=str(root / "Pfam-A.hmm"),
                           min_seqs=2, min_distinct=1)  # fixture HGs: 3 identical seqs
     cfg_file.write_text(yaml.safe_dump(base))
+    monkeypatch.setenv("DRUID_PROJECT", str(root))
     return core.load_config(cfg_file), root

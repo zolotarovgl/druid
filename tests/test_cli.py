@@ -38,14 +38,12 @@ def cli(results_tree, tmp_path, monkeypatch):
         'echo "$@" >> ' + str(bindir) + '/pycalls.txt\nexit 0\n')
     for p in bindir.iterdir():
         p.chmod(p.stat().st_mode | stat.S_IXUSR)
-    runs = tmp_path / "runs"
+    runs = root / "runs"                       # the fixture's druid.yaml: runs_dir: runs
     tmpd = tmp_path / "tmp"
     tmpd.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(tmpd))
     _state.update({"bin": bindir, "runs": runs, "dry": tmpd / "phylocli-dryrun"})
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("PHYLOCLI_CONFIG", str(root / "config.yaml"))
-    monkeypatch.setenv("PHYLOCLI_RUNS", str(runs))
     monkeypatch.setenv("FAKE_SQUEUE", "")
     runner = CliRunner()
     return lambda args: runner.invoke(cli_mod.app, args)
@@ -434,7 +432,7 @@ def _dry_run_dir(stage):
 def test_set_param_written_to_run_config(cli, results_tree):
     import yaml
     _, root = results_tree
-    before = (root / "config.yaml").read_text()
+    before = (root / "druid.yaml").read_text()
     r = cli(["submit", "align", "tfs.C_x.HG1", "-n", "--set", "MAFFT_OPT=--auto", "--set", "MAX_SPR=2"])
     assert r.exit_code == 0, r.output
     run = _dry_run_dir("align")
@@ -442,7 +440,7 @@ def test_set_param_written_to_run_config(cli, results_tree):
     assert params["MAFFT_OPT"] == "--auto" and params["MAX_SPR"] == 2
     assert f'export PHYLOCLI_CONFIG="{run}/config.yaml"' in (run / "array_0.sbatch").read_text()
     assert "MAX_SPR=2" in r.output
-    assert (root / "config.yaml").read_text() == before        # global config untouched
+    assert (root / "druid.yaml").read_text() == before        # global config untouched
 
 
 def test_set_bool_coerced_and_used_at_submit(cli):
@@ -562,3 +560,28 @@ def test_summary_without_squeue(cli):
     (_state["bin"] / "squeue").unlink()
     r = cli(["missing"])
     assert r.exit_code == 0 and "squeue not on PATH" in r.output
+
+
+def test_cli_outside_project_says_how(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+    from druid import cli, paths
+    monkeypatch.delenv("DRUID_PROJECT", raising=False)
+    monkeypatch.delenv("DRUID_CONFIG", raising=False)
+    paths.use(None)
+    monkeypatch.chdir(tmp_path)
+    r = CliRunner().invoke(cli.app, ["status"])
+    assert r.exit_code == 2
+    assert "--project" in r.output and "druid init" in r.output
+    assert "Traceback" not in r.output
+
+
+def test_project_option_selects_the_project(results_tree, tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+    from druid import cli, paths
+    _cfg, root = results_tree
+    monkeypatch.delenv("DRUID_PROJECT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    r = CliRunner().invoke(cli.app, ["--project", str(root), "missing"])
+    assert r.exit_code == 0, r.output
+    assert paths.project_root() == root.resolve()
+    paths.use(None)

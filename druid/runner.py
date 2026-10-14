@@ -9,10 +9,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from druid.core import (ROOT, Config, publish_dir, publish_patterns,
+from druid import paths
+from druid.core import (Config, publish_dir, publish_patterns,
                            stage_inputs)
 
-DRUID_HOME = ROOT                      # the install: stages, helpers, submodules/phylogeny
+DRUID_HOME = paths.DRUID_HOME                      # the install: stages, helpers, submodules/phylogeny
 STAGES_DIR = DRUID_HOME / "druid/stages"
 TMP_SUFFIX = ".tmp-phylo"
 NO_OUTPUT_RC = 65
@@ -20,7 +21,7 @@ NO_OUTPUT_RC = 65
 
 def stage_env(cfg: Config, stage: str, hg: str, cpus: int) -> dict[str, str]:
     env = dict(os.environ)
-    env.update(ID=hg, CPUS=str(cpus), PROJECT_DIR=str(ROOT), DRUID_HOME=str(DRUID_HOME),
+    env.update(ID=hg, CPUS=str(cpus), PROJECT_DIR=str(DRUID_HOME), DRUID_HOME=str(DRUID_HOME),
                OUTDIR=str(cfg.outdir), PYTHONNOUSERSITE="1")
     for k, v in cfg.params.items():
         if isinstance(v, bool):

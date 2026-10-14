@@ -4,9 +4,9 @@ import re
 import subprocess
 from pathlib import Path
 
-from druid import core
+from druid import paths
 
-VENDOR = core.ROOT / "druid/vendor"
+VENDOR = paths.DRUID_HOME / "druid/vendor"
 SCRIPT = VENDOR / "update_treeview.sh"
 
 

@@ -80,7 +80,7 @@ def colour(status: str) -> str:
 # ---- Nextflow ------------------------------------------------------------------------------
 
 def history_dir() -> Path:
-    p = os.environ.get("PHYLOCLI_HISTORY")
+    p = os.environ.get("DRUID_HISTORY")
     return Path(p) if p else runs_dir().parent / "history"
 
 

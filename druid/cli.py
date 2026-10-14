@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import collections
-import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1]          # the install, for sys.path only
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import typer  # noqa: E402
 
-from druid import core, history, runner  # noqa: E402
+from druid import core, history, paths, runner  # noqa: E402
 from druid.common import (FAILED_STATES, RUNNING_STATES, expand_indices as _expand_indices,  # noqa: E402,F401
                              fmt_mem as _fmt_mem, fmt_time as _fmt_time, ids_path as _ids_path,
                              runs_dir as _runs_dir)
@@ -31,7 +30,7 @@ def _guard(fn):
     return wrapped
 
 
-app = typer.Typer(add_completion=False, no_args_is_help=True,
+app = typer.Typer(add_completion=False, no_args_is_help=True, pretty_exceptions_enable=False,
                   context_settings={"help_option_names": ["-h", "--help"]},
                   help="Report step2 progress and submit per-stage SLURM job arrays.")
 
@@ -41,9 +40,18 @@ _new_run_dir = model.new_run_dir
 _show = model.show
 
 
+@app.callback()
+def main(project: Path = typer.Option(None, "--project", "-P",
+                                      help="project directory (else $DRUID_PROJECT, else the "
+                                           "nearest druid.yaml above the cwd)")):
+    paths.use(project)
+
+
 def _cfg() -> core.Config:
-    p = os.environ.get("PHYLOCLI_CONFIG")
-    return core.load_config(Path(p)) if p else core.load_config()
+    try:
+        return core.load_config()
+    except paths.NoProject as e:
+        _fail(f"ERROR: {e}", 2)
 
 
 def _fail(msg: str, code: int = 2):
@@ -401,7 +409,7 @@ def _print_dry_run(stage: str, run_dir: Path, plan: list, qos: str | None, notes
     con = Console(highlight=False)
     n = sum(len(ids_) for _res, ids_, _f, _s in plan)
     try:
-        shown = run_dir.relative_to(ROOT)
+        shown = run_dir.relative_to(paths.project_root())
     except ValueError:
         shown = run_dir
     unit = core.unit(stage)
@@ -444,16 +452,18 @@ def submit(stage: str = typer.Argument(...),
            time: str = typer.Option(None, "--time", help="override time limit for every HG, e.g. 24h, 90m, 1d"),
            cpus: int = typer.Option(None, "--cpus", min=1, help="override cpus for every HG"),
            sets: list[str] = typer.Option(None, "--set",
-                                          help="override a config.yaml param for this submission, "
+                                          help="override a druid.yaml param for this submission, "
                                                "e.g. --set MAX_SPR=2 (repeatable)")):
     """Submit one SLURM array per resource group for STAGE."""
     import yaml
 
     _check_stage(stage)
-    # The submission's config = config.yaml + --set overrides. It is written into the run dir
-    # and the jobs read that copy, so the run keeps a record and config.yaml is never changed.
-    raw = yaml.safe_load(Path(os.environ.get("PHYLOCLI_CONFIG")
-                              or core.ROOT / "druid/config.yaml").read_text())
+    # The submission's config = druid.yaml + --set overrides. It is written into the run dir
+    # and the jobs read that copy, so the run keeps a record and druid.yaml is never changed.
+    try:
+        raw = yaml.safe_load(paths.config_file().read_text())
+    except paths.NoProject as e:
+        _fail(f"ERROR: {e}", 2)
     try:
         override = {"mem_mb": core.parse_mem_mb(mem) if mem else None,
                     "time_min": core.parse_time_min(time) if time else None,
@@ -559,6 +569,10 @@ def jobs(job_id: str = typer.Argument(None, help="array job id: list its tasks w
     from rich.console import Console
     from rich.table import Table
 
+    try:
+        paths.project_root()
+    except paths.NoProject as e:
+        _fail(f"ERROR: {e}", 2)
     if job_id is not None:
         _job_tasks(job_id, failed, running)
         return
@@ -656,4 +670,8 @@ def _run(stage: str, hg: str, run_dir: Path = typer.Option(..., "--run-dir")):
 
 
 if __name__ == "__main__":
-    app()
+    try:
+        app()
+    except paths.NoProject as e:
+        typer.echo(f"ERROR: {e}", err=True)
+        sys.exit(2)

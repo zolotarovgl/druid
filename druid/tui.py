@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import collections
 import math
-import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -21,14 +20,13 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 from textual.worker import get_current_worker
 
-from druid import core, history, model
+from druid import core, history, model, paths
 from druid.common import fmt_mem, fmt_time
 
 
 def load_raw() -> dict:
-    """The raw config.yaml (same path logic as `phylo submit`); written into each run dir."""
-    p = Path(os.environ.get("PHYLOCLI_CONFIG") or core.ROOT / "druid/config.yaml")
-    return yaml.safe_load(p.read_text())
+    """The raw druid.yaml (same path logic as `druid submit`); written into each run dir."""
+    return yaml.safe_load(paths.config_file().read_text())
 
 FILTERS = ("actionable", "failed", "ready", "running", "blocked", "done")
 ACTIONABLE = ("failed", "ready")      # the "actionable" filter shows failed + ready HGs

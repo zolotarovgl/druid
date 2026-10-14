@@ -10,9 +10,10 @@ from pathlib import Path
 
 import yaml
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "druid" / "helpers"))
-sys.path.insert(0, str(ROOT / "druid" / "vendor"))   # vendored treeview (vendor/update_treeview.sh)
+from druid import paths
+
+sys.path.insert(0, str(paths.DRUID_HOME / "druid" / "helpers"))
+sys.path.insert(0, str(paths.DRUID_HOME / "druid" / "vendor"))   # vendored treeview (vendor/update_treeview.sh)
 import report_status  # noqa: E402
 
 FAMILY_STAGES = ["search", "cluster"]                 # unit: gene family <pref>.<family> (step1)
@@ -38,16 +39,16 @@ class Config:
     params: dict
     partition: str
     qos: str
-    nextflow_dir: Path = ROOT      # where .nextflow/ (the run history) lives
+    nextflow_dir: Path = Path(".")   # where .nextflow/ (the run history) lives; set by config_from_raw (project root unless configured)
 
 
 def _abs(p) -> str:
     p = Path(p)
-    return str(p if p.is_absolute() else ROOT / p)
+    return str(p if p.is_absolute() else paths.project_root() / p)
 
 
-def load_config(path: Path = ROOT / "druid/config.yaml") -> Config:
-    return config_from_raw(yaml.safe_load(Path(path).read_text()))
+def load_config(path: Path | None = None) -> Config:
+    return config_from_raw(yaml.safe_load(Path(path or paths.config_file()).read_text()))
 
 
 def _coerce(key: str, old, value: str):

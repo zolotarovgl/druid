@@ -106,3 +106,31 @@ def test_possvm_publish_exact_names(results_tree):
     first, marker = core.publish_patterns("possvm", "tfs.A.HG1", treefile="tfs.A.HG1.generax.support.tree")
     assert marker == "tfs.A.HG1.generax.support.tree.ortholog_groups.csv"
     assert "tfs.A.HG1.generax.support.tree.pairs_orthologs.csv" in first
+
+
+def test_relative_config_paths_resolve_against_the_project(tmp_path, monkeypatch):
+    from druid import paths
+    proj = tmp_path / "p"
+    proj.mkdir()
+    (proj / "druid.yaml").write_text(
+        "outdir: results\npartition: a\nqos: b\nparams:\n  infasta: data/input.fasta\n  hmm_dir: null\n")
+    monkeypatch.setenv("DRUID_PROJECT", str(proj))
+    monkeypatch.chdir(tmp_path)                         # cwd is NOT the project
+    cfg = core.load_config()
+    assert cfg.outdir == proj.resolve() / "results"
+    assert cfg.params["infasta"] == str(proj.resolve() / "data/input.fasta")
+    assert cfg.params["hmm_dir"] is None
+    assert cfg.nextflow_dir == proj.resolve()
+
+
+def test_run_dir_config_resolves_against_project(tmp_path, monkeypatch):
+    proj = tmp_path / "p"
+    run = proj / "runs" / "20261014-120000_align"
+    run.mkdir(parents=True)
+    body = "outdir: results\npartition: a\nqos: b\nparams:\n  infasta: data/input.fasta\n"
+    (proj / "druid.yaml").write_text(body)
+    (run / "config.yaml").write_text(body)
+    monkeypatch.setenv("DRUID_PROJECT", str(proj))
+    monkeypatch.setenv("DRUID_CONFIG", str(run / "config.yaml"))
+    cfg = core.load_config()
+    assert cfg.params["infasta"] == str(proj.resolve() / "data/input.fasta")   # not run/data/...
