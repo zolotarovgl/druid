@@ -591,3 +591,35 @@ def test_dry_run_scripts_go_under_the_project(results_tree):
     from druid import model, paths
     d = model.new_run_dir("align", dry_run=True)
     assert d.parent == paths.project_root() / ".druid" / "tmp" / "dryrun"
+
+
+def _set_druid_yaml(root, **kv):
+    import yaml
+    f = root / "druid.yaml"
+    raw = yaml.safe_load(f.read_text())
+    raw.update(kv)
+    f.write_text(yaml.safe_dump(raw))
+
+
+def test_outdir_outside_the_project_is_a_clean_error(cli, results_tree, tmp_path):
+    _cfg, root = results_tree
+    _set_druid_yaml(root, outdir=str(tmp_path / "outside"))
+    r = cli(["status"])
+    assert r.exit_code == 2 and "inside the project" in r.output
+    assert "Traceback" not in r.output and not (tmp_path / "outside").exists()
+
+
+def test_runs_dir_equal_to_the_project_is_a_clean_error(cli, results_tree):
+    _cfg, root = results_tree
+    _set_druid_yaml(root, runs_dir=".")
+    r = cli(["status"])
+    assert r.exit_code == 2 and "runs_dir must be a subdirectory" in r.output
+    assert "Traceback" not in r.output
+
+
+def test_submit_set_outside_write_target_is_a_clean_error(cli, tmp_path):
+    outside = tmp_path / "outside.fasta"
+    r = cli(["submit", "align", "tfs.C_x.HG1", "-n", "--set", f"infasta={outside}"])
+    assert r.exit_code == 2 and "inside the project" in r.output
+    assert "Traceback" not in r.output
+    assert not dry_dir().exists() or not list(dry_dir().glob("*"))

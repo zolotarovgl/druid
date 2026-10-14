@@ -22,7 +22,7 @@ def test_publish_marker_last_and_atomic(tmp_path, proj):
     order = []
     real = os.replace
     def spy(a, b): order.append(Path(b).name); real(a, b)
-    with mock.patch("druid.runner.os.replace", spy):
+    with mock.patch("druid.paths.os.replace", spy):
         runner.publish(work, dest, ["x.HG1.log"], "x.HG1.treefile")
     assert order == ["x.HG1.log", "x.HG1.treefile"]
     assert not list(dest.glob("*.tmp-phylo"))

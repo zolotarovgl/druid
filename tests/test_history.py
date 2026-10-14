@@ -242,6 +242,16 @@ def test_status_hg_history(hist):
     assert "2026-09-01" in body[0] and "2026-09-30" in body[-1]      # oldest first
 
 
+def test_status_history_dir_outside_the_project_is_a_clean_error(hist, monkeypatch, tmp_path):
+    cli, _cfg, _c, _t = hist
+    monkeypatch.setenv("DRUID_HISTORY", str(tmp_path / "outside"))
+    for args in (["status", HG, "--history"], ["status", HG]):
+        r = cli(args)
+        assert r.exit_code == 2 and "ERROR:" in r.output and "outside the project" in r.output
+        assert "Traceback" not in r.output
+    assert not (tmp_path / "outside").exists()
+
+
 def test_unknown_hg(hist):
     cli, _cfg, _c, _t = hist
     r = cli(["status", "tfs.Z.HG9"])

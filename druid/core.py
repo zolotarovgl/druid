@@ -99,6 +99,8 @@ def config_from_raw(raw: dict) -> Config:
                  nextflow_dir=Path(_abs(raw.get("nextflow_dir", "."))))
     root = paths.project_root()
     runs = Path(_abs(raw.get("runs_dir") or "runs"))
+    if runs.resolve() == root:            # the history dir defaults to runs_dir().parent / "history"
+        raise ValueError(f"runs_dir must be a subdirectory of the project {root}: {runs}")
     for key, p in (("outdir", cfg.outdir), ("runs_dir", runs),
                    ("infasta", params.get("infasta")), ("genefam_info", params.get("genefam_info"))):
         if p and not _inside(Path(p), root):

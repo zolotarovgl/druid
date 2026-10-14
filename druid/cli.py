@@ -50,7 +50,16 @@ def main(project: Path = typer.Option(None, "--project", "-P",
 def _cfg() -> core.Config:
     try:
         return core.load_config()
-    except paths.NoProject as e:
+    except (paths.NoProject, paths.OutsideProject, ValueError) as e:   # ValueError: write target outside the project
+        _fail(f"ERROR: {e}", 2)
+
+
+def _check_history_dir() -> None:
+    """The history cache is written under history.history_dir(); refuse a dir outside the project
+    up front, as one ERROR line, rather than as a traceback from the cache writer."""
+    try:
+        paths.writable(history.history_dir())
+    except paths.OutsideProject as e:
         _fail(f"ERROR: {e}", 2)
 
 
@@ -273,6 +282,7 @@ def _console():
 
 def _hg_status(cfg: core.Config, hg: str, show_history: bool):
     """`status HG`: last attempt per stage, or (--history) every attempt, oldest first."""
+    _check_history_dir()
     exp = core.expected(cfg)
     if hg not in exp:
         _fail(f"unknown HG id: {hg}", 1)
@@ -301,6 +311,7 @@ def _hg_status(cfg: core.Config, hg: str, show_history: bool):
 
 def _family_status(cfg: core.Config, fam: str, show_history: bool):
     """`status FAMILY`: last search / cluster attempt (step1.nf SEARCH/CLUSTER + phylocli)."""
+    _check_history_dir()
     _families(cfg, None)                                  # no genefam file: exit 1
     _warn_families(cfg, collisions=False)                 # duplicates: a warning, then proceed
     con = _console()
@@ -462,7 +473,7 @@ def submit(stage: str = typer.Argument(...),
     # and the jobs read that copy, so the run keeps a record and druid.yaml is never changed.
     try:
         raw = yaml.safe_load(paths.config_file().read_text())
-    except paths.NoProject as e:
+    except (paths.NoProject, paths.OutsideProject) as e:
         _fail(f"ERROR: {e}", 2)
     try:
         override = {"mem_mb": core.parse_mem_mb(mem) if mem else None,
@@ -471,7 +482,10 @@ def submit(stage: str = typer.Argument(...),
         set_notes = core.apply_sets(raw, sets or [])
     except ValueError as e:
         _fail(f"ERROR: {e}", 2)
-    cfg = core.config_from_raw(raw)
+    try:
+        cfg = core.config_from_raw(raw)
+    except (paths.NoProject, paths.OutsideProject, ValueError) as e:
+        _fail(f"ERROR: {e}", 2)
     if stage in core.FAMILY_STAGES:                # duplicates (search: also name collisions)
         _warn_families(cfg, collisions=stage == "search")
         for run, _start, final in history.nf_runs(cfg.nextflow_dir, "step1.nf"):
@@ -571,7 +585,7 @@ def jobs(job_id: str = typer.Argument(None, help="array job id: list its tasks w
 
     try:
         paths.project_root()
-    except paths.NoProject as e:
+    except (paths.NoProject, paths.OutsideProject) as e:
         _fail(f"ERROR: {e}", 2)
     if job_id is not None:
         _job_tasks(job_id, failed, running)
@@ -672,6 +686,6 @@ def _run(stage: str, hg: str, run_dir: Path = typer.Option(..., "--run-dir")):
 if __name__ == "__main__":
     try:
         app()
-    except paths.NoProject as e:
+    except (paths.NoProject, paths.OutsideProject) as e:
         typer.echo(f"ERROR: {e}", err=True)
         sys.exit(2)
