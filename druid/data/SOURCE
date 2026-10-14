@@ -1,0 +1,12 @@
+druid shipped data, copied read-only from Phylogenies_v3 on 14/10/2026.
+V3 = ~/ant/gzolotarov/projects/2022_scRNAseq_Mlei/Phylogenies_v3/data
+(approved by Grygoriy: exactly these 5 files)
+
+file                        v3 path                                  md5                               date
+species_tree.binary.newick  $V3/species_tree.binary.newick           4ae364378f9b95f162e880b76d1afd4c  14/10/2026
+species_tree.newick         $V3/species_tree.newick                  95521216cef1137d35a9e95f515033c3  14/10/2026
+species_info.tsv            $V3/species_info.tsv                     22b73c915ff12ca93bdeed181ac4a780  14/10/2026
+Mmus_gene_names.csv         $V3/Mmus_gene_names.csv                  c3706f1abf7846de2fbaf85a6c6bc08f  14/10/2026
+families_library.csv        $V3/gene_families_searchinfo.csv         004a92741107ff48f217bea0db774e9b  14/10/2026
+
+families_library.csv = v3 data/gene_families_searchinfo.csv (356 rows; the spec's 304 was the older phylohpc copy).

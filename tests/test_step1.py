@@ -84,12 +84,12 @@ def test_config_step1_params(results_tree):
     raw = yaml.safe_load((paths.DRUID_HOME / "druid/templates/druid.yaml").read_text())
     p = raw["params"]
     assert (p["genefam_info"], p["infasta"], p["pfam_db"], p["hmm_dir"]) == (
-        "data/gene_families_searchinfo.csv", "data/input.fasta",
+        "data/families.csv", "data/input.fasta",
         "/users/asebe/xgraubove/data/pfam/Pfam-A.hmm", None)
     assert (p["domain_expand"], p["s1_ncpu"], p["s2_ncpu"], p["max_n"], p["s2_inflation"]) == \
         (30, 4, 4, 2000, 1.1)
     cfg = core.config_from_raw(raw)
-    assert cfg.params["genefam_info"] == str(paths.project_root() / "data/gene_families_searchinfo.csv")
+    assert cfg.params["genefam_info"] == str(paths.project_root() / "data/families.csv")
     assert cfg.params["infasta"] == str(paths.project_root() / "data/input.fasta")
     assert cfg.params["hmm_dir"] is None
 

@@ -1,9 +1,16 @@
-# Parameters the step1 and step2 stages read. Values = v3 nextflow.config params + the `precise`
-# profile + the last successful step2 run (24/09/2026: -profile slurm,precise --run_generax).
+# druid project (druid init, {today}). Paths are relative to this directory.
+# druid writes only inside this directory; proteomes_dir, pfam_db and hmm_dir are read-only.
 outdir: results
-# nextflow_dir: .   # optional: where .nextflow/ (run history, read by `status HG`) lives; default = project root
+runs_dir: runs
+nextflow_dir: .
 partition: genoa64
 qos: normal
+prepare: auto            # locked: druid never rebuilds data/input.fasta (druid adopt sets it)
+proteomes_dir: /users/asebe/xgraubove/genomes/data   # read-only; files start with the species prefix
+proteome_glob: "{{sp}}_long.pep.fasta"
+species: []
+# Parameters the step1 and step2 stages read. Values = v3 nextflow.config params + the `precise`
+# profile + the last successful step2 run (24/09/2026: -profile slurm,precise --run_generax).
 params:
   MAFFT_OPT: "--maxiterate 1000 --localpair"
   TREE_METHOD: iqtree2
@@ -17,12 +24,12 @@ params:
   REFSPECIES: Mmus
   run_generax: true
   gxsup: true
-  resources_tsv: resources.tsv
+  resources_tsv: resources.tsv          # absent = stage defaults
   min_seqs: 5          # skip HGs with fewer seqs (= nextflow.config params.min_seqs; IQ-TREE needs >= 4 to bootstrap)
   min_distinct: 4      # ... and HGs with fewer distinct seqs (= nextflow.config params.min_distinct)
   # step1 (search, cluster): = nextflow.config params + the 24/09/2026 step1 run
-  genefam_info: data/gene_families_searchinfo.csv   # family rows; the job reads a copy taken at submit
-  infasta: data/input.fasta
+  genefam_info: data/families.csv       # the project's families (library: druid/data/families_library.csv); the job reads a copy taken at submit
+  infasta: data/input.fasta             # built by prepare (sub-project 2)
   pfam_db: /users/asebe/xgraubove/data/pfam/Pfam-A.hmm
   hmm_dir: null        # optional dir of custom <name>.hmm models (never written: search.sh copies it)
   domain_expand: 30

@@ -109,8 +109,8 @@ def tmp_dir() -> Path:
     return d
 
 
-def write_text(p: PathLike, text: str) -> Path:
-    q = writable(p)
+def write_text(p: PathLike, text: str, root: Optional[Path] = None) -> Path:
+    q = writable(p, root=root)
     q.write_text(text)
     return q
 
@@ -122,14 +122,15 @@ def append_text(p: PathLike, text: str) -> Path:
     return q
 
 
-def mkdir(p: PathLike, parents: bool = True, exist_ok: bool = False) -> Path:
-    q = writable(p)
+def mkdir(p: PathLike, parents: bool = True, exist_ok: bool = False,
+          root: Optional[Path] = None) -> Path:
+    q = writable(p, root=root)
     q.mkdir(parents=parents, exist_ok=exist_ok)
     return q
 
 
-def copy2(src: PathLike, dst: PathLike) -> Path:
-    q = writable(dst)
+def copy2(src: PathLike, dst: PathLike, root: Optional[Path] = None) -> Path:
+    q = writable(dst, root=root)
     shutil.copy2(src, q)                       # follows symlinks in src: copies the content
     return q
 

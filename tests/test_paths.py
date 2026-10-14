@@ -204,3 +204,14 @@ def test_append_text_inside_and_outside(proj, tmp_path):
     with pytest.raises(paths.OutsideProject):
         paths.append_text(tmp_path / "out.tsv", "x")
     assert not (tmp_path / "out.tsv").exists()
+
+
+def test_ops_with_explicit_root_need_no_project(tmp_path, monkeypatch):
+    monkeypatch.delenv("DRUID_PROJECT", raising=False)
+    paths.use(None)
+    monkeypatch.chdir(tmp_path)
+    new = tmp_path / "new"
+    paths.mkdir(new / "data", parents=True, root=new)
+    paths.write_text(new / "druid.yaml", "x", root=new)
+    with pytest.raises(paths.OutsideProject):
+        paths.write_text(tmp_path / "out.txt", "x", root=new)

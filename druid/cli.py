@@ -337,6 +337,31 @@ def _family_status(cfg: core.Config, fam: str, show_history: bool):
 
 
 @app.command()
+def init(dest: Path = typer.Argument(..., help="new or empty directory")):
+    """Make a druid project directory."""
+    from datetime import date
+    from druid import project
+    try:
+        written = project.init(dest, today=date.today().strftime("%d/%m/%Y"))
+    except project.ProjectError as e:
+        _fail(f"ERROR: {e}", 2)
+    typer.echo(f"druid project at {Path(dest).resolve()}: {written[0].name}, "
+               f"data/ ({len(written) - 1} files)")
+
+
+@app.command()
+def adopt(dest: Path = typer.Argument(..., help="an existing phylohpc project (has phylocli/config.yaml)")):
+    """Open an existing phylohpc project in place (writes only DEST/druid.yaml)."""
+    from datetime import date
+    from druid import project
+    try:
+        out = project.adopt(dest, today=date.today().strftime("%d/%m/%Y"))
+    except project.ProjectError as e:
+        _fail(f"ERROR: {e}", 2)
+    typer.echo(f"wrote {out} (prepare: locked)")
+
+
+@app.command()
 def status(hg: str = typer.Argument(None, help="HG id: show its last attempt per stage "
                                                "(requested vs used resources, Nextflow + phylocli)"),
            ids: Path = typer.Option(None, "--ids", help="restrict to the HG ids in this file"),
