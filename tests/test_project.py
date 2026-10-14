@@ -99,3 +99,30 @@ def test_cli_init_and_adopt(tmp_path):
     assert "druid.yaml" in r.output
     r = CliRunner().invoke(cli.app, ["init", str(tmp_path / "p")])
     assert r.exit_code == 2 and "not empty" in r.output
+
+
+@pytest.mark.parametrize("text", ["a: [unclosed\n", "- just\n- a list\n", "scalar\n"])
+def test_adopt_refuses_malformed_or_non_mapping_config(tmp_path, text):
+    v3 = _phylohpc(tmp_path)
+    (v3 / "phylocli" / "config.yaml").write_text(text)
+    before = _tree_state(v3)
+    with pytest.raises(project.ProjectError, match="config.yaml"):
+        project.adopt(v3, today="14/10/2026")
+    assert _tree_state(v3) == before and not (v3 / "druid.yaml").exists()
+
+
+def test_cli_adopt_success_and_existing_druid_yaml(tmp_path):
+    v3 = _phylohpc(tmp_path)
+    r = CliRunner().invoke(cli.app, ["adopt", str(v3)])
+    assert r.exit_code == 0, r.output
+    assert f"wrote {v3 / 'druid.yaml'}" in r.output and "prepare: locked" in r.output
+    assert (v3 / "druid.yaml").is_file()
+    r = CliRunner().invoke(cli.app, ["adopt", str(v3)])
+    assert r.exit_code == 2 and "ERROR" in r.output and "already exists" in r.output
+
+
+def test_cli_adopt_malformed_config_is_an_error_line(tmp_path):
+    v3 = _phylohpc(tmp_path)
+    (v3 / "phylocli" / "config.yaml").write_text("a: [unclosed\n")
+    r = CliRunner().invoke(cli.app, ["adopt", str(v3)])
+    assert r.exit_code == 2 and "ERROR" in r.output and not (v3 / "druid.yaml").exists()

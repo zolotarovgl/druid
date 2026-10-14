@@ -35,7 +35,12 @@ def adopt(dest: Path, today: str) -> Path:
         raise ProjectError(f"{dest / paths.CONFIG_NAME} already exists; nothing written")
     if not old.is_file():
         raise ProjectError(f"{old} not found: not a phylohpc project with phylocli/config.yaml")
-    raw = yaml.safe_load(old.read_text()) or {}
+    try:
+        raw = yaml.safe_load(old.read_text())
+    except yaml.YAMLError as e:
+        raise ProjectError(f"{old} is not valid YAML ({str(e).splitlines()[0]}); nothing written")
+    if not isinstance(raw, dict):
+        raise ProjectError(f"{old} is not a YAML mapping of settings; nothing written")
     raw.setdefault("runs_dir", "phylocli/runs")
     raw.setdefault("nextflow_dir", ".")
     raw["prepare"] = "locked"

@@ -362,6 +362,16 @@ def adopt(dest: Path = typer.Argument(..., help="an existing phylohpc project (h
 
 
 @app.command()
+def doctor():
+    """Check tools, python packages, the submodule and the project's inputs (reads only)."""
+    from druid import doctor as d
+    cs = d.checks()
+    for c in cs:
+        typer.echo(f"{'OK  ' if c.ok else 'FAIL'} {c.name:<16} {c.detail}")
+    raise typer.Exit(0 if all(c.ok for c in cs) else 1)
+
+
+@app.command()
 def status(hg: str = typer.Argument(None, help="HG id: show its last attempt per stage "
                                                "(requested vs used resources, Nextflow + phylocli)"),
            ids: Path = typer.Option(None, "--ids", help="restrict to the HG ids in this file"),
