@@ -3317,6 +3317,7 @@ def test_t_opens_the_tree_at_the_hg_og_and_member(cli, monkeypatch):
             assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG1"
             await _press_t(app, pilot, "#res", 0)                     # HG: whole tree, root
             assert isinstance(app.screen, TreeScreen)
+            assert app.screen.write_guard is paths.writable      # `w` stays inside the project
             tv = app.screen.query_one(TreeView)
             m = tv.model
             assert tv.cursor == 0 and m.highlight == set() and m.meta_cols[0] == "orthogroup"

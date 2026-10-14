@@ -354,9 +354,10 @@ class TreeScreen(Screen):
 
     def __init__(self, model: TreeModel, view: str = "clado", title: str = "",
                  path: Optional[Path] = None, focus: Optional[int] = None, highlight=None,
-                 **kwargs):
+                 write_guard=None, **kwargs):
         super().__init__(**kwargs)
         self.model, self.start_view, self.title_text = model, view, title
+        self.write_guard = write_guard            # embedding caller's check on the output path (druid: inside the project)
         self.path = Path(path) if path is not None else None      # the input file (for `w`)
         self.focus_node = focus                   # the cursor's first node (an embedding caller)
         model.highlight = set(highlight or ())
@@ -485,6 +486,12 @@ class TreeScreen(Screen):
         if self.path is not None and out.resolve() == self.path.resolve():
             self._status("will not overwrite the input")
             return
+        if self.write_guard is not None:
+            try:
+                out = Path(self.write_guard(out))
+            except Exception as e:
+                self._status(f"refused: {e}")
+                return
         try:
             out.write_text(self.model.to_newick() + "\n")
         except OSError as e:

@@ -1648,7 +1648,8 @@ class PhyloApp(App):
         if not self._tree_current(gen):
             return
         from treeview.widget import TreeScreen
-        self.push_screen(TreeScreen(m, title=title, path=path, focus=focus, highlight=hl))
+        self.push_screen(TreeScreen(m, title=title, path=path, focus=focus, highlight=hl,
+                                    write_guard=paths.writable))
         for n in notes:
             self.notify(n, severity="warning")
 
