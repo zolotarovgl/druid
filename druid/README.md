@@ -229,6 +229,8 @@ and underlined (`n`/`N` step through them; members missing from the tree are rep
 members pane that member's tip. The `*.ortholog_groups.csv` columns show as metadata (`t` in the
 tree, `c` cycles the colouring). `esc` returns to Results unchanged (first `esc` clears the
 underline/search). Not in the header row of a table: `↓` first. A missing tree is a warning, never a crash.
+The tree opens with branch lengths to scale and collapsed by orthogroup (14/10/2026); the OG or
+member it opens on stays expanded (`e` expands all, `l` drops the lengths).
 
 `?` lists every key, in phylocli and in the tree (`esc`, `?` or `q` closes it); the help line at
 the top of each is one line (`… · ? keys`).

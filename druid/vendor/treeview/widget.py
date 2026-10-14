@@ -75,7 +75,8 @@ class TreeView(ScrollView, can_focus=True):
         super().__init__(**kwargs)
         self.model = model
         self.view = view
-        self.scaled = False                  # cladogram: branch lengths to scale
+        self.scaled = True                   # cladogram: branch lengths to scale, the default
+        #                                      (Grygoriy, 14/10/2026)
         self.gap = -1                        # cladogram: filler rows between node rows (0-3);
         #                                      -1 = compact (one row per leaf), the default
         #                                      (Grygoriy, 13/10/2026)
@@ -151,8 +152,9 @@ class TreeView(ScrollView, can_focus=True):
 
     def watch_show_vertical_scrollbar(self, old: bool, new: bool) -> None:
         """The scrollbar appears (or goes) after the rows are set, narrowing (widening) the view
-        without a resize: fit the cladogram to the width it has now."""
-        if self.view == "clado" and self.scrollable_content_region.width != self._fit_w:
+        without a resize: fit the cladogram to the width it has now.  The region may still be
+        the old width here, so the width is compared after the refresh (in _refit)."""
+        if self.view == "clado":
             self.call_after_refresh(self._refit)
 
     def _refit(self) -> None:
@@ -361,6 +363,11 @@ class TreeScreen(Screen):
         self.hits: list = sorted(model.highlight)  # n/N step through the highlighted tips
         self.hit = -1
         self.mode = ""
+        # opens collapsed by orthogroup (Grygoriy, 14/10/2026), the focus and marked tips shown
+        self.n_grouped = model.collapse_by_group() if model.has_meta else 0
+        if self.n_grouped:
+            keep = model.highlight | ({focus} if focus is not None else set())
+            self.n_grouped -= model.expand_holding(keep)
 
     def compose(self):
         yield Static(HELP, id="help")
@@ -377,8 +384,10 @@ class TreeScreen(Screen):
         self._status()
         m = self.model
         if m.has_meta:                    # queued behind the tree's own first messages
-            self.tree.post_message(TreeView.Note(
-                self.tree, f"metadata: {m.meta_matched}/{m.ntips[0]} tips matched"))
+            note = f"metadata: {m.meta_matched}/{m.ntips[0]} tips matched"
+            if self.n_grouped:
+                note += f" · {self.n_grouped} {m.group_column()} clades collapsed"
+            self.tree.post_message(TreeView.Note(self.tree, note))
 
     @property
     def tree(self) -> TreeView:

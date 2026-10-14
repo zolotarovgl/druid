@@ -396,6 +396,16 @@ class TreeModel:
         self.group.update({i: val[i] for i in hit})
         return len(hit)
 
+    def expand_holding(self, ids) -> int:
+        """Expand every collapsed clade that is, or holds, one of the nodes `ids` (what an opener
+        points at or marks stays visible); returns how many were expanded."""
+        ids = list(ids)
+        hit = {c for c in self.collapsed if any(c <= j < c + self.size[c] for j in ids)}
+        self.collapsed -= hit
+        for c in hit:
+            self.group.pop(c, None)
+        return len(hit)
+
     def meta_width_max(self) -> int:
         """The longest metadata value or column name: the width that cuts nothing."""
         return max([len(c) for c in self.meta_cols]
