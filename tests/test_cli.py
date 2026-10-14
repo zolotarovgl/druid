@@ -1,11 +1,10 @@
 import os
 import stat
-import tempfile
 
 import pytest
 from typer.testing import CliRunner
 
-from druid import cli as cli_mod
+from druid import cli as cli_mod, paths
 
 _state = {}
 
@@ -39,10 +38,7 @@ def cli(results_tree, tmp_path, monkeypatch):
     for p in bindir.iterdir():
         p.chmod(p.stat().st_mode | stat.S_IXUSR)
     runs = root / "runs"                       # the fixture's druid.yaml: runs_dir: runs
-    tmpd = tmp_path / "tmp"
-    tmpd.mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(tmpd))
-    _state.update({"bin": bindir, "runs": runs, "dry": tmpd / "phylocli-dryrun"})
+    _state.update({"bin": bindir, "runs": runs, "dry": root / ".druid" / "tmp" / "dryrun"})
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_SQUEUE", "")
     runner = CliRunner()
@@ -438,7 +434,11 @@ def test_set_param_written_to_run_config(cli, results_tree):
     run = _dry_run_dir("align")
     params = yaml.safe_load((run / "config.yaml").read_text())["params"]
     assert params["MAFFT_OPT"] == "--auto" and params["MAX_SPR"] == 2
-    assert f'export PHYLOCLI_CONFIG="{run}/config.yaml"' in (run / "array_0.sbatch").read_text()
+    text = (run / "array_0.sbatch").read_text()
+    assert f'export DRUID_CONFIG="{run}/config.yaml"' in text
+    assert f'export DRUID_PROJECT="{paths.project_root()}"' in text
+    assert f'python3 "{paths.DRUID_HOME}/druid/cli.py" _run' in text
+    assert "#SBATCH --job-name=phylo-" in text
     assert "MAX_SPR=2" in r.output
     assert (root / "druid.yaml").read_text() == before        # global config untouched
 
@@ -468,7 +468,7 @@ def test_run_config_always_written(cli):
     assert cli(["submit", "align", "tfs.C_x.HG1", "-n"]).exit_code == 0
     run = _dry_run_dir("align")
     assert (run / "config.yaml").exists()
-    assert "export PHYLOCLI_CONFIG=" in (run / "array_0.sbatch").read_text()
+    assert "export DRUID_CONFIG=" in (run / "array_0.sbatch").read_text()
 
 
 def _task_rows(output):
@@ -585,3 +585,9 @@ def test_project_option_selects_the_project(results_tree, tmp_path, monkeypatch)
     assert r.exit_code == 0, r.output
     assert paths.project_root() == root.resolve()
     paths.use(None)
+
+
+def test_dry_run_scripts_go_under_the_project(results_tree):
+    from druid import model, paths
+    d = model.new_run_dir("align", dry_run=True)
+    assert d.parent == paths.project_root() / ".druid" / "tmp" / "dryrun"

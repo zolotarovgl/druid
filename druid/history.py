@@ -13,11 +13,10 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from druid import core
+from druid import core, paths
 from druid.common import (FAILED_STATES, expand_indices, fmt_mem, fmt_time, ids_path,
                              runs_dir)
 
@@ -116,10 +115,9 @@ def _parse_nf(text: str, started: str) -> list[tuple]:
 
 
 def _call_nextflow(nextflow_dir: Path, run: str) -> str:
-    fd, tmp = tempfile.mkstemp(prefix="phylocli-nxflog-", suffix=".log")
-    os.close(fd)
+    tmp = paths.mkstemp(prefix="druid-nxflog-", suffix=".log")
     try:
-        r = subprocess.run(["nextflow", "-log", tmp, "log", run, "-f", NF_FIELDS],
+        r = subprocess.run(["nextflow", "-log", str(tmp), "log", run, "-f", NF_FIELDS],
                            cwd=str(nextflow_dir), capture_output=True, text=True,
                            env={**os.environ, "NXF_VER": os.environ.get("NXF_VER", NF_VER)},
                            timeout=NEXTFLOW_TIMEOUT)
@@ -127,7 +125,7 @@ def _call_nextflow(nextflow_dir: Path, run: str) -> str:
         raise RuntimeError(f"nextflow log timed out after {NEXTFLOW_TIMEOUT} s") from None
     finally:
         try:
-            os.unlink(tmp)
+            paths.unlink(tmp)
         except OSError:
             pass
     if r.returncode != 0:

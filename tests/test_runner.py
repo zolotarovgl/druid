@@ -6,7 +6,7 @@ from unittest import mock
 
 import pytest
 
-from druid import runner
+from druid import paths, runner
 
 
 def test_publish_marker_last_and_atomic(tmp_path):
@@ -51,8 +51,11 @@ def test_stage_env(results_tree):
     cfg, _ = results_tree
     env = runner.stage_env(cfg, "align", "tfs.A.HG11", 4)
     assert env["ID"] == "tfs.A.HG11" and env["CPUS"] == "4"
-    assert env["PROJECT_DIR"] == str(runner.DRUID_HOME) and env["OUTDIR"] == str(cfg.outdir)
-    assert env["DRUID_HOME"] == str(runner.DRUID_HOME)
+    assert env["OUTDIR"] == str(cfg.outdir)
+    assert env["PROJECT_DIR"] == str(paths.project_root())
+    assert env["DRUID_HOME"] == str(runner.DRUID_HOME) == str(paths.DRUID_HOME)
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert env["PROJECT_DIR"] != env["DRUID_HOME"]
     assert env["PYTHONNOUSERSITE"] == "1"
     assert env["run_generax"] == "true" and env["MAX_SPR"] == "3"
 

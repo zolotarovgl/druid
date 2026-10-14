@@ -9,7 +9,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -400,8 +399,10 @@ SBATCH = """#!/usr/bin/env bash
 set -uo pipefail
 HG=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "{ids_file}")
 echo "phylo {stage} ${{HG}} (array ${{SLURM_ARRAY_JOB_ID}}_${{SLURM_ARRAY_TASK_ID}})"
-export PHYLOCLI_CONFIG="{run_dir}/config.yaml"
-python3 "{root}/druid/cli.py" _run {stage} "$HG" --run-dir "{run_dir}" &
+export DRUID_PROJECT="{project}"
+export DRUID_CONFIG="{run_dir}/config.yaml"
+export PYTHONDONTWRITEBYTECODE=1
+python3 "{druid_home}/druid/cli.py" _run {stage} "$HG" --run-dir "{run_dir}" &
 PID=$!
 trap 'kill -USR2 $PID 2>/dev/null' USR2
 trap 'kill -TERM $PID 2>/dev/null' TERM
@@ -416,9 +417,9 @@ def chunks(ids: list[str], n: int = MAX_ARRAY) -> list[list[str]]:
 
 
 def new_run_dir(stage: str, dry_run: bool = False) -> Path:
-    # A dry run writes its scripts under the system temp dir, so runs/ only holds real
+    # A dry run writes its scripts under the project's .druid/tmp, so runs/ only holds real
     # submissions (queue and the already-queued check read runs/*/jobs.tsv).
-    root = Path(tempfile.gettempdir()) / "phylocli-dryrun" if dry_run else runs_dir()
+    root = paths.tmp_dir() / "dryrun" if dry_run else runs_dir()
     base = root / f"{datetime.now():%Y%m%d-%H%M%S}_{stage}"
     d, k = base, 1
     while True:
@@ -582,7 +583,8 @@ def write_run(cfg: core.Config, raw: dict, p: Plan, dry_run: bool, max_running: 
             cpus=res.cpus, mem_mb=res.mem_mb, time_min=res.time_min,
             n_minus_1=len(ids_) - 1, max_running=max_running, run_dir=run_dir,
             signal_line=f"#SBATCH --signal={res.signal}" if res.signal else "",
-            ids_file=ids_file, root=paths.DRUID_HOME))
+            ids_file=ids_file, project=paths.project_root(),
+            druid_home=paths.DRUID_HOME))
         arrays.append((res, ids_, ids_file, script))
     return Written(run_dir, arrays)
 

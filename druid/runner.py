@@ -21,8 +21,9 @@ NO_OUTPUT_RC = 65
 
 def stage_env(cfg: Config, stage: str, hg: str, cpus: int) -> dict[str, str]:
     env = dict(os.environ)
-    env.update(ID=hg, CPUS=str(cpus), PROJECT_DIR=str(DRUID_HOME), DRUID_HOME=str(DRUID_HOME),
-               OUTDIR=str(cfg.outdir), PYTHONNOUSERSITE="1")
+    env.update(ID=hg, CPUS=str(cpus), PROJECT_DIR=str(paths.project_root()),
+               DRUID_HOME=str(DRUID_HOME), OUTDIR=str(cfg.outdir),
+               PYTHONNOUSERSITE="1", PYTHONDONTWRITEBYTECODE="1")
     for k, v in cfg.params.items():
         if isinstance(v, bool):
             env[str(k)] = "true" if v else "false"

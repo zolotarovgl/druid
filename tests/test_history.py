@@ -1,6 +1,7 @@
 """Per-HG job history: Nextflow run database + phylocli submissions (`phylo status HG`)."""
 import os
 import stat
+from pathlib import Path
 
 import pytest
 import yaml
@@ -68,7 +69,7 @@ def hist(cli, results_tree, tmp_path, monkeypatch):   # noqa: F811
     fake.write_text(
         '#!/bin/sh\n'
         '[ "$1" = "-log" ] || { echo "nextflow without -log" >&2; exit 9; }\n'
-        f'case "$2" in "{nf}"/*|"{root}"/*) echo "log inside project" >&2; exit 8;; esac\n'
+        f'case "$2" in "{root}/.druid/tmp/"*) ;; *) echo "log not under .druid/tmp" >&2; exit 8;; esac\n'
         f'echo "$4 $PWD $NXF_VER" >> {calls}\n'
         '[ "$3" = log ] && cat "$FAKE_NFLOG_DIR/$4.tsv"\n')
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
@@ -348,3 +349,17 @@ def test_no_cache_without_sacct(hist):
     atts = history._phylocli_attempts(None)
     assert atts and all(a.status == "unknown" for a in atts)
     assert not (history.history_dir() / "phylocli_arrays.json").exists()
+
+
+def test_nextflow_log_temp_is_inside_the_project(results_tree, monkeypatch):
+    from druid import history, paths
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["log"] = cmd[cmd.index("-log") + 1]
+        class R: returncode, stdout, stderr = 0, "", ""
+        return R()
+    monkeypatch.setattr(history.subprocess, "run", fake_run)
+    history._call_nextflow(paths.project_root(), "run_x")
+    assert Path(seen["log"]).parent == paths.project_root() / ".druid" / "tmp"
+    assert not Path(seen["log"]).exists()                    # removed afterwards
