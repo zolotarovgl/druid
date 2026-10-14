@@ -189,9 +189,18 @@ def test_old_dash_run_cached_newest_not(hist):
 
 def test_history_env_dir(hist, monkeypatch, tmp_path):
     _cli, cfg, _c, _t = hist
-    monkeypatch.setenv("DRUID_HISTORY", str(tmp_path / "elsewhere"))
+    where = paths.project_root() / "elsewhere"
+    monkeypatch.setenv("DRUID_HISTORY", str(where))
     history.attempts(cfg, HG)
-    assert (tmp_path / "elsewhere/nf_run_ok.tsv").is_file()
+    assert (where / "nf_run_ok.tsv").is_file()
+
+
+def test_history_env_dir_outside_the_project_is_refused(hist, monkeypatch, tmp_path):
+    _cli, cfg, _c, _t = hist
+    monkeypatch.setenv("DRUID_HISTORY", str(tmp_path / "outside"))
+    with pytest.raises(paths.OutsideProject):
+        history.attempts(cfg, HG)
+    assert not (tmp_path / "outside").exists()
 
 
 def test_nextflow_missing_warns_and_keeps_phylocli(hist, monkeypatch):

@@ -194,3 +194,13 @@ def test_removing_the_project_root_is_refused(proj):
     with pytest.raises(paths.OutsideProject):
         paths.unlink(proj / "sub" / "..")       # resolves to the root itself
     assert (proj / "druid.yaml").is_file()
+
+
+def test_append_text_inside_and_outside(proj, tmp_path):
+    paths.use(proj)
+    paths.append_text(proj / "jobs.tsv", "a\n")
+    paths.append_text(proj / "jobs.tsv", "b\n")
+    assert (proj / "jobs.tsv").read_text() == "a\nb\n"
+    with pytest.raises(paths.OutsideProject):
+        paths.append_text(tmp_path / "out.tsv", "x")
+    assert not (tmp_path / "out.tsv").exists()

@@ -424,12 +424,12 @@ def new_run_dir(stage: str, dry_run: bool = False) -> Path:
     d, k = base, 1
     while True:
         try:
-            d.mkdir(parents=True)
+            paths.mkdir(d, parents=True)
             break
         except FileExistsError:
             k += 1
             d = base.with_name(f"{base.name}-{k}")
-    (d / "logs").mkdir()
+    paths.mkdir(d / "logs")
     return d
 
 
@@ -570,15 +570,15 @@ def write_run(cfg: core.Config, raw: dict, p: Plan, dry_run: bool, max_running: 
         # (the file the ids were validated against), and the run keeps it as the record.
         raw = copy.deepcopy(raw)
         snap = run_dir / "genefam.csv"
-        shutil.copy2(cfg.params["genefam_info"], snap)
+        paths.copy2(cfg.params["genefam_info"], snap)
         raw.setdefault("params", {})["genefam_info"] = str(snap)
-    (run_dir / "config.yaml").write_text(yaml.safe_dump(raw, sort_keys=False))
+    paths.write_text(run_dir / "config.yaml", yaml.safe_dump(raw, sort_keys=False))
     arrays = []
     for k, (res, ids_) in enumerate(p.groups):
         ids_file = run_dir / f"ids_{k}.txt"
-        ids_file.write_text("\n".join(ids_) + "\n")
+        paths.write_text(ids_file, "\n".join(ids_) + "\n")
         script = run_dir / f"array_{k}.sbatch"
-        script.write_text(SBATCH.format(
+        paths.write_text(script, SBATCH.format(
             stage=p.stage, partition=partition or cfg.partition, qos=qos or res.qos,
             cpus=res.cpus, mem_mb=res.mem_mb, time_min=res.time_min,
             n_minus_1=len(ids_) - 1, max_running=max_running, run_dir=run_dir,
@@ -610,8 +610,7 @@ def sbatch_all(w: Written, submitted: list[str] | None = None) -> tuple[list[str
                                + ("not submitted (or unknown): " if timed_out else "not submitted: ")
                                + " ".join(str(a[3]) for a in w.arrays[i:]))
         submitted.append(jid)                        # before the write: the array IS queued
-        with open(w.run_dir / "jobs.tsv", "a") as fh:
-            fh.write(f"{jid}\t{ids_file}\n")
+        paths.append_text(w.run_dir / "jobs.tsv", f"{jid}\t{ids_file}\n")
     return submitted, None
 
 

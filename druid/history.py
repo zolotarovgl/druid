@@ -134,10 +134,10 @@ def _call_nextflow(nextflow_dir: Path, run: str) -> str:
 
 
 def _write_cache(path: Path, rows: list[tuple]):
-    path.parent.mkdir(parents=True, exist_ok=True)
+    paths.mkdir(path.parent, parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text("".join("\t".join(r) + "\n" for r in rows))
-    os.replace(tmp, path)
+    paths.write_text(tmp, "".join("\t".join(r) + "\n" for r in rows))
+    paths.replace(tmp, path)
 
 
 def _nf_rows(cfg: core.Config, warn, script: str = "step2.nf") -> list[tuple[str, tuple]]:
@@ -302,10 +302,10 @@ def _load_array_cache(path: Path) -> dict:
 
 def _write_array_cache(path: Path, data: dict):
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        paths.mkdir(path.parent, parents=True, exist_ok=True)
         tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")   # per process: concurrent writers
-        tmp.write_text(json.dumps(data))
-        os.replace(tmp, path)
+        paths.write_text(tmp, json.dumps(data))
+        paths.replace(tmp, path)
     except OSError:
         pass        # the cache is an optimisation; never fail a refresh over it
 

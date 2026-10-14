@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import glob
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -47,16 +46,16 @@ def _copy_atomic(src: Path, dest: Path) -> Path:
     final = dest / src.name
     tmp = dest / (src.name + TMP_SUFFIX)
     if tmp.is_dir() and not tmp.is_symlink():
-        shutil.rmtree(tmp)
+        paths.rmtree(tmp)
     elif tmp.exists() or tmp.is_symlink():
-        tmp.unlink()
+        paths.unlink(tmp)
     if src.is_dir():
-        shutil.copytree(src, tmp)  # symlinks=False: copies link targets
+        paths.copytree(src, tmp)  # symlinks=False: copies link targets
         if final.is_dir() and not final.is_symlink():
-            shutil.rmtree(final)
+            paths.rmtree(final)
     else:
-        shutil.copy2(src, tmp)  # follows symlinks
-    os.replace(tmp, final)
+        paths.copy2(src, tmp)  # follows symlinks
+    paths.replace(tmp, final)
     return final
 
 
@@ -65,7 +64,7 @@ def publish(work: Path, dest: Path, first: list[str], marker: str) -> list[Path]
     markers = _expand(work, [marker])
     if not markers:
         raise FileNotFoundError(f"marker {marker!r} not produced in {work}")
-    dest.mkdir(parents=True, exist_ok=True)
+    paths.mkdir(dest, parents=True, exist_ok=True)
     firsts = [p for p in _expand(work, first) if p not in markers]
     return [_copy_atomic(p, dest) for p in firsts + markers]
 
@@ -74,11 +73,11 @@ def run_one(cfg: Config, stage: str, hg: str, work_root: Path) -> int:
     from druid import core
     work = Path(work_root) / hg
     if work.exists():
-        shutil.rmtree(work)
-    work.mkdir(parents=True)
+        paths.rmtree(work)
+    paths.mkdir(work, parents=True)
     inputs = stage_inputs(cfg, stage, hg)
     for p in inputs:
-        (work / p.name).symlink_to(p)
+        paths.symlink(work / p.name, p)
     table = core.load_resources_tsv(Path(cfg.params.get("resources_tsv", "")))
     cpus = core.resources(cfg, stage, hg, table).cpus
     state = {"proc": None, "pending": []}
@@ -113,5 +112,5 @@ def run_one(cfg: Config, stage: str, hg: str, work_root: Path) -> int:
             print(f"phylocli: {stage} for {hg} exited 0 but produced no output matching "
                   f"{marker!r}; nothing published, work dir kept: {work}", file=sys.stderr)
             return NO_OUTPUT_RC
-        shutil.rmtree(work)
+        paths.rmtree(work)
     return rc

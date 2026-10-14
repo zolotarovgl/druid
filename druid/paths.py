@@ -115,6 +115,13 @@ def write_text(p: PathLike, text: str) -> Path:
     return q
 
 
+def append_text(p: PathLike, text: str) -> Path:
+    q = writable(p)
+    with open(q, "a") as fh:
+        fh.write(text)
+    return q
+
+
 def mkdir(p: PathLike, parents: bool = True, exist_ok: bool = False) -> Path:
     q = writable(p)
     q.mkdir(parents=parents, exist_ok=exist_ok)

@@ -284,7 +284,7 @@ def stage_project(tmp_path, monkeypatch) -> Path:
 
 def _spy_replace(monkeypatch) -> list:
     order, real = [], os.replace
-    monkeypatch.setattr(runner.os, "replace", lambda a, b: (order.append(Path(b).name), real(a, b)))
+    monkeypatch.setattr(paths.os, "replace", lambda a, b: (order.append(Path(b).name), real(a, b)))
     return order
 
 
@@ -298,20 +298,20 @@ def test_search_publishes_marker_last(results_tree, tmp_path, monkeypatch):
     cfg, root = results_tree
     stage_project(tmp_path, monkeypatch)
     order = _spy_replace(monkeypatch)
-    assert runner.run_one(cfg, "search", "slc.NEW", tmp_path / "work") == 0
+    assert runner.run_one(cfg, "search", "slc.NEW", paths.project_root() / "work") == 0
     assert order == ["slc.NEW.domains.csv", "slc.NEW.domains_ummerged.csv", "slc.NEW.genes.list",
                      "slc.NEW.domains.fasta"]
     assert (tmp_path / "args.txt").read_text().split() == [
         "hmmsearch", "-f", "input.fasta", "-g", "gene_families_searchinfo.csv", "NEW", "-o", ".",
         "--pfam_db", str(root / "Pfam-A.hmm"), "--domain_expand", "30", "--ncpu", "4"]
     assert core.family_done(cfg, {"slc.NEW"})["hits"] == {"slc.NEW"}
-    assert not (tmp_path / "work" / "slc.NEW").exists()
+    assert not (paths.project_root() / "work" / "slc.NEW").exists()
 
 
 def test_search_trailing_tab_family(results_tree, tmp_path, monkeypatch):
     cfg, _ = results_tree
     stage_project(tmp_path, monkeypatch)
-    assert runner.run_one(cfg, "search", "cal.Trail", tmp_path / "work") == 0
+    assert runner.run_one(cfg, "search", "cal.Trail", paths.project_root() / "work") == 0
     assert (cfg.outdir / "search/cal.Trail.domains.fasta").read_text() == ">s1\nMKV\n"
 
 
@@ -319,7 +319,7 @@ def test_search_no_hits_publishes_empty_marker(results_tree, tmp_path, monkeypat
     cfg, _ = results_tree
     stage_project(tmp_path, monkeypatch)
     monkeypatch.setenv("FAKE_HMM", "nohits")
-    assert runner.run_one(cfg, "search", "slc.NEW", tmp_path / "work") == 0
+    assert runner.run_one(cfg, "search", "slc.NEW", paths.project_root() / "work") == 0
     d = core.family_done(cfg, {"slc.NEW"})
     assert d["no_hits"] == {"slc.NEW"} and d["cluster"] == {"slc.NEW"}
 
@@ -330,7 +330,7 @@ def test_search_name_under_two_prefixes_warns_and_publishes_empty(results_tree, 
     stage_project(tmp_path, monkeypatch)
     g = root / "gene_families_searchinfo.csv"
     g.write_text(g.read_text() + "Dup\tPF_D\t1.1\t3\tGA\tRBP\trbp\nDup\tPF_D\t1.1\t3\tGA\tTF\ttfs\n")
-    assert runner.run_one(cfg, "search", "rbp.Dup", tmp_path / "work") == 0   # hits went to tfs.Dup.*
+    assert runner.run_one(cfg, "search", "rbp.Dup", paths.project_root() / "work") == 0   # hits went to tfs.Dup.*
     err = capfd.readouterr().err
     assert "WARNING: family name Dup" in err and "rbp.Dup's hits are written as tfs.Dup.*" in err
     s = cfg.outdir / "search"
@@ -338,7 +338,7 @@ def test_search_name_under_two_prefixes_warns_and_publishes_empty(results_tree, 
     assert core.family_done(cfg, {"rbp.Dup"})["no_hits"] == {"rbp.Dup"}
     assert not list(s.glob("tfs.Dup.*"))                                      # not this task's id
     monkeypatch.setenv("FAKE_HMM", "notfound")                                # name not found at all
-    assert runner.run_one(cfg, "search", "slc.NEW", tmp_path / "work") == 0
+    assert runner.run_one(cfg, "search", "slc.NEW", paths.project_root() / "work") == 0
     assert "WARNING: main.py hmmsearch wrote nothing named slc.NEW.*" in capfd.readouterr().err
     assert core.family_done(cfg, {"slc.NEW"})["no_hits"] == {"slc.NEW"}
 
@@ -350,7 +350,7 @@ def test_search_hmm_dir_is_never_written(results_tree, tmp_path, monkeypatch):
     hmms.mkdir()
     (hmms / "PF_N.hmm").write_text("HMMER3/f\n")
     cfg = dataclasses.replace(cfg, params={**cfg.params, "hmm_dir": str(hmms)})
-    assert runner.run_one(cfg, "search", "slc.NEW", tmp_path / "work") == 0
+    assert runner.run_one(cfg, "search", "slc.NEW", paths.project_root() / "work") == 0
     assert sorted(p.name for p in hmms.iterdir()) == ["PF_N.hmm"]       # fetched.hmm went to the copy
     assert "--hmm_dir hmm_dir.work" in (tmp_path / "args.txt").read_text()
 
@@ -367,7 +367,7 @@ def test_cluster_drops_small_hgs_keeps_full_tsv(results_tree, tmp_path, monkeypa
     cfg = _cluster_cfg(results_tree, DOMAINS)
     stage_project(tmp_path, monkeypatch)
     order = _spy_replace(monkeypatch)
-    assert runner.run_one(cfg, "cluster", "slc.NEW", tmp_path / "work") == 0
+    assert runner.run_one(cfg, "cluster", "slc.NEW", paths.project_root() / "work") == 0
     assert "slc.NEW: skipped 3 HGs below min_seqs/min_distinct (5/4); kept 1" in capfd.readouterr().out
     assert order == ["slc.NEW.HG3.fasta", "slc.NEW_cluster.tsv"]          # marker last
     clu = cfg.outdir / "clusters"
@@ -383,7 +383,7 @@ def test_cluster_drops_small_hgs_keeps_full_tsv(results_tree, tmp_path, monkeypa
 def test_cluster_all_small_publishes_tsv_only(results_tree, tmp_path, monkeypatch):
     cfg = _cluster_cfg(results_tree, DOMAINS.split(">c1")[0])                  # HG1 + HG2 only
     stage_project(tmp_path, monkeypatch)
-    assert runner.run_one(cfg, "cluster", "slc.NEW", tmp_path / "work") == 0
+    assert runner.run_one(cfg, "cluster", "slc.NEW", paths.project_root() / "work") == 0
     assert (cfg.outdir / "clusters/slc.NEW_cluster.tsv").is_file()
     assert not list((cfg.outdir / "clusters").glob("slc.NEW.HG*.fasta"))
     assert core.family_done(cfg, {"slc.NEW"})["cluster"] == {"slc.NEW"}

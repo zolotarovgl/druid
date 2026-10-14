@@ -94,9 +94,21 @@ def config_from_raw(raw: dict) -> Config:
     for k in PATH_PARAMS:
         if params.get(k):                       # hmm_dir may be null
             params[k] = _abs(params[k])
-    return Config(outdir=Path(_abs(raw["outdir"])), params=params,
-                  partition=raw["partition"], qos=raw["qos"],
-                  nextflow_dir=Path(_abs(raw.get("nextflow_dir", "."))))
+    cfg = Config(outdir=Path(_abs(raw["outdir"])), params=params,
+                 partition=raw["partition"], qos=raw["qos"],
+                 nextflow_dir=Path(_abs(raw.get("nextflow_dir", "."))))
+    root = paths.project_root()
+    runs = Path(_abs(raw.get("runs_dir") or "runs"))
+    for key, p in (("outdir", cfg.outdir), ("runs_dir", runs),
+                   ("infasta", params.get("infasta")), ("genefam_info", params.get("genefam_info"))):
+        if p and not _inside(Path(p), root):
+            raise ValueError(f"{key} must be inside the project {root}: {p}")
+    return cfg
+
+
+def _inside(p: Path, root: Path) -> bool:
+    r = p.resolve()
+    return r == root or root in r.parents
 
 
 @dataclass(frozen=True)
