@@ -5,7 +5,7 @@ import tempfile
 import pytest
 from typer.testing import CliRunner
 
-from phylocli import phylo as cli_mod
+from druid import cli as cli_mod
 
 _state = {}
 
@@ -250,7 +250,7 @@ def test_missing_without_stage_prints_summary(cli, results_tree):
 
 
 def test_ready_set_matches_inputs_ready(results_tree):
-    from phylocli import core
+    from druid import core
     cfg, _ = results_tree
     _align_hg11(results_tree)
     hgs = sorted(core.expected(cfg))

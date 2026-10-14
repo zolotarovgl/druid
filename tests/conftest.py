@@ -4,11 +4,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "workflow"))
+sys.path.insert(0, str(ROOT / "druid" / "helpers"))
 
-from phylocli import core  # noqa: E402
+from druid import core  # noqa: E402
 
 HEADER = "id aln_mem aln_time gr_mem gr_time gr_watcher_mem gr_watcher_time phy_mem phy_time pvm_mem pvm_time"
 ROW = "tfs.A.HG11 800.MB 45.min 3100.MB 120.min 3100.MB 180.min 800.MB 1140.min 800.MB 9.min"
@@ -45,7 +45,7 @@ def results_tree(tmp_path):
     _w(root / "input.fasta", ">p1\nMKV\n")
     _w(root / "Pfam-A.hmm", "HMMER3/f\n")
     cfg_file = root / "config.yaml"
-    base = yaml.safe_load((ROOT / "phylocli/config.yaml").read_text())
+    base = yaml.safe_load((ROOT / "druid/config.yaml").read_text())
     base["outdir"] = str(out)
     # Never read the real project's .nextflow/ run history (slow, and not a fixture).
     base["nextflow_dir"] = str(root)

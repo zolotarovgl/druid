@@ -14,9 +14,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from phylocli import core, history
+from druid import core, history
 import og_origin  # noqa: E402  (core puts workflow/ on sys.path)
-from phylocli.common import FAILED_STATES, RUNNING_STATES, ROOT, expand_indices, ids_path, runs_dir
+from druid.common import FAILED_STATES, RUNNING_STATES, ROOT, expand_indices, ids_path, runs_dir
 
 SLURM_TIMEOUT = 60  # seconds; a stuck slurmctld must not hang the CLI or freeze the TUI
 
@@ -401,7 +401,7 @@ set -uo pipefail
 HG=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "{ids_file}")
 echo "phylo {stage} ${{HG}} (array ${{SLURM_ARRAY_JOB_ID}}_${{SLURM_ARRAY_TASK_ID}})"
 export PHYLOCLI_CONFIG="{run_dir}/config.yaml"
-python3 "{root}/phylocli/phylo.py" _run {stage} "$HG" --run-dir "{run_dir}" &
+python3 "{root}/druid/cli.py" _run {stage} "$HG" --run-dir "{run_dir}" &
 PID=$!
 trap 'kill -USR2 $PID 2>/dev/null' USR2
 trap 'kill -TERM $PID 2>/dev/null' TERM

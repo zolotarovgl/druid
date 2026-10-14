@@ -7,8 +7,8 @@ import stat
 
 import pytest
 
-from phylocli import core, model
-from phylocli.tests.test_cli import _state, cli  # noqa: F401  (fixture)
+from druid import core, model
+from tests.test_cli import _state, cli  # noqa: F401  (fixture)
 
 
 def _fake(name, body):
@@ -122,7 +122,7 @@ def test_array_rows(cli, monkeypatch):
     assert (r.stage, r.job, r.n, r.counts["done"], r.counts["running"]) == ("align", "12345", 2, 1, 1)
 
 
-from phylocli import history
+from druid import history
 
 
 def _att(status, exit_="-", mem="2.0 GB", time="30m"):

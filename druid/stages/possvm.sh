@@ -9,7 +9,7 @@ REFNAMES_FILE="$2"
 # collapsed 38 of 146 TF families to one orthogroup spanning the whole tree
 # (tfs.Forkhead.HG2: 1 group rooted vs 12 with the flag). PVM_PREV deliberately does
 # NOT get this -- its IQ-TREE trees are genuinely unrooted and need the rooting.
-python ${PROJECT_DIR}/phylogeny/main.py possvm \
+python ${DRUID_HOME}/submodules/phylogeny/main.py possvm \
     -t ${TREE} \
     --refsps ${REFSPECIES} \
     --skiproot \
@@ -22,5 +22,5 @@ python ${PROJECT_DIR}/phylogeny/main.py possvm \
 # 1.0 is REAL -- which is why this recomputes the MRCA instead of matching on "1.0".
 # Drops singleton rows; sets support to -1 where the MRCA is the root.
 for f in ${ID}.*.ortholog_groups.csv; do
-    if [ -s "$f" ]; then python ${PROJECT_DIR}/workflow/possvm_postprocess.py "$f"; fi
+    if [ -s "$f" ]; then python ${DRUID_HOME}/druid/helpers/possvm_postprocess.py "$f"; fi
 done

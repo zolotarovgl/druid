@@ -17,8 +17,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from phylocli import core
-from phylocli.common import (FAILED_STATES, expand_indices, fmt_mem, fmt_time, ids_path,
+from druid import core
+from druid.common import (FAILED_STATES, expand_indices, fmt_mem, fmt_time, ids_path,
                              runs_dir)
 
 PROC_STAGE = {"SEARCH": "search", "CLUSTER": "cluster",                       # step1.nf

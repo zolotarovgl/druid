@@ -21,13 +21,13 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 from textual.worker import get_current_worker
 
-from phylocli import core, history, model
-from phylocli.common import fmt_mem, fmt_time
+from druid import core, history, model
+from druid.common import fmt_mem, fmt_time
 
 
 def load_raw() -> dict:
     """The raw config.yaml (same path logic as `phylo submit`); written into each run dir."""
-    p = Path(os.environ.get("PHYLOCLI_CONFIG") or core.ROOT / "phylocli/config.yaml")
+    p = Path(os.environ.get("PHYLOCLI_CONFIG") or core.ROOT / "druid/config.yaml")
     return yaml.safe_load(p.read_text())
 
 FILTERS = ("actionable", "failed", "ready", "running", "blocked", "done")

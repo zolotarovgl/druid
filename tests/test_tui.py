@@ -9,9 +9,9 @@ import pytest
 
 pytest.importorskip("textual")
 
-from phylocli import core, tui  # noqa: E402
-from phylocli.tests.test_cli import _state, cli  # noqa: E402,F401
-from phylocli.tests.test_model import OG_HEAD, write_results  # noqa: E402
+from druid import core, tui  # noqa: E402
+from tests.test_cli import _state, cli  # noqa: E402,F401
+from tests.test_model import OG_HEAD, write_results  # noqa: E402
 
 SACCT_OOM = ("12345_0|COMPLETED|10M|00:01:00|0:0\\n"
              "12345_1|OUT_OF_MEMORY|4100M|00:03:00|0:125\\n")
@@ -61,12 +61,12 @@ def test_tui_select_all_and_quit(cli, monkeypatch):
 def test_tui_command_without_textual(cli, monkeypatch):
     import sys
 
-    import phylocli
+    import druid
     # None in sys.modules makes `from textual import ...` raise ModuleNotFoundError(name="textual");
     # phylocli.tui must be forgotten both as a module and as the package attribute.
     monkeypatch.setitem(sys.modules, "textual", None)
-    monkeypatch.delitem(sys.modules, "phylocli.tui", raising=False)
-    monkeypatch.delattr(phylocli, "tui", raising=False)
+    monkeypatch.delitem(sys.modules, "druid.tui", raising=False)
+    monkeypatch.delattr(druid, "tui", raising=False)
     r = cli(["tui"])
     assert r.exit_code == 1 and "pip install textual" in r.output
 
@@ -92,7 +92,7 @@ def _failed_app(cli, monkeypatch):
 
 def test_resource_groups_bump_oom(cli, monkeypatch):
     _failed_app(cli, monkeypatch)
-    from phylocli import model
+    from druid import model
     rows = [r for r in model.hg_rows(_cfg(), "align") if r.state == "failed"]
     groups = tui.resource_groups(_cfg(), "align", rows)
     assert [(g[0], g[1].mem_mb, g[2]) for g in groups] == [("OOM", 8192, ["tfs.C_x.HG1"])]
@@ -263,7 +263,7 @@ def test_refresh_keeps_stage_selection_and_cursor(cli, monkeypatch):
 
 def test_key_presses_run_no_slurm(cli, monkeypatch):
     app = _three_failed(cli, monkeypatch)
-    from phylocli import model
+    from druid import model
 
     async def go():
         async with app.run_test() as pilot:
@@ -282,7 +282,7 @@ def test_key_presses_run_no_slurm(cli, monkeypatch):
 
 def test_second_enter_while_busy_is_ignored(cli, monkeypatch):
     app = _failed_app(cli, monkeypatch)
-    from phylocli import model
+    from druid import model
 
     async def go():
         async with app.run_test() as pilot:
@@ -367,7 +367,7 @@ def test_no_duplicate_submit_from_same_dialog(cli, monkeypatch):
 
 def test_load_error_does_not_kill_app(cli, monkeypatch):
     app = _failed_app(cli, monkeypatch)
-    from phylocli import history
+    from druid import history
 
     def boom(*a, **k):
         raise OSError("Stale file handle")
@@ -383,7 +383,7 @@ def test_load_error_does_not_kill_app(cli, monkeypatch):
 
 def test_write_run_error_shown_in_dialog(cli, monkeypatch):
     app = _failed_app(cli, monkeypatch)
-    from phylocli import model
+    from druid import model
 
     def boom(*a, **k):
         raise OSError("disk full")
@@ -403,7 +403,7 @@ def test_write_run_error_shown_in_dialog(cli, monkeypatch):
 
 def test_error_after_sbatch_keeps_submitted_ids(cli, monkeypatch):
     app = _failed_app(cli, monkeypatch)
-    from phylocli import model
+    from druid import model
 
     def half(w, submitted=None):
         submitted.append("777")
@@ -463,7 +463,7 @@ def test_no_fasta_reads_after_load(cli, monkeypatch):
 
 def test_resource_groups_with_nseq_reads_no_fasta(cli, monkeypatch):
     _failed_app(cli, monkeypatch)
-    from phylocli import model
+    from druid import model
     rows = [r for r in model.hg_rows(_cfg(), "tree") if r.hg == "tfs.C_x.HG1"]
     calls = []
     monkeypatch.setattr(core, "nseq", lambda cfg, hg: calls.append(hg) or 0)
@@ -534,7 +534,7 @@ def test_submit_result_shows_notes_and_uses_given_raw(cli, monkeypatch):
 
 
 def _counting_attempts(monkeypatch):
-    from phylocli import history
+    from druid import history
     calls = {"n": 0}
     real = history.attempts
 
@@ -666,7 +666,7 @@ def test_refresh_in_hg_view_stays_in_group(cli):
 
 def test_open_group_before_hg_data_shows_loading(cli, monkeypatch):
     import threading
-    from phylocli import history
+    from druid import history
     gate = threading.Event()
     real = history.attempts
 
@@ -805,7 +805,7 @@ def test_default_filter_shows_failed_and_ready_then_f_goes_to_failed(cli, monkey
 
 def test_f_while_history_loading_keeps_user_filter(cli, monkeypatch):
     import threading
-    from phylocli import history
+    from druid import history
     gate = threading.Event()
     real = history.attempts
 
@@ -843,7 +843,7 @@ def test_tui_command_runs_without_mouse(cli, monkeypatch):
 
 @pytest.mark.parametrize("how", ["quit", "ctrl-c", "crash"])
 def test_tui_command_resets_terminal_on_exit(cli, monkeypatch, how):
-    from phylocli import phylo
+    from druid import cli as druid_cli
 
     def run(self, **kw):
         if how == "ctrl-c":
@@ -852,7 +852,7 @@ def test_tui_command_resets_terminal_on_exit(cli, monkeypatch, how):
             raise RuntimeError("boom")
     monkeypatch.setattr(tui.PhyloApp, "run", run)
     r = cli(["tui"])
-    assert r.output.endswith(phylo.TERM_RESET)
+    assert r.output.endswith(druid_cli.TERM_RESET)
     assert (r.exit_code == 0) == (how == "quit")
 
 
@@ -921,7 +921,7 @@ def test_panes_are_named_top_left(cli):
 
 def test_panels_grey_while_history_loads(cli, monkeypatch):
     import threading
-    from phylocli import history
+    from druid import history
     gate = threading.Event()
     real = history.attempts
 
@@ -1027,7 +1027,7 @@ def test_successful_submit_closes_dialog_and_refreshes(cli, monkeypatch):
 
 def test_partial_sbatch_failure_keeps_dialog_open(cli, monkeypatch):
     app = _failed_app(cli, monkeypatch)
-    from phylocli import model
+    from druid import model
 
     def half(w, submitted=None):
         submitted = submitted if submitted is not None else []
@@ -3058,7 +3058,7 @@ def test_spinner_stops_when_a_read_is_cancelled_by_leaving_the_window(cli, monke
 # ---- final-review fixes ----------------------------------------------------------------------
 def _flip_possvm_done():
     """tfs.C_x.HG1 had no POSSVM output; give it one (its possvm stage is now done)."""
-    from phylocli.tests.test_model import POSSVM_HG1, og_csv
+    from tests.test_model import POSSVM_HG1, og_csv
     (_cfg().outdir / "possvm/tfs.C_x.HG1.generax.support.tree.ortholog_groups.csv").write_text(
         og_csv(POSSVM_HG1))
 

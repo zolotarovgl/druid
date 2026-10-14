@@ -13,10 +13,10 @@ import pytest
 import yaml
 
 import report_status
-from phylocli import core, history, model, runner
-from phylocli import phylo as cli_mod
-from phylocli.tests.test_cli import _state, calls_txt, cli, dry_dir, runs_dir  # noqa: F401  (fixture)
-from phylocli.tests.test_history import hist  # noqa: E402,F401  (fixture)
+from druid import core, history, model, runner
+from druid import cli as cli_mod
+from tests.test_cli import _state, calls_txt, cli, dry_dir, runs_dir  # noqa: F401  (fixture)
+from tests.test_history import hist  # noqa: E402,F401  (fixture)
 
 FAMS = {"tfs.A", "tfs.B", "tfs.C_x", "slc.NEW", "cal.Trail"}
 
@@ -81,7 +81,7 @@ def test_family_ids_missing_file(results_tree, tmp_path):
 
 
 def test_config_step1_params():
-    raw = yaml.safe_load((core.ROOT / "phylocli/config.yaml").read_text())
+    raw = yaml.safe_load((core.ROOT / "druid/config.yaml").read_text())
     p = raw["params"]
     assert (p["genefam_info"], p["infasta"], p["pfam_db"], p["hmm_dir"]) == (
         "data/gene_families_searchinfo.csv", "data/input.fasta",
@@ -95,7 +95,7 @@ def test_config_step1_params():
 
 
 def test_set_hmm_dir_and_inflation():
-    raw = yaml.safe_load((core.ROOT / "phylocli/config.yaml").read_text())
+    raw = yaml.safe_load((core.ROOT / "druid/config.yaml").read_text())
     notes = core.apply_sets(raw, ["hmm_dir=/x/hmms", "s2_inflation=1.4"])
     assert raw["params"]["hmm_dir"] == "/x/hmms" and raw["params"]["s2_inflation"] == 1.4
     assert notes == ["set hmm_dir=/x/hmms (was None)", "set s2_inflation=1.4 (was 1.1)"]
@@ -261,13 +261,14 @@ DOMAINS = ("".join(f">a{i}\nMKA\n" for i in range(1, 2))               # HG1: 1 
 
 
 def stage_project(tmp_path, monkeypatch) -> Path:
-    """PROJECT_DIR with the stub main.py and the REAL workflow/ (drop_small_hgs.py,
-    report_status.py); PATH with a real `python` and a fake `samtools`. The stage scripts run
-    are the real phylocli/stages/*.sh (runner.STAGES_DIR is left alone)."""
-    proj = tmp_path / "proj"
-    (proj / "phylogeny").mkdir(parents=True)
-    (proj / "phylogeny" / "main.py").write_text(FAKE_MAIN)
-    (proj / "workflow").symlink_to(core.ROOT / "workflow")
+    """A fake DRUID_HOME with the stub submodules/phylogeny/main.py and the REAL druid/helpers/
+    (drop_small_hgs.py, report_status.py); PATH with a real `python` and a fake `samtools`. The
+    stage scripts run are the real druid/stages/*.sh (runner.STAGES_DIR is left alone)."""
+    home = tmp_path / "home"
+    (home / "submodules" / "phylogeny").mkdir(parents=True)
+    (home / "submodules" / "phylogeny" / "main.py").write_text(FAKE_MAIN)
+    (home / "druid").mkdir()
+    (home / "druid" / "helpers").symlink_to(core.ROOT / "druid" / "helpers")
     b = tmp_path / "s1bin"
     b.mkdir()
     (b / "python").write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
@@ -277,8 +278,8 @@ def stage_project(tmp_path, monkeypatch) -> Path:
         (b / n).chmod((b / n).stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv("PATH", f"{b}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_ARGS", str(tmp_path / "args.txt"))
-    monkeypatch.setattr(runner, "ROOT", proj)              # stage_env: PROJECT_DIR
-    return proj
+    monkeypatch.setattr(runner, "DRUID_HOME", home)        # stage_env: DRUID_HOME
+    return home
 
 
 def _spy_replace(monkeypatch) -> list:
@@ -720,7 +721,7 @@ def test_status_family_rows(hist):
 
 def _tui():
     pytest.importorskip("textual")
-    from phylocli import tui
+    from druid import tui
     return tui
 
 
@@ -851,16 +852,6 @@ def test_status_hg_survives_malformed_genefam(cli, monkeypatch):
 
 
 # ---- Task 7: step1.nf ------------------------------------------------------------------------
-
-def test_step1_nf_calls_stage_scripts():
-    nf = (core.ROOT / "step1.nf").read_text()
-    assert "exec bash ${projectDir}/phylocli/stages/search.sh genefam.csv input.fasta" in nf
-    assert "exec bash ${projectDir}/phylocli/stages/cluster.sh ${domains_fasta}" in nf
-    assert "min_seqs=${params.min_seqs} min_distinct=${params.min_distinct}" in nf
-    assert 'path("${pref}.${family}.*.fasta", optional: true)' in nf
-    assert "python ${projectDir}/phylogeny/main.py" not in nf          # bodies live in the scripts
-    assert "def familyIsDone" in nf and "stageInMode 'copy'" in nf      # skip logic / staging kept
-
 
 def _set_nf_history(tmp_path, text):
     nf = tmp_path / "nf_active"

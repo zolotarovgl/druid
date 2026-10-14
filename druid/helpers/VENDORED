@@ -1,0 +1,5 @@
+source: phylohpc (github.com/zolotarovgl/phylohpc), branch phylocli, workflow/
+commit: 88e05e74a1ed901782c47338d5504f99c17a0ca1
+date: 14/10/2026
+files: og_origin.py report_status.py possvm_postprocess.py reroot_to_generax.py remove_gaponly.py drop_small_hgs.py
+history: carried by git filter-repo; edit them here from now on

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 import report_status
-from phylocli import core
+from druid import core
 
 
 def test_expected_excludes_single_seq(results_tree):

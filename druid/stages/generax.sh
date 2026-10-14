@@ -56,7 +56,7 @@ progress_watcher() {
     done
 }
 
-python ${PROJECT_DIR}/phylogeny/main.py generax \
+python ${DRUID_HOME}/submodules/phylogeny/main.py generax \
     --name ${ID} \
     --alignment ${ALN} \
     --gene_tree $GENE_TREE \

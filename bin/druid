@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# druid entry point. No byte-code is written into the install (write boundary, spec 14/10/2026).
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 "$(dirname "$(readlink -f "$0")")/../druid/cli.py" "$@"

@@ -5,8 +5,8 @@ import stat
 import pytest
 import yaml
 
-from phylocli import core, history
-from phylocli.tests.test_cli import _state, cli  # noqa: F401  (fixture)
+from druid import core, history
+from tests.test_cli import _state, cli  # noqa: F401  (fixture)
 
 HG = "tfs.A.HG1"
 NF_OK = "\n".join([

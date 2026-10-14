@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from phylocli import core  # noqa: F401  (puts workflow/ on sys.path)
+from druid import core  # noqa: F401  (puts workflow/ on sys.path)
 import og_origin  # noqa: E402
 from og_origin import Origin, OriginTree, parse_newick  # noqa: E402
 

@@ -6,7 +6,7 @@ from unittest import mock
 
 import pytest
 
-from phylocli import runner
+from druid import runner
 
 
 def test_publish_marker_last_and_atomic(tmp_path):
@@ -15,7 +15,7 @@ def test_publish_marker_last_and_atomic(tmp_path):
     order = []
     real = os.replace
     def spy(a, b): order.append(Path(b).name); real(a, b)
-    with mock.patch("phylocli.runner.os.replace", spy):
+    with mock.patch("druid.runner.os.replace", spy):
         runner.publish(work, dest, ["x.HG1.log"], "x.HG1.treefile")
     assert order == ["x.HG1.log", "x.HG1.treefile"]
     assert not list(dest.glob("*.tmp-phylo"))
@@ -52,6 +52,7 @@ def test_stage_env(results_tree):
     env = runner.stage_env(cfg, "align", "tfs.A.HG11", 4)
     assert env["ID"] == "tfs.A.HG11" and env["CPUS"] == "4"
     assert env["PROJECT_DIR"] == str(runner.ROOT) and env["OUTDIR"] == str(cfg.outdir)
+    assert env["DRUID_HOME"] == str(runner.DRUID_HOME)
     assert env["PYTHONNOUSERSITE"] == "1"
     assert env["run_generax"] == "true" and env["MAX_SPR"] == "3"
 

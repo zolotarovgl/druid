@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # step1.nf SEARCH, one family. Args: GENEFAM INFASTA [HMM_DIR]. Env: ID=<pref>.<family>, CPUS,
-# PROJECT_DIR, pfam_db, domain_expand.
+# DRUID_HOME, PROJECT_DIR, pfam_db, domain_expand.
 set -euo pipefail
 export PYTHONNOUSERSITE=1
 GENEFAM="$1"
@@ -20,7 +20,7 @@ fi
 
 echo "Running hmmsearch for ${FAMILY}"
 
-python ${PROJECT_DIR}/phylogeny/main.py hmmsearch \
+python ${DRUID_HOME}/submodules/phylogeny/main.py hmmsearch \
 	-f ${INFASTA} \
 	-g ${GENEFAM} \
 	${FAMILY} \

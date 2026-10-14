@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# step1.nf CLUSTER, one family. Arg: DOMAINS_FASTA. Env: ID=<pref>.<family>, CPUS, PROJECT_DIR,
-# max_n, s2_inflation, min_seqs, min_distinct.
+# step1.nf CLUSTER, one family. Arg: DOMAINS_FASTA. Env: ID=<pref>.<family>, CPUS, DRUID_HOME,
+# PROJECT_DIR, max_n, s2_inflation, min_seqs, min_distinct.
 set -euo pipefail
 export PYTHONNOUSERSITE=1
 DOMAINS="$1"
 
 echo "Clustering: ${DOMAINS}"
 
-python ${PROJECT_DIR}/phylogeny/main.py cluster \
+python ${DRUID_HOME}/submodules/phylogeny/main.py cluster \
 	-f ${DOMAINS} \
 	--out_file ${ID}_cluster.tsv \
 	-c ${CPUS} \
@@ -26,4 +26,4 @@ touch ${ID}_cluster.tsv
 
 # Small HGs are not written (spec, 08/10/2026): delete the HG FASTAs step2 would skip, by the
 # rule report_status.expected_hgs uses. ${ID}_cluster.tsv stays complete (every HG and member).
-python ${PROJECT_DIR}/workflow/drop_small_hgs.py ${ID} ${min_seqs} ${min_distinct}
+python ${DRUID_HOME}/druid/helpers/drop_small_hgs.py ${ID} ${min_seqs} ${min_distinct}

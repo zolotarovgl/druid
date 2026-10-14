@@ -4,9 +4,9 @@ import re
 import subprocess
 from pathlib import Path
 
-from phylocli import core
+from druid import core
 
-VENDOR = core.ROOT / "phylocli/vendor"
+VENDOR = core.ROOT / "druid/vendor"
 SCRIPT = VENDOR / "update_treeview.sh"
 
 

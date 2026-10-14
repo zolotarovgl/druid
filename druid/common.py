@@ -14,7 +14,7 @@ RUNNING_STATES = {"RUNNING", "COMPLETING", "CONFIGURING", "STAGE_OUT", "SUSPENDE
 
 
 def runs_dir()-> Path:
-    return Path(os.environ.get("PHYLOCLI_RUNS") or ROOT / "phylocli/runs")
+    return Path(os.environ.get("PHYLOCLI_RUNS") or ROOT / "runs")
 
 
 def ids_path(run: Path, recorded: str) -> Path:

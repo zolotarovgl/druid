@@ -37,7 +37,7 @@ trap 'stash_ckp; exit 143' TERM
 # Background + wait so the shell can service USR2 promptly; a foreground child
 # would defer the trap until after it exits.
 set +e
-python ${PROJECT_DIR}/phylogeny/main.py phylogeny -f ${ALN} --outprefix ${ID} -c ${CPUS} --method ${TREE_METHOD} --iqtree2_model ${IQTREE2_MODEL} >> ${ID}.log 2>&1 &
+python ${DRUID_HOME}/submodules/phylogeny/main.py phylogeny -f ${ALN} --outprefix ${ID} -c ${CPUS} --method ${TREE_METHOD} --iqtree2_model ${IQTREE2_MODEL} >> ${ID}.log 2>&1 &
 PY_PID=$!
 wait "$PY_PID"
 RC=$?

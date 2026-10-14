@@ -9,18 +9,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-from phylocli.core import (ROOT, Config, publish_dir, publish_patterns,
+from druid.core import (ROOT, Config, publish_dir, publish_patterns,
                            stage_inputs)
 
-STAGES_DIR = ROOT / "phylocli/stages"
+DRUID_HOME = ROOT                      # the install: stages, helpers, submodules/phylogeny
+STAGES_DIR = DRUID_HOME / "druid/stages"
 TMP_SUFFIX = ".tmp-phylo"
 NO_OUTPUT_RC = 65
 
 
 def stage_env(cfg: Config, stage: str, hg: str, cpus: int) -> dict[str, str]:
     env = dict(os.environ)
-    env.update(ID=hg, CPUS=str(cpus), PROJECT_DIR=str(ROOT), OUTDIR=str(cfg.outdir),
-               PYTHONNOUSERSITE="1")
+    env.update(ID=hg, CPUS=str(cpus), PROJECT_DIR=str(ROOT), DRUID_HOME=str(DRUID_HOME),
+               OUTDIR=str(cfg.outdir), PYTHONNOUSERSITE="1")
     for k, v in cfg.params.items():
         if isinstance(v, bool):
             env[str(k)] = "true" if v else "false"
@@ -68,7 +69,7 @@ def publish(work: Path, dest: Path, first: list[str], marker: str) -> list[Path]
 
 
 def run_one(cfg: Config, stage: str, hg: str, work_root: Path) -> int:
-    from phylocli import core
+    from druid import core
     work = Path(work_root) / hg
     if work.exists():
         shutil.rmtree(work)

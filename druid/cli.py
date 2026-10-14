@@ -13,12 +13,12 @@ if str(ROOT) not in sys.path:
 
 import typer  # noqa: E402
 
-from phylocli import core, history, runner  # noqa: E402
-from phylocli.common import (FAILED_STATES, RUNNING_STATES, expand_indices as _expand_indices,  # noqa: E402,F401
+from druid import core, history, runner  # noqa: E402
+from druid.common import (FAILED_STATES, RUNNING_STATES, expand_indices as _expand_indices,  # noqa: E402,F401
                              fmt_mem as _fmt_mem, fmt_time as _fmt_time, ids_path as _ids_path,
                              runs_dir as _runs_dir)
-from phylocli.runner import run_one  # noqa: E402,F401  (module-level name: tests patch it)
-from phylocli import model  # noqa: E402
+from druid.runner import run_one  # noqa: E402,F401  (module-level name: tests patch it)
+from druid import model  # noqa: E402
 
 
 def _guard(fn):
@@ -453,7 +453,7 @@ def submit(stage: str = typer.Argument(...),
     # The submission's config = config.yaml + --set overrides. It is written into the run dir
     # and the jobs read that copy, so the run keeps a record and config.yaml is never changed.
     raw = yaml.safe_load(Path(os.environ.get("PHYLOCLI_CONFIG")
-                              or core.ROOT / "phylocli/config.yaml").read_text())
+                              or core.ROOT / "druid/config.yaml").read_text())
     try:
         override = {"mem_mb": core.parse_mem_mb(mem) if mem else None,
                     "time_min": core.parse_time_min(time) if time else None,
@@ -599,7 +599,7 @@ def jobs(job_id: str = typer.Argument(None, help="array job id: list its tasks w
 def tui(refresh: int = typer.Option(30, "--refresh", min=5, help="seconds between refreshes")):
     """Interactive view: stages, HGs, arrays; select failed HGs and resubmit them."""
     try:
-        from phylocli import tui as tui_mod
+        from druid import tui as tui_mod
     except ModuleNotFoundError as e:
         if (e.name or "").startswith("textual"):
             _fail("textual not installed: pip install textual", 1)

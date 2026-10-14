@@ -1,4 +1,4 @@
-"""Pure logic for phylocli: config, HG sets, stage table, resources, validation."""
+"""Pure logic for druid: config, HG sets, stage table, resources, validation."""
 from __future__ import annotations
 
 import os
@@ -11,8 +11,8 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "workflow"))
-sys.path.insert(0, str(ROOT / "phylocli" / "vendor"))   # vendored treeview (vendor/update_treeview.sh)
+sys.path.insert(0, str(ROOT / "druid" / "helpers"))
+sys.path.insert(0, str(ROOT / "druid" / "vendor"))   # vendored treeview (vendor/update_treeview.sh)
 import report_status  # noqa: E402
 
 FAMILY_STAGES = ["search", "cluster"]                 # unit: gene family <pref>.<family> (step1)
@@ -46,7 +46,7 @@ def _abs(p) -> str:
     return str(p if p.is_absolute() else ROOT / p)
 
 
-def load_config(path: Path = ROOT / "phylocli/config.yaml") -> Config:
+def load_config(path: Path = ROOT / "druid/config.yaml") -> Config:
     return config_from_raw(yaml.safe_load(Path(path).read_text()))
 
 
