@@ -74,20 +74,38 @@ def _abs(p: PathLike) -> Path:
     return q if q.is_absolute() else Path.cwd() / q
 
 
+def _entry_path(q: Path) -> Path:
+    """The directory entry `q` names, its parent resolved. A trailing '.' or '..' names no entry
+    of its own (`proj/..` is the parent of the project), so the whole path is resolved instead."""
+    if q.name in ("", ".", ".."):
+        return q.resolve()
+    return q.parent.resolve() / q.name
+
+
 def writable(p: PathLike, root: Optional[Path] = None, entry: bool = False) -> Path:
     """`p` as an absolute path if writing it stays inside the project, else OutsideProject.
     entry=True checks the directory entry itself (its parent resolved), not a symlink's target."""
     root = Path(root).resolve() if root is not None else project_root()
     q = _abs(p)
-    r = (q.parent.resolve() / q.name) if entry else q.resolve()
+    r = _entry_path(q) if entry else q.resolve()
     if r != root and root not in r.parents:
         raise OutsideProject(f"refusing to write {p}: outside the project {root}")
     return q
 
 
+def _removable(p: PathLike) -> Path:
+    """writable(entry=True), and never the project root itself."""
+    q = writable(p, entry=True)
+    root = project_root()
+    if _entry_path(q) == root:
+        raise OutsideProject(f"refusing to remove the project root {root}")
+    return q
+
+
 def tmp_dir() -> Path:
     d = project_root() / ".druid" / "tmp"
-    d.mkdir(parents=True, exist_ok=True)       # inside the project by construction
+    writable(d)                                # content mode: a .druid link pointing out is refused
+    d.mkdir(parents=True, exist_ok=True)
     return d
 
 
@@ -123,11 +141,11 @@ def replace(src: PathLike, dst: PathLike) -> Path:
 
 
 def rmtree(p: PathLike) -> None:
-    shutil.rmtree(writable(p, entry=True))     # never follows symlinks inside the tree
+    shutil.rmtree(_removable(p))               # never follows symlinks inside the tree
 
 
 def unlink(p: PathLike) -> None:
-    writable(p, entry=True).unlink()
+    _removable(p).unlink()
 
 
 def symlink(link: PathLike, target: PathLike) -> Path:

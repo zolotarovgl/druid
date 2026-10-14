@@ -154,3 +154,43 @@ def test_tmp_dir_and_mkstemp_are_in_the_project(proj):
 
 def test_druid_home_is_the_install():
     assert (paths.DRUID_HOME / "druid" / "paths.py").is_file()
+
+
+def test_entry_with_trailing_dotdot_is_resolved_before_the_check(proj, tmp_path):
+    paths.use(proj)
+    (proj / "sub").mkdir()
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("keep")
+    with pytest.raises(paths.OutsideProject):
+        paths.writable(proj / "..", entry=True)
+    with pytest.raises(paths.OutsideProject):
+        paths.writable(proj / "sub" / ".." / "..", entry=True)
+    with pytest.raises(paths.OutsideProject):
+        paths.rmtree(proj / "..")
+    with pytest.raises(paths.OutsideProject):
+        paths.unlink(proj / "sub" / ".." / "..")
+    assert (victim / "keep.txt").read_text() == "keep" and (proj / "sub").is_dir()
+
+
+def test_tmp_dir_through_an_outward_druid_link_is_refused(proj, tmp_path):
+    paths.use(proj)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (proj / ".druid").symlink_to(outside)
+    with pytest.raises(paths.OutsideProject):
+        paths.mkstemp("x", "y")
+    with pytest.raises(paths.OutsideProject):
+        paths.tmp_dir()
+    assert list(outside.iterdir()) == []
+
+
+def test_removing_the_project_root_is_refused(proj):
+    paths.use(proj)
+    (proj / "sub").mkdir()
+    with pytest.raises(paths.OutsideProject) as e:
+        paths.rmtree(proj)
+    assert "project root" in str(e.value)
+    with pytest.raises(paths.OutsideProject):
+        paths.unlink(proj / "sub" / "..")       # resolves to the root itself
+    assert (proj / "druid.yaml").is_file()
