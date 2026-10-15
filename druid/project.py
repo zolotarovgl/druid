@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from druid import paths
+from druid import core, paths
 
 ShippedData = ("species_tree.binary.newick", "species_tree.newick", "species_info.tsv",
                "Mmus_gene_names.csv")
@@ -44,6 +44,10 @@ def adopt(dest: Path, today: str) -> Path:
     raw.setdefault("runs_dir", "phylocli/runs")
     raw.setdefault("nextflow_dir", ".")
     raw["prepare"] = "locked"
+    try:                                        # the config as it will be read; validate before writing
+        core.config_from_raw(raw, root=dest)
+    except core.ConfigError as e:
+        raise ProjectError(f"{old}: {e}; nothing written")
     head = (f"# druid project adopted from phylocli/config.yaml on {today} (druid adopt).\n"
             "# prepare: locked -- data/input.fasta is curated; druid never rebuilds it\n"
             "# (Phylogenies_v3/PROVENANCE.md: rebuilding from xgraubove breaks 11 species' ids).\n")

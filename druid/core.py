@@ -44,9 +44,9 @@ class Config:
     nextflow_dir: Path = Path(".")   # where .nextflow/ (the run history) lives; set by config_from_raw (project root unless configured)
 
 
-def _abs(p) -> str:
+def _abs(p, root: Path | None = None) -> str:
     p = Path(p)
-    return str(p if p.is_absolute() else paths.project_root() / p)
+    return str(p if p.is_absolute() else (root if root is not None else paths.project_root()) / p)
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -95,7 +95,10 @@ def apply_sets(raw: dict, sets: list[str]) -> list[str]:
     return notes
 
 
-def config_from_raw(raw: dict) -> Config:
+def config_from_raw(raw: dict, root: Path | None = None) -> Config:
+    """The Config for a raw druid.yaml. `root`: the project dir when it is not yet a discoverable
+    project (druid adopt validates before it writes druid.yaml); default: the current project."""
+    root = Path(root).resolve() if root is not None else paths.project_root()
     if not isinstance(raw, dict):
         raise ConfigError("the config is not a YAML mapping of settings")
     absent = [k for k in ("outdir", "partition", "qos", "params") if raw.get(k) is None]
@@ -107,12 +110,11 @@ def config_from_raw(raw: dict) -> Config:
     params = dict(raw["params"])
     for k in PATH_PARAMS:
         if params.get(k):                       # hmm_dir may be null
-            params[k] = _abs(params[k])
-    cfg = Config(outdir=Path(_abs(raw["outdir"])), params=params,
+            params[k] = _abs(params[k], root)
+    cfg = Config(outdir=Path(_abs(raw["outdir"], root)), params=params,
                  partition=raw["partition"], qos=raw["qos"],
-                 nextflow_dir=Path(_abs(raw.get("nextflow_dir", "."))))
-    root = paths.project_root()
-    runs = Path(_abs(raw.get("runs_dir") or "runs"))
+                 nextflow_dir=Path(_abs(raw.get("nextflow_dir", "."), root)))
+    runs = Path(_abs(raw.get("runs_dir") or "runs", root))
     if runs.resolve() == root:            # the history dir defaults to runs_dir().parent / "history"
         raise ConfigError(f"runs_dir must be a subdirectory of the project {root}: {runs}")
     for key, p in (("outdir", cfg.outdir), ("runs_dir", runs),

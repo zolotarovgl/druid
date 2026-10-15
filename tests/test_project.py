@@ -126,3 +126,81 @@ def test_cli_adopt_malformed_config_is_an_error_line(tmp_path):
     (v3 / "phylocli" / "config.yaml").write_text("a: [unclosed\n")
     r = CliRunner().invoke(cli.app, ["adopt", str(v3)])
     assert r.exit_code == 2 and "ERROR" in r.output and not (v3 / "druid.yaml").exists()
+
+
+def _old_config(v3, **edit):
+    p = v3 / "phylocli" / "config.yaml"
+    raw = yaml.safe_load(p.read_text())
+    for k, v in edit.items():
+        if v is None:
+            raw.pop(k, None)
+        elif k.startswith("params."):
+            raw["params"][k[7:]] = v
+        else:
+            raw[k] = v
+    p.write_text(yaml.safe_dump(raw))
+
+
+@pytest.mark.parametrize("edit,needle", [
+    ({"partition": None}, "partition"),
+    ({"params": None}, "params"),
+    ({"params.infasta": "/elsewhere/x"}, "infasta"),
+    ({"outdir": "/elsewhere/results"}, "outdir"),
+    ({"runs_dir": "."}, "runs_dir"),
+])
+def test_adopt_validates_before_writing(tmp_path, edit, needle):
+    v3 = _phylohpc(tmp_path)
+    _old_config(v3, **edit)
+    before = _tree_state(v3)
+    with pytest.raises(project.ProjectError, match=needle):
+        project.adopt(v3, today="15/10/2026")
+    assert _tree_state(v3) == before and not (v3 / "druid.yaml").exists()
+
+
+def test_cli_adopt_invalid_config_is_an_error_line(tmp_path):
+    v3 = _phylohpc(tmp_path)
+    _old_config(v3, partition=None)
+    r = CliRunner().invoke(cli.app, ["adopt", str(v3)])
+    assert r.exit_code == 2 and "ERROR" in r.output and "partition" in r.output
+    assert "Traceback" not in r.output and not (v3 / "druid.yaml").exists()
+
+
+def _read_only(d: Path):
+    import os
+    d.chmod(0o555)
+    if os.access(d, os.W_OK):
+        pytest.skip("directory permissions are not enforced here (running as root?)")
+
+
+def test_cli_init_into_a_read_only_parent_is_an_error_line(tmp_path):
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    _read_only(ro)
+    try:
+        r = CliRunner().invoke(cli.app, ["init", str(ro / "p")])
+    finally:
+        ro.chmod(0o755)
+    assert r.exit_code == 2 and "ERROR" in r.output and "Traceback" not in r.output
+    assert not (ro / "p").exists()
+
+
+def test_cli_init_into_a_read_only_empty_dir_is_an_error_line(tmp_path):
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    _read_only(ro)
+    try:
+        r = CliRunner().invoke(cli.app, ["init", str(ro)])
+    finally:
+        ro.chmod(0o755)
+    assert r.exit_code == 2 and "ERROR" in r.output and "Traceback" not in r.output
+
+
+def test_cli_adopt_into_a_read_only_project_is_an_error_line(tmp_path):
+    v3 = _phylohpc(tmp_path)
+    _read_only(v3)
+    try:
+        r = CliRunner().invoke(cli.app, ["adopt", str(v3)])
+    finally:
+        v3.chmod(0o755)
+    assert r.exit_code == 2 and "ERROR" in r.output and "Traceback" not in r.output
+    assert not (v3 / "druid.yaml").exists()

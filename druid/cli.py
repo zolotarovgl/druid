@@ -343,7 +343,7 @@ def init(dest: Path = typer.Argument(..., help="new or empty directory")):
     from druid import project
     try:
         written = project.init(dest, today=date.today().strftime("%d/%m/%Y"))
-    except project.ProjectError as e:
+    except (project.ProjectError, OSError, paths.OutsideProject) as e:
         _fail(f"ERROR: {e}", 2)
     typer.echo(f"druid project at {Path(dest).resolve()}: {written[0].name}, "
                f"data/ ({len(written) - 1} files)")
@@ -356,7 +356,7 @@ def adopt(dest: Path = typer.Argument(..., help="an existing phylohpc project (h
     from druid import project
     try:
         out = project.adopt(dest, today=date.today().strftime("%d/%m/%Y"))
-    except project.ProjectError as e:
+    except (project.ProjectError, OSError, paths.OutsideProject) as e:
         _fail(f"ERROR: {e}", 2)
     typer.echo(f"wrote {out} (prepare: locked)")
 
