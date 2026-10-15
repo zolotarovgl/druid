@@ -60,7 +60,9 @@ def test_snapshot_sees_new_pyc_and_new_empty_dirs(tmp_path):
 
 @needs_tools
 def test_align_writes_nothing_outside_the_project(tmp_path, monkeypatch):
-    monkeypatch.setattr(sys, "dont_write_bytecode", True)   # in-process imports; the stage gets PYTHONDONTWRITEBYTECODE=1
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)   # in-process imports only
+    # The stage must get PYTHONDONTWRITEBYTECODE=1 from stage_env alone, not from our own environment.
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
     prot = tmp_path / "xgraubove"
     prot.mkdir()
     (prot / "Aaa_long.pep.fasta").write_text(">Aaa_1\nMKVLAAGIVG\n>Aaa_2\nMKVLSAGIVG\n")
