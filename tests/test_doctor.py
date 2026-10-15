@@ -126,6 +126,16 @@ def test_version_probe_gets_no_stdin(monkeypatch):
     monkeypatch.setattr(doctor.subprocess, "run", fake_run)
     assert doctor._version("whatever") == "tool 1.2"
     assert seen.get("stdin") is doctor.subprocess.DEVNULL
+    assert seen.get("cwd") == "/"                      # a tool that scribbles on -h scribbles nowhere useful
+
+
+def test_mpirun_missing_says_who_needs_it(monkeypatch):
+    real = doctor.shutil.which
+    monkeypatch.setattr(doctor.shutil, "which", lambda t: None if t == "mpirun" else real(t))
+    c = _names(doctor.checks())["mpirun"]
+    assert not c.ok                                                # still a FAIL
+    assert c.detail == ("not on PATH \u2014 needed by generax/gxsup only (module load OpenMPI, "
+                        "or a conda env whose openmpi provides mpirun)")
 
 
 def test_relative_proteomes_dir_is_resolved_against_the_project(results_tree, tmp_path, monkeypatch):
@@ -152,3 +162,27 @@ def test_bad_proteome_glob_is_a_fail_line_not_a_crash(results_tree, tmp_path):
         (root / "druid.yaml").write_text(yaml.safe_dump(raw))
         c = _names(doctor.checks())["proteomes"]
         assert not c.ok and "proteome_glob" in c.detail, glob
+
+
+def test_explicit_project_without_druid_yaml_is_a_fail_not_a_skip(tmp_path, monkeypatch):
+    from druid import paths
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("DRUID_PROJECT", str(empty))
+    c = _names(doctor.checks())["project"]
+    assert not c.ok and "druid.yaml" in c.detail and "SKIP" not in c.detail
+    paths.use(empty)                                   # --project
+    monkeypatch.delenv("DRUID_PROJECT")
+    c = _names(doctor.checks())["project"]
+    assert not c.ok and "SKIP" not in c.detail
+    r = CliRunner().invoke(cli.app, ["--project", str(empty), "doctor"])
+    assert r.exit_code == 1 and "FAIL project" in r.output
+
+
+def test_walk_up_finding_nothing_stays_a_skip(tmp_path, monkeypatch):
+    from druid import paths
+    monkeypatch.delenv("DRUID_PROJECT", raising=False)
+    paths.use(None)
+    monkeypatch.chdir(tmp_path)
+    c = _names(doctor.checks())["project"]
+    assert c.ok and c.detail.startswith("SKIP")

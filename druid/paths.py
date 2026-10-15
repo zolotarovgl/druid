@@ -29,6 +29,10 @@ class NoProject(RuntimeError):
     pass
 
 
+class ExplicitProjectMissing(NoProject):
+    """--project / $DRUID_PROJECT names a directory that has no druid.yaml."""
+
+
 class OutsideProject(RuntimeError):
     pass
 
@@ -46,7 +50,7 @@ def use(project: Optional[PathLike]) -> None:
 
 def _checked(p: Path, how: str) -> Path:
     if not (p / CONFIG_NAME).is_file():
-        raise NoProject(f"{p} ({how}) has no {CONFIG_NAME}; {HOW}")
+        raise ExplicitProjectMissing(f"{p} ({how}) has no {CONFIG_NAME}; {HOW}")
     return p
 
 

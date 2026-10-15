@@ -20,6 +20,8 @@ TOOLS = ("hmmsearch", "hmmfetch", "bedtools", "samtools", "mafft", "clipkit", "i
 PACKAGES = (("textual", "textual", "8.2", "9"), ("ete3", "ete3", "3.1.3", None),
             ("rich", "rich", "14", "16"), ("typer", "typer", None, None),
             ("yaml", "PyYAML", None, None), ("Bio", "biopython", None, None))
+NOT_ON_PATH = {"mpirun": "not on PATH \u2014 needed by generax/gxsup only (module load OpenMPI, "
+                         "or a conda env whose openmpi provides mpirun)"}
 PFAM_INDEX = (".h3m", ".h3i", ".h3f", ".h3p")
 
 
@@ -34,7 +36,7 @@ def _version(tool: str) -> str:
     for flag in ("--version", "-version", "-h"):
         try:
             r = subprocess.run([tool, flag], capture_output=True, text=True, errors="replace",
-                               timeout=10, stdin=subprocess.DEVNULL)
+                               timeout=10, stdin=subprocess.DEVNULL, cwd="/")
         except (OSError, subprocess.TimeoutExpired):
             continue
         if r.returncode != 0:                       # "No such option --version" is not a version
@@ -54,7 +56,7 @@ def _tools() -> list:
     out = []
     for t in TOOLS:
         p = shutil.which(t)
-        out.append(Check(bool(p), t, _version(t) if p else "not on PATH"))
+        out.append(Check(bool(p), t, _version(t) if p else NOT_ON_PATH.get(t, "not on PATH")))
     return out
 
 
@@ -90,7 +92,9 @@ def _project() -> list:
     from druid import core
     try:
         root = paths.project_root()
-    except paths.NoProject as e:
+    except paths.ExplicitProjectMissing as e:      # you named a project: that it is not one is a failure
+        return [Check(False, "project", str(e))]
+    except paths.NoProject as e:                   # nothing found by walking up: doctor still checks the install
         return [Check(True, "project", f"SKIP {e}")]
     out = [Check(True, "project", str(root))]
     try:
