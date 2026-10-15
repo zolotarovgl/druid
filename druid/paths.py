@@ -33,6 +33,11 @@ class OutsideProject(RuntimeError):
     pass
 
 
+class ConfigError(ValueError):
+    """The project's config cannot be used: unreadable, not YAML, not a mapping, a required key
+    missing, or a write target outside the project. (A ValueError so `except ValueError` keeps working.)"""
+
+
 def use(project: Optional[PathLike]) -> None:
     """Set the project explicitly (the CLI's --project); None clears it."""
     global _explicit
@@ -63,8 +68,22 @@ def config_file() -> Path:
     return Path(env) if env else project_root() / CONFIG_NAME
 
 
+def read_raw(path: Optional[PathLike] = None) -> dict:
+    """The config file as a dict (default: the project's); ConfigError says what is wrong with it."""
+    f = Path(path) if path is not None else config_file()
+    try:
+        raw = yaml.safe_load(f.read_text())
+    except OSError as e:
+        raise ConfigError(f"cannot read {f}: {e.strerror or e}")
+    except yaml.YAMLError as e:
+        raise ConfigError(f"{f} is not valid YAML ({str(e).splitlines()[0]})")
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{f} is {'empty' if raw is None else 'not a YAML mapping of settings'}")
+    return raw
+
+
 def runs_dir() -> Path:
-    raw = yaml.safe_load(config_file().read_text()) or {}
+    raw = read_raw()
     p = Path(raw.get("runs_dir") or "runs")
     return p if p.is_absolute() else project_root() / p
 

@@ -12,6 +12,8 @@ import yaml
 
 from druid import paths
 
+ConfigError = paths.ConfigError
+
 sys.path.insert(0, str(paths.DRUID_HOME / "druid" / "helpers"))
 sys.path.insert(0, str(paths.DRUID_HOME / "druid" / "vendor"))   # vendored treeview (vendor/update_treeview.sh)
 import report_status  # noqa: E402
@@ -48,7 +50,7 @@ def _abs(p) -> str:
 
 
 def load_config(path: Path | None = None) -> Config:
-    return config_from_raw(yaml.safe_load(Path(path or paths.config_file()).read_text()))
+    return config_from_raw(paths.read_raw(path))
 
 
 def _coerce(key: str, old, value: str):
@@ -75,7 +77,11 @@ def _coerce(key: str, old, value: str):
 def apply_sets(raw: dict, sets: list[str]) -> list[str]:
     """Apply KEY=VALUE overrides to raw['params'] in place, converting each value to the type
     of the existing one. Only existing keys are allowed. Returns 'KEY=VALUE (was OLD)' notes."""
-    params = raw.setdefault("params", {})
+    params = raw.get("params")
+    if not isinstance(params, dict):                 # config_from_raw reports it; nothing to override
+        if sets:
+            raise ConfigError("params must be a mapping to take --set overrides")
+        return []
     notes = []
     for s in sets:
         if "=" not in s:
@@ -90,7 +96,15 @@ def apply_sets(raw: dict, sets: list[str]) -> list[str]:
 
 
 def config_from_raw(raw: dict) -> Config:
-    params = dict(raw.get("params", {}))
+    if not isinstance(raw, dict):
+        raise ConfigError("the config is not a YAML mapping of settings")
+    absent = [k for k in ("outdir", "partition", "qos", "params") if raw.get(k) is None]
+    if absent:
+        raise ConfigError(f"the config has no {', '.join(absent)} "
+                          f"(required: outdir, partition, qos, params)")
+    if not isinstance(raw["params"], dict):
+        raise ConfigError("params must be a mapping")
+    params = dict(raw["params"])
     for k in PATH_PARAMS:
         if params.get(k):                       # hmm_dir may be null
             params[k] = _abs(params[k])
@@ -100,11 +114,11 @@ def config_from_raw(raw: dict) -> Config:
     root = paths.project_root()
     runs = Path(_abs(raw.get("runs_dir") or "runs"))
     if runs.resolve() == root:            # the history dir defaults to runs_dir().parent / "history"
-        raise ValueError(f"runs_dir must be a subdirectory of the project {root}: {runs}")
+        raise ConfigError(f"runs_dir must be a subdirectory of the project {root}: {runs}")
     for key, p in (("outdir", cfg.outdir), ("runs_dir", runs),
                    ("infasta", params.get("infasta")), ("genefam_info", params.get("genefam_info"))):
         if p and not _inside(Path(p), root):
-            raise ValueError(f"{key} must be inside the project {root}: {p}")
+            raise ConfigError(f"{key} must be inside the project {root}: {p}")
     return cfg
 
 

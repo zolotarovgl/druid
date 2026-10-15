@@ -7,7 +7,6 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-import yaml
 from rich.markup import escape
 from rich.measure import Measurement
 from rich.text import Text
@@ -26,7 +25,7 @@ from druid.common import fmt_mem, fmt_time
 
 def load_raw() -> dict:
     """The raw druid.yaml (same path logic as `druid submit`); written into each run dir."""
-    return yaml.safe_load(paths.config_file().read_text())
+    return paths.read_raw()
 
 FILTERS = ("actionable", "failed", "ready", "running", "blocked", "done")
 ACTIONABLE = ("failed", "ready")      # the "actionable" filter shows failed + ready HGs

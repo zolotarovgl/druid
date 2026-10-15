@@ -87,7 +87,6 @@ def _install() -> list:
 
 
 def _project() -> list:
-    import yaml
     from druid import core
     try:
         root = paths.project_root()
@@ -95,11 +94,10 @@ def _project() -> list:
         return [Check(True, "project", f"SKIP {e}")]
     out = [Check(True, "project", str(root))]
     try:
-        raw = yaml.safe_load(paths.config_file().read_text()) or {}
+        raw = paths.read_raw()
         cfg = core.config_from_raw(raw)
-    except (OSError, yaml.YAMLError, ValueError, KeyError, TypeError, AttributeError) as e:
-        # ValueError: a write target outside the project; the rest: unreadable or malformed config
-        return out + [Check(False, "config", f"{paths.config_file()}: {type(e).__name__}: {e}")]
+    except core.ConfigError as e:             # unreadable, malformed, incomplete, or a target outside
+        return out + [Check(False, "config", f"{paths.config_file()}: {e}")]
     out.append(Check(True, "config", str(paths.config_file())))
     pf = Path(cfg.params.get("pfam_db") or "")
     missing = [e for e in PFAM_INDEX if not Path(str(pf) + e).is_file()]

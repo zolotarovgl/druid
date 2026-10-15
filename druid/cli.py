@@ -50,7 +50,7 @@ def main(project: Path = typer.Option(None, "--project", "-P",
 def _cfg() -> core.Config:
     try:
         return core.load_config()
-    except (paths.NoProject, paths.OutsideProject, ValueError) as e:   # ValueError: write target outside the project
+    except (paths.NoProject, paths.OutsideProject, core.ConfigError) as e:
         _fail(f"ERROR: {e}", 2)
 
 
@@ -501,14 +501,12 @@ def submit(stage: str = typer.Argument(...),
                                           help="override a druid.yaml param for this submission, "
                                                "e.g. --set MAX_SPR=2 (repeatable)")):
     """Submit one SLURM array per resource group for STAGE."""
-    import yaml
-
     _check_stage(stage)
     # The submission's config = druid.yaml + --set overrides. It is written into the run dir
     # and the jobs read that copy, so the run keeps a record and druid.yaml is never changed.
     try:
-        raw = yaml.safe_load(paths.config_file().read_text())
-    except (paths.NoProject, paths.OutsideProject) as e:
+        raw = paths.read_raw()
+    except (paths.NoProject, paths.OutsideProject, core.ConfigError) as e:
         _fail(f"ERROR: {e}", 2)
     try:
         override = {"mem_mb": core.parse_mem_mb(mem) if mem else None,
@@ -519,7 +517,7 @@ def submit(stage: str = typer.Argument(...),
         _fail(f"ERROR: {e}", 2)
     try:
         cfg = core.config_from_raw(raw)
-    except (paths.NoProject, paths.OutsideProject, ValueError) as e:
+    except (paths.NoProject, paths.OutsideProject, core.ConfigError) as e:
         _fail(f"ERROR: {e}", 2)
     if stage in core.FAMILY_STAGES:                # duplicates (search: also name collisions)
         _warn_families(cfg, collisions=stage == "search")
@@ -620,7 +618,8 @@ def jobs(job_id: str = typer.Argument(None, help="array job id: list its tasks w
 
     try:
         paths.project_root()
-    except (paths.NoProject, paths.OutsideProject) as e:
+        paths.runs_dir()                                     # reads druid.yaml
+    except (paths.NoProject, paths.OutsideProject, core.ConfigError) as e:
         _fail(f"ERROR: {e}", 2)
     if job_id is not None:
         _job_tasks(job_id, failed, running)
@@ -669,6 +668,8 @@ def tui(refresh: int = typer.Option(30, "--refresh", min=5, help="seconds betwee
         raise
     try:
         tui_mod.PhyloApp(_cfg(), refresh_s=refresh, raw=tui_mod.load_raw()).run(mouse=False)
+    except (paths.NoProject, paths.OutsideProject, core.ConfigError) as e:
+        _fail(f"ERROR: {e}", 2)
     finally:
         # Leave a clean terminal however the app ended (q, Ctrl-C, crash): mouse reporting
         # off, main screen, cursor shown, then clear (else e.g. "35;98;12M" leaks into the shell).
@@ -721,6 +722,6 @@ def _run(stage: str, hg: str, run_dir: Path = typer.Option(..., "--run-dir")):
 if __name__ == "__main__":
     try:
         app()
-    except (paths.NoProject, paths.OutsideProject) as e:
+    except (paths.NoProject, paths.OutsideProject, core.ConfigError) as e:
         typer.echo(f"ERROR: {e}", err=True)
         sys.exit(2)
