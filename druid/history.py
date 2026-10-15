@@ -306,7 +306,7 @@ def _write_array_cache(path: Path, data: dict):
         tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")   # per process: concurrent writers
         paths.write_text(tmp, json.dumps(data))
         paths.replace(tmp, path)
-    except OSError:
+    except (OSError, paths.OutsideProject):
         pass        # the cache is an optimisation; never fail a refresh over it
 
 

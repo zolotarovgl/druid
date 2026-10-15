@@ -382,3 +382,9 @@ def test_nextflow_log_temp_is_inside_the_project(results_tree, monkeypatch):
     history._call_nextflow(paths.project_root(), "run_x")
     assert Path(seen["log"]).parent == paths.project_root() / ".druid" / "tmp"
     assert not Path(seen["log"]).exists()                    # removed afterwards
+
+
+def test_array_cache_write_outside_the_project_is_skipped_silently(hist, tmp_path):
+    out = tmp_path / "outside" / "arrays.json"
+    history._write_array_cache(out, {"k": 1})            # an optimisation: never fail over it
+    assert not out.parent.exists()

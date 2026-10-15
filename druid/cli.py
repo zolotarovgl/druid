@@ -519,6 +519,7 @@ def submit(stage: str = typer.Argument(...),
         cfg = core.config_from_raw(raw)
     except (paths.NoProject, paths.OutsideProject, core.ConfigError) as e:
         _fail(f"ERROR: {e}", 2)
+    _check_history_dir()
     if stage in core.FAMILY_STAGES:                # duplicates (search: also name collisions)
         _warn_families(cfg, collisions=stage == "search")
         for run, _start, final in history.nf_runs(cfg.nextflow_dir, "step1.nf"):

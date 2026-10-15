@@ -632,3 +632,11 @@ def test_submit_set_outside_write_target_is_a_clean_error(cli, tmp_path):
     assert r.exit_code == 2 and "inside the project" in r.output
     assert "Traceback" not in r.output
     assert not dry_dir().exists() or not list(dry_dir().glob("*"))
+
+
+def test_submit_history_dir_outside_the_project_is_a_clean_error(cli, monkeypatch, tmp_path):
+    monkeypatch.setenv("DRUID_HISTORY", str(tmp_path / "outside"))
+    r = cli(["submit", "align", "tfs.C_x.HG1", "-n"])
+    assert r.exit_code == 2 and "ERROR:" in r.output and "outside the project" in r.output
+    assert "Traceback" not in r.output and not (tmp_path / "outside").exists()
+    assert not dry_dir().exists() or not list(dry_dir().glob("*"))
