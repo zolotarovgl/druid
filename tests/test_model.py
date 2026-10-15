@@ -205,6 +205,14 @@ def test_preflight_message(cli, monkeypatch):
     assert model.preflight("gxsup") is None
 
 
+def test_preflight_python_probe_writes_no_bytecode_and_hint_is_current(cli, monkeypatch):
+    assert model.preflight("align") is None            # the fake python exits 4 without PYTHONDONTWRITEBYTECODE=1
+    monkeypatch.setenv("FAKE_PY_FAIL", "1")
+    msg = model.preflight("align")
+    assert "workflow/environment.yaml" not in msg
+    assert "environment.yml" in msg and "druid doctor" in msg
+
+
 def test_sbatch_all_timeout_reports_partial_submission(cli, monkeypatch):
     cfg = _cfg()
     sel = model.select(cfg, "align", ["tfs.A.HG11", "tfs.C_x.HG1"])

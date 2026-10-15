@@ -27,8 +27,8 @@ def _w(p, text):
 
 @pytest.fixture(autouse=True)
 def _no_ambient_project(monkeypatch):
-    """No test sees a project it did not set up: druid.yaml discovery, DRUID_* env, --project."""
-    for k in ("DRUID_PROJECT", "DRUID_CONFIG"):
+    """No test sees a project it did not set up: druid.yaml discovery, DRUID_* env (incl. the history dir), --project."""
+    for k in ("DRUID_PROJECT", "DRUID_CONFIG", "DRUID_HISTORY"):
         monkeypatch.delenv(k, raising=False)
     paths.use(None)
     yield

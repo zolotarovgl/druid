@@ -395,6 +395,7 @@ SBATCH = """#!/usr/bin/env bash
 #SBATCH --array=0-{n_minus_1}%{max_running}
 #SBATCH --output={run_dir}/logs/{stage}_%A_%a.out
 #SBATCH --error={run_dir}/logs/{stage}_%A_%a.err
+#SBATCH --chdir={run_dir}
 {signal_line}
 set -uo pipefail
 HG=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "{ids_file}")
@@ -449,7 +450,7 @@ def preflight(stage: str, cfg: "core.Config | None" = None) -> str | None:
     lost = [t for t in TOOLS[stage] if shutil.which(t) is None]
     files = _missing_files(stage, cfg)
     hint = ("       run 'conda activate phylo' and 'module load OpenMPI' before submitting;\n"
-            "       see workflow/environment.yaml.")
+            "       the tools and packages are listed in environment.yml; 'druid doctor' checks them.")
     py_err = None
     if stage != "gxsup":  # same `python` + PYTHONNOUSERSITE=1 as the stage scripts
         py = shutil.which("python")
@@ -457,7 +458,7 @@ def preflight(stage: str, cfg: "core.Config | None" = None) -> str | None:
             py_err = "python: not on PATH"
         else:
             r = subprocess.run([py, "-c", "import ete3, Bio, yaml"], capture_output=True, text=True,
-                               env={**os.environ, "PYTHONNOUSERSITE": "1"})
+                               env={**os.environ, "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"})
             if r.returncode != 0:
                 py_err = (f"{py} (PYTHONNOUSERSITE=1) cannot import ete3, Bio, yaml:\n"
                           f"       {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else 'exit ' + str(r.returncode)}")

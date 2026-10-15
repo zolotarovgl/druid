@@ -42,6 +42,7 @@ def cli(results_tree, tmp_path, monkeypatch):
         (bindir / t).write_text("#!/bin/sh\nexit 0\n")
     (bindir / "python").write_text(
         '#!/bin/sh\n[ "$PYTHONNOUSERSITE" = 1 ] || { echo "PYTHONNOUSERSITE unset" >&2; exit 3; }\n'
+        '[ "$PYTHONDONTWRITEBYTECODE" = 1 ] || { echo "PYTHONDONTWRITEBYTECODE unset" >&2; exit 4; }\n'
         'if [ -n "$FAKE_PY_FAIL" ]; then echo "ModuleNotFoundError: No module named ete3" >&2; exit 1; fi\n'
         'echo "$@" >> ' + str(bindir) + '/pycalls.txt\nexit 0\n')
     for p in bindir.iterdir():
@@ -108,6 +109,8 @@ def test_sbatch_script_content(cli, results_tree):
     assert "#SBATCH --signal=B:USR2@180" in s and "#SBATCH --mem=800M" in s and "#SBATCH --time=1140" in s  # resources.tsv row
     assert "#SBATCH --job-name=phylo-tree" in s and "--array=0-0%50" in s
     assert "kill -USR2 $PID" in s and "_run tree" in s
+    run = next(dry_dir().glob("*_tree"))
+    assert f"#SBATCH --chdir={run}\n" in s               # the job starts in its run dir, not in $HOME
 
 
 def test_missing_tool_is_error(cli, monkeypatch, tmp_path):
