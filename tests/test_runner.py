@@ -141,3 +141,27 @@ def test_signal_during_popen_is_forwarded(results_tree, monkeypatch, tmp_path):
         return real(*a, **k)
     monkeypatch.setattr(runner.subprocess, "Popen", spy)
     assert runner.run_one(cfg, "align", "tfs.A.HG11", root/"work") in (140, -12, 138)
+
+
+@pytest.mark.parametrize("hg", ["", ".", "..", ".hidden", "a/b", "../x", "/abs", "a\0b"])
+def test_run_one_rejects_an_hg_id_that_is_not_a_plain_name(results_tree, hg):
+    cfg, root = results_tree
+    work_root = root / "work"
+    (work_root / "keep").mkdir(parents=True)
+    (work_root / "keep" / "f").write_text("x")
+    (root / "outside_marker").write_text("x")
+    with pytest.raises(ValueError, match="HG id"):
+        runner.run_one(cfg, "align", hg, work_root)
+    assert (work_root / "keep" / "f").read_text() == "x" and (root / "outside_marker").exists()
+    assert sorted(p.name for p in work_root.iterdir()) == ["keep"]
+
+
+def test_cli_run_with_a_bad_hg_id_is_an_error_line(results_tree):
+    from typer.testing import CliRunner
+    from druid import cli
+    cfg, root = results_tree
+    rd = root / "runs" / "r"
+    (rd / "work" / "keep").mkdir(parents=True)
+    r = CliRunner().invoke(cli.app, ["_run", "align", "../keep", "--run-dir", str(rd)])
+    assert r.exit_code == 2 and "ERROR:" in r.output and "HG id" in r.output
+    assert (rd / "work" / "keep").is_dir()

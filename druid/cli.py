@@ -716,7 +716,12 @@ def queue(stage: str = typer.Option(None, "--stage"), last: int = typer.Option(1
 @app.command("_run", hidden=True)
 def _run(stage: str, hg: str, run_dir: Path = typer.Option(..., "--run-dir")):
     """Run one stage for one HG (used inside the array task)."""
-    raise typer.Exit(run_one(_cfg(), stage, hg, Path(run_dir) / "work"))
+    cfg = _cfg()
+    try:
+        rc = run_one(cfg, stage, hg, Path(run_dir) / "work")
+    except runner.BadHgId as e:
+        _fail(f"ERROR: {e}", 2)
+    raise typer.Exit(rc)
 
 
 if __name__ == "__main__":

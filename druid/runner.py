@@ -69,8 +69,15 @@ def publish(work: Path, dest: Path, first: list[str], marker: str) -> list[Path]
     return [_copy_atomic(p, dest) for p in firsts + markers]
 
 
+class BadHgId(ValueError):
+    pass
+
+
 def run_one(cfg: Config, stage: str, hg: str, work_root: Path) -> int:
     from druid import core
+    if not hg or "/" in hg or "\0" in hg or hg.startswith("."):
+        # the work dir is work_root/hg and is removed first: an id like '..' would remove the wrong tree
+        raise BadHgId(f"invalid HG id {hg!r}: it must be a plain name (no '/', no leading '.', not empty)")
     work = Path(work_root) / hg
     if work.exists():
         paths.rmtree(work)
