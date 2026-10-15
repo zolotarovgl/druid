@@ -20,7 +20,7 @@ TOOLS = ("hmmsearch", "hmmfetch", "bedtools", "samtools", "mafft", "clipkit", "i
 PACKAGES = (("textual", "textual", "8.2", "9"), ("ete3", "ete3", "3.1.3", None),
             ("rich", "rich", "14", "16"), ("typer", "typer", None, None),
             ("yaml", "PyYAML", None, None), ("Bio", "biopython", None, None))
-NOT_ON_PATH = {"mpirun": "not on PATH \u2014 needed by generax/gxsup only (module load OpenMPI, "
+NOT_ON_PATH = {"mpirun": "not on PATH \u2014 needed by the generax stage only (module load OpenMPI, "
                          "or a conda env whose openmpi provides mpirun)"}
 PFAM_INDEX = (".h3m", ".h3i", ".h3f", ".h3p")
 

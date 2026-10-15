@@ -134,7 +134,7 @@ def test_mpirun_missing_says_who_needs_it(monkeypatch):
     monkeypatch.setattr(doctor.shutil, "which", lambda t: None if t == "mpirun" else real(t))
     c = _names(doctor.checks())["mpirun"]
     assert not c.ok                                                # still a FAIL
-    assert c.detail == ("not on PATH \u2014 needed by generax/gxsup only (module load OpenMPI, "
+    assert c.detail == ("not on PATH \u2014 needed by the generax stage only (module load OpenMPI, "
                         "or a conda env whose openmpi provides mpirun)")
 
 
