@@ -8,7 +8,7 @@ import stat
 import pytest
 
 from druid import core, model, paths
-from tests.test_cli import _state, cli  # noqa: F401  (fixture)
+from tests.test_cli import _state, cli, hide_tool  # noqa: F401  (fixture)
 
 
 def _fake(name, body):
@@ -24,8 +24,8 @@ def test_live_maps_array_task_to_hg(cli, monkeypatch):
     assert model.live({"tfs.A.HG11", "tfs.C_x.HG1"}) == {"align": {"tfs.C_x.HG1"}}
 
 
-def test_live_none_without_squeue(cli):
-    (_state["bin"] / "squeue").unlink()
+def test_live_none_without_squeue(cli, monkeypatch):
+    hide_tool(monkeypatch, "squeue")
     assert model.live(set()) is None
 
 
@@ -79,8 +79,8 @@ def test_stage_rows_not_applicable(cli):
     assert next(r for r in rows if r.stage == "gxsup").applicable is False
 
 
-def test_stage_rows_without_squeue(cli):
-    (_state["bin"] / "squeue").unlink()
+def test_stage_rows_without_squeue(cli, monkeypatch):
+    hide_tool(monkeypatch, "squeue")
     rows, known, _d = model.stage_rows(_cfg(), core.expected(_cfg()))
     assert known is False and all(r.running == 0 for r in rows)
 

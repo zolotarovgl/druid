@@ -1,5 +1,6 @@
 import os
 import stat
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -19,6 +20,14 @@ def runs_dir():
 
 def dry_dir():
     return _state["dry"]
+
+
+def hide_tool(monkeypatch, name):
+    """Make `name` absent from PATH: drop the fake and every real copy (a cluster node has a real
+    squeue/sacct; a laptop does not)."""
+    (_state["bin"] / name).unlink()
+    keep = [d for d in os.environ["PATH"].split(os.pathsep) if not (Path(d) / name).exists()]
+    monkeypatch.setenv("PATH", os.pathsep.join(keep))
 
 
 @pytest.fixture
@@ -413,9 +422,9 @@ def test_queue_is_hidden_alias(cli, monkeypatch):
     assert "queue" not in cli(["--help"]).output
 
 
-def test_jobs_without_sacct_shows_unknown(cli):
+def test_jobs_without_sacct_shows_unknown(cli, monkeypatch):
     _submit_two_align(cli)
-    (_state["bin"] / "sacct").unlink()
+    hide_tool(monkeypatch, "sacct")
     r = cli(["jobs"])
     assert r.exit_code == 0 and "sacct not on PATH" in r.output
     assert _row(r.output)[-5:] == ["2", "?", "?", "?", "?"]
@@ -556,8 +565,8 @@ def test_status_hg_shows_running(cli, results_tree, monkeypatch):
     assert line.split()[1] == "running"
 
 
-def test_summary_without_squeue(cli):
-    (_state["bin"] / "squeue").unlink()
+def test_summary_without_squeue(cli, monkeypatch):
+    hide_tool(monkeypatch, "squeue")
     r = cli(["missing"])
     assert r.exit_code == 0 and "squeue not on PATH" in r.output
 
