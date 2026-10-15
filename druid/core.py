@@ -98,9 +98,9 @@ def apply_sets(raw: dict, sets: list[str]) -> list[str]:
 def config_from_raw(raw: dict, root: Path | None = None) -> Config:
     """The Config for a raw druid.yaml. `root`: the project dir when it is not yet a discoverable
     project (druid adopt validates before it writes druid.yaml); default: the current project."""
-    root = Path(root).resolve() if root is not None else paths.project_root()
     if not isinstance(raw, dict):
         raise ConfigError("the config is not a YAML mapping of settings")
+    root = Path(root).resolve() if root is not None else paths.project_root()
     absent = [k for k in ("outdir", "partition", "qos", "params") if raw.get(k) is None]
     if absent:
         raise ConfigError(f"the config has no {', '.join(absent)} "

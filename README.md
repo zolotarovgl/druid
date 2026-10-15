@@ -29,12 +29,14 @@ druid never writes outside it (see Write boundary).
 git clone --recurse-submodules https://github.com/zolotarovgl/druid     # or, in a clone: git submodule update --init --recursive
 conda env create -f environment.yml          # name: druid; on CRG you can use the existing `phylo` env instead
 conda activate druid                         # CRG: conda activate phylo
-module load OpenMPI                          # CRG: mpirun for generax, if the env has none
+module load OpenMPI                          # CRG: mpirun for generax, if the env has none (the `phylo` env has none)
 bin/druid doctor                             # checks everything below; reads only, fixes nothing
 ```
 
 `environment.yml` was exported read-only from the CRG `phylo` env on 14/10/2026
-(`conda env export -n phylo --no-builds`); nothing was installed into `phylo`. Code is Python 3.9
+(`conda env export -n phylo --no-builds`); nothing was installed into `phylo`. That env's
+`openmpi 4.1.3` conda package has an empty file list (no `mpirun`), hence `module load OpenMPI`; a
+fresh env from `environment.yml` is expected to provide `mpirun`, but this is unverified. Code is Python 3.9
 compatible (that env's version). Put `bin/druid` on your `PATH` (or call it by path); it resolves
 its own install through symlinks.
 
@@ -44,7 +46,9 @@ clipkit iqtree2 diamond mcl generax mpirun sbatch squeue sacct`), the python pac
 >= 8.2 < 9, ete3 >= 3.1.3, rich 14-15, typer, PyYAML, Biopython), `submodules/phylogeny` with its
 nested `possvm-orthology` and, when a project is found, its `druid.yaml`, `pfam_db` (readable
 and pressed: `.h3m .h3i .h3f .h3p`), `proteomes_dir` (one file per species) and the species
-tree. Without a project it prints `SKIP project ...` and still checks the rest. A `druid.yaml`
+tree. Without a project (none found by walking up from the cwd) it prints `SKIP project ...` and still
+checks the rest; a project you named with `--project` / `$DRUID_PROJECT` that has no `druid.yaml`
+is `FAIL project` (exit 1). A `druid.yaml`
 that cannot be loaded (bad YAML, a write target outside the project) is one `FAIL config` line.
 It never runs `hmmpress`: a missing index is reported, and the owner of `Pfam-A.hmm` presses it.
 
@@ -85,8 +89,12 @@ With no project, every command except `init`, `adopt` and `doctor` exits 2 and s
 history cache, publish into `results/`, temp files (`<project>/.druid/tmp/`, never `/tmp`), the
 treeview `w` prompt, `init` and `adopt` all go through one gate (`paths.writable`), which resolves
 symlinks and refuses a path outside the project. A config whose `outdir`, `runs_dir`, `infasta`
-or `genefam_info` points outside is refused when it is loaded. A lint test
+or `genefam_info` points outside is refused when it is loaded (`ERROR: ...`, exit 2, like any
+unreadable, malformed or incomplete `druid.yaml`; `adopt` runs that check before it writes). A lint test
 (`tests/test_write_boundary.py`) fails on any write call in `druid/*.py` outside `paths.py`.
+
+This binds druid's own files. The external tools a stage runs (mafft, iqtree2, diamond, ...) may
+still use `$TMPDIR` (for example `/tmp`) for their own scratch; druid does not redirect them.
 
 Read-only, always: the proteome directories (above all `/users/asebe/xgraubove/...`), `pfam_db`,
 `hmm_dir`, the druid install (`DRUID_HOME`) and other projects. Stages never receive a proteome
