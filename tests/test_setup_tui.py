@@ -9,7 +9,7 @@ import yaml
 
 pytest.importorskip("textual")
 
-from druid import core, paths, project, setup_state, setup_tui, tui, yamledit  # noqa: E402
+from druid import core, families, paths, project, setup_state, setup_tui, sptree, tui, yamledit  # noqa: E402
 from tests.conftest import GENEFAM  # noqa: E402
 from tests.test_cli import cli  # noqa: E402,F401  (fixture)
 
@@ -322,6 +322,10 @@ def test_setup_on_locked_project_writes_nothing(cli, monkeypatch, tmp_path):
     f.write_text("# druid project adopted from phylocli/config.yaml (druid adopt).\n"
                  + yaml.safe_dump(raw, sort_keys=False))
     before = f.read_bytes()
+    from pathlib import Path
+    Path(core.load_config(f).params["genefam_info"]).write_text("")   # empty: Families would fill it
+    files = {p: p.read_bytes() for p in paths.project_root().rglob("*")
+             if p.is_file() and ".druid" not in p.parts}
     monkeypatch.setattr(setup_tui, "_run_editor", lambda path: pytest.fail("editor started"))
 
     async def go():
@@ -330,8 +334,19 @@ def test_setup_on_locked_project_writes_nothing(cli, monkeypatch, tmp_path):
             scr = await _setup(app, pilot)
             for name in setup_tui.SetupScreen.SECTIONS:
                 await _section(pilot, scr, name)
-                await pilot.press("space", "a", "e", "enter", "x", "enter")
+                await pilot.press("space", "a", "e", "enter", "x", "enter", "P")
+                await app.workers.wait_for_complete()
                 await pilot.pause()
+            assert "ERROR: this project is adopted" in _text(scr, "#blockers")    # P refused
+            scr.query_one("#rb-hmm").value = True                     # behind the disabled radios
+            await pilot.pause()
+            scr._set_hmm_dir(str(tmp_path))
+            scr._set_families_source(str(tmp_path / "locked_tax.tsv"))
+            scr._set_tree_source(str(tmp_path / "locked_tax.tsv"))
+            scr._placed("Aaa", frozenset({"Bbb"}))
+            scr._open_edit(0)
+            await pilot.pause()
+            assert not scr.query_one("#fam-edit").display
             for wid in ("#sw-generax", "#sw-origins"):                # toggle attempts behind the UI
                 sw = scr.query_one(wid)
                 assert sw.disabled
@@ -355,3 +370,368 @@ def test_setup_on_locked_project_writes_nothing(cli, monkeypatch, tmp_path):
             assert not isinstance(app.screen, setup_tui.SetupScreen)
     _run(go())
     assert f.read_bytes() == before
+    assert {p: p.read_bytes() for p in paths.project_root().rglob("*")      # families, placements,
+            if p.is_file() and ".druid" not in p.parts} == files            # trees: nothing written
+
+
+# ---- Tree, Search, Families, prepare (Task 8) ----------------------------------------------------
+def _tree(root, newick):
+    for f in ("base_tree.binary.newick", "base_tree.newick"):
+        (root / "data" / f).write_text(newick)
+
+
+def _mine(mine):
+    return {("sources",): [{"name": "mine", "proteomes_dir": str(mine),
+                            "proteome_glob": "{sp}_long.pep.fasta", "taxonomy": "data/tax.tsv"}]}
+
+
+def _fams(root):
+    return [r.fields() for r in families.read(root / "data" / "families.csv")]
+
+
+def test_tree_section_hidden_when_switches_off(proj):
+    root, _prot, _mine_ = proj
+    _tree(root, "((Aaa:1,Xxx:1):1,Yyy:1)R;")
+    yamledit.update_config({("species",): ["Aaa", "Bbb"]})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Tree")
+            t = scr.query_one("#tree-missing")
+            assert t.display and t.row_count == 1 and str(t.get_row_at(0)[0]) == "Bbb"
+            assert scr.focused is t
+            assert "1 ticked species not on the tree: Bbb" in _text(scr, "#blockers")
+            assert _text(scr, "#lbl-tree").endswith("!")
+            await _section(pilot, scr, "Analyses")
+            await pilot.press("space")                                    # GeneRax off
+            scr.query_one("#sw-origins").focus()
+            await pilot.press("space")                                    # origins off
+            await pilot.pause()
+            await _section(pilot, scr, "Tree")
+            assert not t.display and not scr.query_one("#tree-source").display
+            assert _text(scr, "#tree-info") == setup_tui.TREE_OFF
+            assert _text(scr, "#lbl-tree").endswith("·")
+            assert "not on the tree" not in _text(scr, "#blockers")
+            assert _text(scr, "#blockers") == "no blockers: ready for prepare"
+    _run(go())
+
+
+def test_place_as_sister_writes_placements(proj):
+    root, _prot, mine = proj
+    _tree(root, "((Aaa:1,Bbb:1):1,Xxx:1)R;")
+    yamledit.update_config({**_mine(mine), ("species",): ["Aaa", "Bbb", {"sp": "Ccc", "source": "mine"}]})
+    pl_file = root / "data" / sptree.PLACEMENTS
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Tree")
+            assert str(scr.query_one("#tree-missing").get_row_at(0)[0]) == "Ccc"
+            await pilot.press("enter")
+            await pilot.pause()
+            place = app.screen
+            assert isinstance(place, setup_tui.PlaceScreen)
+            assert {place.model.name[i] for i in range(len(place.model)) if place.model.is_tip(i)} \
+                == {"Aaa", "Bbb"}                                         # the built tree, pruned
+            await pilot.press("escape")                                   # cancel: nothing written
+            await pilot.pause()
+            assert app.screen is scr and not pl_file.exists()
+            await pilot.press("enter")
+            await pilot.pause()
+            place = app.screen
+            place.tree.goto(place.model.tip("Aaa"))
+            await pilot.pause()
+            await pilot.press("p")
+            await pilot.pause()
+            assert app.screen is scr
+            assert pl_file.read_text() == "Ccc\tAaa\n"
+            assert scr.query_one("#tree-missing").row_count == 0
+            assert "placed Ccc as the sister of Aaa" in _text(scr, "#blockers")
+            assert "not on the tree" not in _text(scr, "#blockers")
+            assert _text(scr, "#lbl-tree").endswith("✓")
+            built = sptree.build_trees("((Aaa:1,Bbb:1):1,Xxx:1)R;", "((Aaa:1,Bbb:1):1,Xxx:1)R;",
+                                       ["Aaa", "Bbb", "Ccc"], sptree.read_placements(pl_file))[0]
+            assert sptree.tips(built) == {"Aaa", "Bbb", "Ccc"}
+    _run(go())
+
+
+def test_place_on_internal_node_and_tree_source(proj, tmp_path):
+    root, _prot, mine = proj
+    _tree(root, "((Aaa:1,Xxx:1):1,Yyy:1)R;")
+    own = tmp_path / "own.newick"
+    own.write_text("((Aaa:1,Bbb:1)ab:1,Yyy:1)R;")
+    yamledit.update_config({**_mine(mine), ("species",): ["Aaa", "Bbb", {"sp": "Ccc", "source": "mine"}]})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Tree")
+            assert scr.query_one("#tree-missing").row_count == 2          # Bbb, Ccc
+            scr.query_one("#tree-source").focus()
+            scr.query_one("#tree-source").value = str(tmp_path / "nope.newick")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert "tree_source" not in _raw() and "ERROR: no such tree file" in _text(scr, "#blockers")
+            scr.query_one("#tree-source").value = str(own)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert _raw()["tree_source"] == str(own)
+            t = scr.query_one("#tree-missing")
+            assert t.row_count == 1 and str(t.get_row_at(0)[0]) == "Ccc"
+            t.focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            place = app.screen
+            place.tree.goto(place.model.mrca([place.model.tip("Aaa"), place.model.tip("Bbb")]))
+            await pilot.pause()
+            await pilot.press("p")
+            await pilot.pause()
+            assert (root / "data" / sptree.PLACEMENTS).read_text() == "Ccc\tAaa,Bbb\n"
+            assert scr.query_one("#tree-missing").row_count == 0
+    _run(go())
+    assert own.read_text() == "((Aaa:1,Bbb:1)ab:1,Yyy:1)R;"                # the user's tree is read only
+
+
+def test_search_custom_hmm_rows_appear_with_defaults(proj, tmp_path):
+    root, _prot, _mine_ = proj
+    hd = tmp_path / "hmms"
+    hd.mkdir()
+    (hd / "Foo.hmm").write_text("HMMER3/f\nNAME  Foo\nGA    20.0 20.0;\n//\n")
+    (hd / "Bar.hmm").write_text("HMMER3/f\nNAME  Bar\n//\n")
+    hd.chmod(0o555)
+    mtimes = {p.name: p.stat().st_mtime_ns for p in hd.iterdir()}
+    n0 = len(_fams(root))
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Search")
+            assert scr.focused is scr.query_one("#se-type")
+            assert scr.query_one("#rb-file").value and not scr.query_one("#se-hmmdir").display
+            before = paths.config_file().read_bytes()
+            scr.query_one("#rb-hmm").value = True
+            await pilot.pause()
+            assert scr.query_one("#se-hmmdir").display and scr.focused is scr.query_one("#se-hmmdir")
+            assert "set params.hmm_dir" in _text(scr, "#blockers")
+            assert _text(scr, "#lbl-search").endswith("!")
+            scr.query_one("#se-hmmdir").value = str(tmp_path / "nope")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert paths.config_file().read_bytes() == before
+            assert "ERROR: not a directory" in _text(scr, "#blockers")
+            scr.query_one("#se-hmmdir").value = str(hd)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert _raw()["params"]["hmm_dir"] == str(hd)
+            rows = _fams(root)
+            assert len(rows) == n0 + 2
+            assert rows[-2:] == [["Bar", "Bar", "1.1", "3", "1e-5", "custom", "cus"],
+                                 ["Foo", "Foo", "1.1", "3", "GA", "custom", "cus"]]
+            assert _text(scr, "#lbl-search").endswith("✓")
+            await _section(pilot, scr, "Families")
+            scr.query_one("#fam-filter").value = "custom"
+            await pilot.pause()
+            t = scr.query_one("#fam-table")
+            assert t.row_count == 2
+            assert [str(c) for c in t.get_row_at(0)] == ["[x]", "cus.Bar", "Bar", "1.1", "3", "1e-5",
+                                                       "custom", "cus"]
+            scr.query_one("#rb-file").value = True                        # back: hmm_dir and rows go
+            await pilot.pause()
+            assert _raw()["params"]["hmm_dir"] is None and len(_fams(root)) == n0
+            assert "hmm_dir: null        # optional dir" in paths.config_file().read_text()
+    _run(go())
+    hd.chmod(0o755)
+    assert {p.name: p.stat().st_mtime_ns for p in hd.iterdir()} == mtimes
+
+
+def test_bad_hmm_dir_in_config_is_a_blocker_line(proj, tmp_path):
+    yamledit.update_config({("params", "hmm_dir"): str(tmp_path / "gone")})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            assert "params.hmm_dir is not a directory" in _text(scr, "#blockers")
+            assert scr.query_one("#rb-hmm").value and _text(scr, "#lbl-search").endswith("!")
+    _run(go())
+
+
+def test_query_sequences_disabled(proj):
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Search")
+            rb = scr.query_one("#rb-query")
+            assert rb.disabled and "not available yet" in str(rb.label)
+            before = paths.config_file().read_bytes()
+            await pilot.press("down", "down", "enter", "space")
+            await pilot.pause()
+            assert not rb.value and scr._search == "file"
+            assert paths.config_file().read_bytes() == before
+    _run(go())
+
+
+def test_own_families_file(proj, tmp_path):
+    root, _prot, _mine_ = proj
+    own = tmp_path / "own.csv"
+    own.write_text("X1\tPF_X\t1.1\t3\tGA\tTF\ttfs\nX2\tPF_Y\t1.1\t3\tGA\tTF\ttfs\n")
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Search")
+            scr.query_one("#se-famfile").focus()
+            scr.query_one("#se-famfile").value = "data/families.csv"     # the target itself: refused
+            await pilot.press("enter")
+            await pilot.pause()
+            assert "families_source" not in _raw() and "ERROR:" in _text(scr, "#blockers")
+            scr.query_one("#se-famfile").value = str(own)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert _raw()["families_source"] == str(own)
+            assert _fams(root) == [r.fields() for r in families.read(own)]
+            assert scr.query_one("#fam-table").row_count == 2
+    _run(go())
+
+
+def test_families_all_ticked_untick_writes_csv(proj):
+    root, _prot, _mine_ = proj
+    f = root / "data" / "families.csv"
+    f.write_text("")
+    lib = [r.fields() for r in families.library()]
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            assert "no families in params.genefam_info" in _text(scr, "#blockers")
+            assert _text(scr, "#lbl-families").endswith("!")
+            await _section(pilot, scr, "Families")                        # first open: all written
+            assert _fams(root) == lib and len(lib) == 356
+            t = scr.query_one("#fam-table")
+            assert t.row_count == 356 and all(str(t.get_row_at(i)[0]) == "[x]" for i in range(356))
+            assert "no families" not in _text(scr, "#blockers")
+            assert _text(scr, "#lbl-families").endswith("356")
+            assert scr.focused is scr.query_one("#fam-filter")
+            await pilot.press("enter")                                    # to the table
+            assert scr.focused is t
+            await pilot.press("space")                                    # untick row 0
+            await pilot.pause()
+            assert _fams(root) == lib[1:] and str(t.get_row_at(0)[0]) == "[ ]"
+            assert "355 ticked / 356" in _text(scr, "#fam-count")
+            scr.query_one("#fam-filter").value = "slc"
+            await pilot.pause()
+            assert 0 < t.row_count < 356 and "shown" in _text(scr, "#fam-count")
+            scr.query_one("#fam-filter").value = ""
+            await pilot.pause()
+            t.focus()
+            t.move_cursor(row=0)
+            await pilot.press("space")                                    # tick again: library order
+            await pilot.pause()
+            assert _fams(root) == lib
+    _run(go())
+
+
+def test_family_row_edit_persists(proj):
+    root, _prot, _mine_ = proj
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Families")
+            await pilot.press(*"PF_A", "enter")
+            t = scr.query_one("#fam-table")
+            assert t.row_count == 1 and scr.focused is t
+            await pilot.press("enter")                                    # the edit form
+            await pilot.pause()
+            assert scr.query_one("#fam-edit").display and scr.focused is scr.query_one("#fe-inflation")
+            assert scr.query_one("#fe-threshold").value == "GA"
+            before = _fams(root)
+            scr.query_one("#fe-inflation").value = "x"
+            for _ in range(5):
+                await pilot.press("enter")
+            await pilot.pause()
+            assert _fams(root) == before and "ERROR: inflation" in _text(scr, "#blockers")
+            await pilot.press("escape")                                   # cancel
+            await pilot.pause()
+            assert not scr.query_one("#fam-edit").display and scr.focused is t
+            await pilot.press("enter")
+            await pilot.pause()
+            for col, v in (("inflation", "1.5"), ("min_seqs", "4"), ("threshold", "1e-10"),
+                           ("pref1", "TF"), ("pref2", "tfx")):
+                scr.query_one(f"#fe-{col}").value = v
+            scr.query_one("#fe-pref2").focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not scr.query_one("#fam-edit").display
+            assert ["A", "PF_A", "1.5", "4", "1e-10", "TF", "tfx"] in _fams(root)
+            assert "tfx.A: saved" in _text(scr, "#blockers")
+        app2 = _app()                                                     # reopened: the edit wins
+        async with app2.run_test() as pilot:
+            scr = await _setup(app2, pilot)
+            await _section(pilot, scr, "Families")
+            await pilot.press(*"PF_A")
+            await pilot.pause()
+            t = scr.query_one("#fam-table")
+            assert t.row_count == 1
+            assert [str(c) for c in t.get_row_at(0)] == ["[x]", "tfx.A", "PF_A", "1.5", "4", "1e-10",
+                                                       "TF", "tfx"]
+    _run(go())
+
+
+def test_families_editable_after_lock(proj):
+    root, _prot, _mine_ = proj
+    _tree(root, "((Aaa:1,Xxx:1):1,Yyy:1)R;")
+    yamledit.update_config({("species",): ["Aaa", "Bbb"], ("species_locked",): True})
+    before = paths.config_file().read_bytes()
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Tree")                            # read-only: nothing focused
+            t = scr.query_one("#tree-missing")
+            assert t.row_count == 1 and t.disabled and scr.query_one("#tree-source").disabled
+            assert "read-only" in _text(scr, "#tree-info")
+            scr._open_place(0)                                            # behind the UI: refused
+            await pilot.pause()
+            assert not isinstance(app.screen, setup_tui.PlaceScreen)
+            assert not (root / "data" / sptree.PLACEMENTS).exists()
+            await _section(pilot, scr, "Families")
+            assert _text(scr, "#fam-reason").startswith("space")
+            await pilot.press(*"PF_A", "enter", "space")
+            await pilot.pause()
+            assert len(_fams(root)) == 4 and "PF_A" not in {r[1] for r in _fams(root)}   # GENEFAM: 5
+    _run(go())
+    assert paths.config_file().read_bytes() == before
+
+
+def test_prepare_key_runs_and_reports(proj):
+    root, _prot, _mine_ = proj
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await pilot.press("P")                                        # nothing ticked
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert _text(scr, "#blockers").startswith("ERROR: cannot prepare")
+            assert not (root / "data" / "input.fasta").exists()
+            yamledit.update_config({("species",): ["Aaa", "Bbb"]})
+            await pilot.press("P")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            text = _text(scr, "#blockers")
+            assert text.startswith("prepare wrote data/input.fasta, data/species_tree.binary.newick")
+            assert (root / "data" / "input.fasta").read_text() == ">Aaa_x\nM\n>Bbb_x\nM\n"
+            assert sptree.tips((root / "data" / "species_tree.binary.newick").read_text()) == {"Aaa", "Bbb"}
+    _run(go())

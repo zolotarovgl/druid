@@ -3258,6 +3258,24 @@ def test_origin_tree_read_off_the_ui_thread(cli, monkeypatch):
     assert on_main == [False]
 
 
+def test_results_no_origin_when_origins_off(cli, monkeypatch):
+    from druid import yamledit
+    write_results(_cfg())
+    yamledit.update_config({("params", "origins"): False})
+    monkeypatch.setattr(tui.model, "origin_tree", lambda cfg: pytest.fail("ORIGIN_TREE read"))
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "tfs")
+            t = app.query_one("#ogs")
+            assert [c.name for c in t.cols] == ["og", "genes", "spp", "support", "name"]
+            assert _cells(app, "#ogs", 0) == ["HG1.0", "3", "2", "78.4", "T/Tbx19"]
+            assert app.query_one("#species_box").border_title == "species · HG1.0"
+            assert app._origins == {}
+    _run(go())
+
+
 def test_origin_from_results_tab_cache(cli, monkeypatch):
     write_results(_cfg())
     calls = []

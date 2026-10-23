@@ -1,30 +1,44 @@
 """The TUI Setup tab (sub-project 2, 23/10/2026): proteome sources, the species picker, the analyses
-switches and druid.yaml, with the blockers `prepare` would report on the bottom line. Every write goes
-through yamledit.update_config; an adopted project (prepare: locked) is read-only throughout, a
-species-locked one only in the Species section. Imported by druid.tui when the Setup tab opens."""
+switches, the placement of ticked species missing from the species tree, the search type, the
+families and druid.yaml, with the blockers `prepare` would report on the bottom line; `P` runs
+prepare. Config writes go through yamledit.update_config, the placements and families files through
+sptree / families (paths). An adopted project (prepare: locked) is read-only throughout; a
+species-locked one in the Species and Tree sections (the families stay editable). Imported by
+druid.tui when the Setup tab opens."""
 from __future__ import annotations
 
+import dataclasses
 import os
 import shlex
 import subprocess
 from pathlib import Path
 
 from rich.text import Text
+from textual import work
 from textual.app import ComposeResult, SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import (ContentSwitcher, DataTable, Footer, Header, Input, Label, ListItem,
-                             ListView, Static, Switch)
+                             ListView, RadioButton, RadioSet, Static, Switch)
 
-from druid import core, paths, setup_state, yamledit
+from ete3 import Tree
+
+from druid import core, families, paths, prepare, setup_state, sptree, yamledit
+from treeview import model as tvm                # vendored: core puts druid/vendor on sys.path
+from treeview.widget import TreeScreen
 
 SWITCHES = {"sw-generax": "run_generax", "sw-origins": "origins"}   # switch id -> params key
 SRC_FIELDS = ("name", "dir", "glob", "tax")                          # #src-<field> inputs, in order
-PLACEHOLDERS = {
-    "Tree": "Not available yet: placing ticked species that are missing from the species tree.",
-    "Search": "Not available yet: the family file, custom HMMs or query sequences to search with.",
-    "Families": "Not available yet: ticking the families to run from the shipped library."}
+SEARCH = {"rb-file": "file", "rb-hmm": "hmm"}                         # radio id -> search type
+# the editable families-file columns (#fe-<col>, in order) and what the pipeline does with each,
+# checked 23/10/2026 in submodules/phylogeny/helper/hmmsearch.py and druid/stages/cluster.sh
+EDIT_COLS = {"inflation": "inflation (per family; the cluster stage uses params.s2_inflation)",
+             "min_seqs": "min_seqs (per family; the stages use params.min_seqs)",
+             "threshold": "threshold (GA: hmmsearch --cut_ga; else a --domE e-value)",
+             "pref1": "pref1 (category)",
+             "pref2": "pref2 (id prefix: the family id is <pref2>.<class_name>; pref1 when empty)"}
+TREE_OFF = "not needed: GeneRax and origins are off"
 LOCKED_ALL = "read-only: adopted project (prepare: locked); druid never changes its druid.yaml here"
 
 
@@ -36,6 +50,70 @@ def _run_editor(path: Path) -> int:
 def _resolve(p: str, root: Path) -> Path:
     q = Path(p).expanduser()
     return q if q.is_absolute() else root / q
+
+
+def _fam_id(r: families.Row) -> str:
+    return next(iter(families.ticked_ids([r])))
+
+
+def _key(r: families.Row) -> tuple:
+    return r.class_name, r.hmms
+
+
+def _merge(universe: list, file_rows: list) -> list:
+    """[[Row, ticked]]: the universe in its order, each row replaced by its families-file row
+    (ticked) — an identical row first, else one with the same class_name and hmms (its settings
+    edited); file rows matching none are appended, ticked. An empty file: everything ticked."""
+    if not file_rows:
+        return [[r, True] for r in universe]
+    out = [[r, False] for r in universe]
+    rest = []
+    for f in file_rows:                          # pass 1: the identical row
+        i = next((i for i, (r, t) in enumerate(out) if not t and r.fields() == f.fields()), None)
+        if i is None:
+            rest.append(f)
+        else:
+            out[i] = [f, True]
+    extra = []
+    for f in rest:                               # pass 2: same family, edited settings
+        i = next((i for i, (r, t) in enumerate(out) if not t and _key(r) == _key(f)), None)
+        if i is None:
+            extra.append([f, True])
+        else:
+            out[i] = [f, True]
+    return out + extra
+
+
+def _edit_error(v: dict) -> str:
+    """Why the edit form's values cannot be saved ("" = fine)."""
+    def positive(s):
+        try:
+            return float(s) > 0
+        except ValueError:
+            return False
+    if not positive(v["inflation"]):
+        return f"inflation must be a number > 0, not {v['inflation']!r}"
+    if not v["min_seqs"].isdigit() or int(v["min_seqs"]) < 1:
+        return f"min_seqs must be a whole number >= 1, not {v['min_seqs']!r}"
+    if v["threshold"] != "GA" and not positive(v["threshold"]):
+        return f"threshold must be GA or an e-value > 0, not {v['threshold']!r}"
+    for c in ("pref1", "pref2"):
+        if any(ch.isspace() or ch == "." for ch in v[c]):
+            return f"{c} takes no spaces or dots: {v[c]!r}"
+    if not v["pref1"] and not v["pref2"]:
+        return "pref1 or pref2 must be set (the family id prefix)"
+    return ""
+
+
+class PlaceScreen(TreeScreen):
+    """The species tree as built now (base tree, ticked species, earlier placements) in the
+    vendored treeview; p dismisses with the tip names under the cursor node, which the new species
+    becomes the sister of (a tip or an internal node); esc leaves without a placement."""
+    BINDINGS = [Binding("p", "place", "place here")]
+
+    def action_place(self) -> None:
+        m, i = self.model, self.tree.cursor
+        self.dismiss(frozenset(m.name[j] for j in range(i, i + m.size[i]) if m.is_tip(j)))
 
 
 class SetupScreen(Screen):
@@ -51,9 +129,17 @@ class SetupScreen(Screen):
     SetupScreen #content > * { height: 1fr; }
     SetupScreen #sp-table { height: 1fr; }
     SetupScreen #sp-table:focus { border: round orange; }
+    SetupScreen #tree-missing { height: 1fr; }
+    SetupScreen #tree-missing:focus { border: round orange; }
+    SetupScreen #fam-table { height: 1fr; }
+    SetupScreen #fam-table:focus { border: round orange; }
+    SetupScreen #fam-edit { height: auto; display: none; }
+    SetupScreen #fam-edit-help { display: none; }
+    SetupScreen #fam-edit Input { width: 1fr; }
+    SetupScreen #se-type { height: auto; }
     SetupScreen .row { height: auto; }
     SetupScreen .row Label { padding: 1 1; }
-    SetupScreen .note { color: $text-muted; }
+    SetupScreen .note { color: $text-muted; height: auto; }
     SetupScreen #blockers { height: auto; max-height: 8; color: $warning; }
     """
     BINDINGS = [
@@ -63,6 +149,7 @@ class SetupScreen(Screen):
         Binding("space", "toggle", "tick"),
         Binding("a", "tick_all", "tick shown"),
         Binding("e", "edit_config", "edit druid.yaml"),
+        Binding("P", "prepare", "prepare"),
     ]
 
     def __init__(self):
@@ -79,7 +166,20 @@ class SetupScreen(Screen):
         self._shown: list = []                   # candidates passing the filter, as in #sp-table
         self._blockers: list = []
         self._ro_all = False                     # prepare: locked
-        self._sp_reason = ""                     # why Species is read-only ("" = editable)
+        self._sp_reason = ""                     # why Species / Tree are read-only ("" = editable)
+        self._tree_on = True                     # GeneRax or origins on: a species tree is needed
+        self._tree_file = None                   # the base binary tree (setup_state.base_tree_files)
+        self._tree_err = ""                      # why the tree cannot be read ("" = fine)
+        self._built = ""                         # the binary tree as built now (newick)
+        self._missing: list = []                 # ticked species not on it
+        self._placements: list = []              # sptree.Placement, data/placements.tsv
+        self._search = None                      # "file" | "hmm"; hmm_dir set in druid.yaml wins
+        self._hmm_dir = None                     # params.hmm_dir resolved, None when unset
+        self._fam_target = None                  # params.genefam_info (data/families.csv)
+        self._fam: list = []                     # [[families.Row, ticked]] in table order
+        self._fam_nfile = 0                      # rows in the families file
+        self._fam_shown: list = []               # indices into _fam passing the filter
+        self._fam_edit = None                    # the _fam index in the edit form
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -111,8 +211,41 @@ class SetupScreen(Screen):
                         yield Switch(id="sw-origins")
                         yield Label("orthogroup origins on ORIGIN_TREE (params.origins)")
                     yield Static("Both off: no species tree is needed.", classes="note")
-                for name, text in PLACEHOLDERS.items():
-                    yield Static(text, id=f"sec-{name.lower()}", classes="note")
+                with Vertical(id="sec-tree"):
+                    yield Static("", id="tree-info", classes="note", markup=False)
+                    yield DataTable(id="tree-missing", cursor_type="row")
+                    yield Static("custom route: one species tree of your own, used for both trees "
+                                 "(tree_source; empty: the shipped curated tree)",
+                                 id="tree-source-note", classes="note")
+                    yield Input(placeholder="tree_source (newick)", id="tree-source")
+                with Vertical(id="sec-search"):
+                    yield Static("", id="se-reason", classes="note", markup=False)
+                    with RadioSet(id="se-type"):
+                        yield RadioButton("gene family file (Pfam HMM names)", id="rb-file",
+                                          value=True)
+                        yield RadioButton("custom HMMs (one family per <name>.hmm in params.hmm_dir)",
+                                          id="rb-hmm")
+                        yield RadioButton("custom query sequences: not available yet", id="rb-query",
+                                          disabled=True)
+                    yield Static("your own families file (tab-separated, the library's columns; "
+                                 "empty: the shipped library)", classes="note")
+                    yield Input(placeholder="families_source", id="se-famfile")
+                    yield Static("custom HMM directory (read-only; enter: set params.hmm_dir)",
+                                 classes="note")
+                    yield Input(placeholder="params.hmm_dir", id="se-hmmdir")
+                with Vertical(id="sec-families"):
+                    yield Static("", id="fam-reason", classes="note", markup=False)
+                    yield Input(placeholder="filter (any column · enter: the list)", id="fam-filter")
+                    yield DataTable(id="fam-table", cursor_type="row")
+                    yield Static("\n".join(EDIT_COLS.values()) + "\nenter: next field · enter on "
+                                 "the last: save (the row is ticked) · esc: cancel",
+                                 id="fam-edit-help", classes="note", markup=False)
+                    with Horizontal(id="fam-edit"):
+                        for col in EDIT_COLS:
+                            inp = Input(id=f"fe-{col}")
+                            inp.border_title = col
+                            yield inp
+                    yield Static("", id="fam-count", markup=False)
                 with VerticalScroll(id="sec-config"):
                     yield Static("", id="cfg-help", classes="note", markup=False)
                     yield Static("", id="cfg-text", markup=False)
@@ -121,6 +254,8 @@ class SetupScreen(Screen):
 
     def on_mount(self) -> None:
         self.query_one("#sp-table", DataTable).add_columns("", "prefix", "name", "taxonomy", "source")
+        self.query_one("#tree-missing", DataTable).add_columns("missing from the tree", "source")
+        self.query_one("#fam-table", DataTable).add_columns("", "family", "hmms", *EDIT_COLS)
         self.query_one("#content").border_title = self.current
         txt = Text()
         txt.append("Jobs │ Results │ ")
@@ -171,12 +306,70 @@ class SetupScreen(Screen):
             self._sp_reason = ""
         self._blockers = [] if self._cfg is None else self._try(
             "blockers", lambda: setup_state.blockers(raw, self._cfg, root), [])
+        params = raw.get("params") if isinstance(raw.get("params"), dict) else {}
+        self._reload_tree(raw, params, root)
+        self._reload_families(raw, params, root)
 
-    def _write(self, changes: dict, done: str = "") -> None:
-        """update_config(changes); its error (nothing written) on the bottom line; then re-read."""
+    def _reload_tree(self, raw: dict, params: dict, root: Path) -> None:
+        """The base binary tree, the placements, the tree built from them and who is missing; a
+        bad tree is the Tree section's own note (setup_state.blockers lists it as a blocker)."""
+        self._tree_on = bool(params.get("run_generax")) or bool(params.get("origins", True))
+        self._tree_err, self._built, self._missing, self._placements = "", "", [], []
+        self._tree_file = None
+        if not self._tree_on:
+            return
+        species = list(dict.fromkeys(sp for sp, _src in self._sel))
         try:
-            yamledit.update_config(changes)
-        except (core.ConfigError, OSError) as e:
+            self._tree_file = setup_state.base_tree_files(raw, root)[0]
+            self._placements = sptree.read_placements(root / "data" / sptree.PLACEMENTS)
+            base = self._tree_file.read_text().strip()
+            self._built = sptree.build_trees(base, base, species, self._placements)[0]
+            self._missing = sptree.missing(base, species, self._placements)
+        except Exception as e:                   # unreadable / unparsable newick, a bad path, ...
+            self._tree_err = f"species tree unreadable ({self._tree_file}): {type(e).__name__}: {e}"
+
+    def _reload_families(self, raw: dict, params: dict, root: Path) -> None:
+        """The families table: the library (or families_source) plus the hmm_dir rows, merged with
+        the project's families file (its rows are the ticked set; none: all ticked)."""
+        hd = params.get("hmm_dir")
+        self._hmm_dir = _resolve(str(hd), root) if hd else None
+        if self._hmm_dir is not None:
+            self._search = "hmm"
+            if not self._hmm_dir.is_dir():
+                self._errors.append(f"ERROR: params.hmm_dir is not a directory: {self._hmm_dir}")
+        elif self._search is None:
+            self._search = "file"
+        elif self._search == "hmm":
+            self._errors.append("custom HMMs chosen: set params.hmm_dir in Search")
+        self._fam_target = None
+        if self._cfg is not None and self._cfg.params.get("genefam_info"):
+            self._fam_target = Path(self._cfg.params["genefam_info"])
+        universe = self._try("families", lambda: self._fam_universe(raw, root), [])
+        file_rows = []
+        if self._fam_target is not None and self._fam_target.is_file():
+            file_rows = self._try(f"families file {self._fam_target}",
+                                  lambda: families.read(self._fam_target), [])
+        self._fam_nfile = len(file_rows)
+        self._fam = _merge(universe, file_rows)
+
+    def _fam_universe(self, raw: dict, root: Path) -> list:
+        src = raw.get("families_source")
+        rows = families.read(_resolve(str(src), root)) if src else families.library()
+        if self._hmm_dir is not None and self._hmm_dir.is_dir():
+            rows = rows + families.hmm_rows(self._hmm_dir)
+        return rows
+
+    def _write(self, changes: dict, done: str = "", fam_rows=None) -> None:
+        """update_config(changes), then (fam_rows given) the families file; the error (nothing
+        more written) on the bottom line; then re-read."""
+        try:
+            if changes:
+                yamledit.update_config(changes)
+            if fam_rows is not None:
+                if self._fam_target is None:
+                    raise core.ConfigError("no params.genefam_info to write the families to")
+                families.write(self._fam_target, fam_rows)
+        except (core.ConfigError, OSError, paths.OutsideProject) as e:
             self._msg = f"ERROR: {e}"
         else:
             self._msg = done
@@ -186,9 +379,14 @@ class SetupScreen(Screen):
     # ---- drawing ----------------------------------------------------------------------------
     def _marks(self) -> dict:
         nsrc_bad = any(e.startswith(("ERROR: sources", "ERROR: proteome")) for e in self._errors)
+        nfam = sum(1 for _r, t in self._fam if t)
+        hmm_bad = self._search == "hmm" and (self._hmm_dir is None or not self._hmm_dir.is_dir())
         return {"Source": "!" if nsrc_bad or self._rowless else str(len(self._srcs)),
                 "Species": str(len(self._sel)) if self._sel else "!",
-                "Analyses": "✓", "Tree": "·", "Search": "·", "Families": "·",
+                "Analyses": "✓",
+                "Tree": "·" if not self._tree_on else "!" if self._tree_err or self._missing else "✓",
+                "Search": "!" if hmm_bad else "✓",
+                "Families": str(nfam) if nfam and self._fam_nfile else "!",
                 "Config": "!" if self._cfg is None else "✓"}
 
     def _refresh(self) -> None:
@@ -197,6 +395,9 @@ class SetupScreen(Screen):
         self._fill_source()
         self._fill_species()
         self._fill_analyses()
+        self._fill_tree()
+        self._fill_search()
+        self._fill_families()
         self._fill_config()
         self._fill_blockers()
 
@@ -252,6 +453,93 @@ class SetupScreen(Screen):
             sw.disabled = self._ro_all
         self.query_one("#an-reason", Static).update(LOCKED_ALL if self._ro_all else "")
 
+    def _fill_tree(self) -> None:
+        t = self.query_one("#tree-missing", DataTable)
+        for wid in ("#tree-missing", "#tree-source-note", "#tree-source"):
+            self.query_one(wid).display = self._tree_on
+        if not self._tree_on:
+            t.clear()
+            self.query_one("#tree-info", Static).update(TREE_OFF)
+            return
+        src = dict(self._sel)
+        row = t.cursor_row
+        t.clear()
+        for sp in self._missing:
+            t.add_row(sp, src.get(sp, ""))
+        if self._missing:
+            t.move_cursor(row=min(max(row, 0), len(self._missing) - 1))
+        ts = self._raw.get("tree_source")
+        lines = [self._sp_reason] if self._sp_reason else []
+        lines.append(f"species tree: {self._tree_file} "
+                     f"({'tree_source' if ts else 'the shipped curated tree'})")
+        if self._tree_err:
+            lines.append(f"ERROR: {self._tree_err}")
+        elif self._missing:
+            lines.append(f"{len(self._missing)} ticked species missing · enter on one: the tree, "
+                         "then p on the node it becomes the sister of")
+        else:
+            lines.append("every ticked species is on the tree")
+        if self._placements:
+            lines.append("placed: " + " · ".join(f"{x.sp} (sister of {len(x.tipset)} tips)"
+                                                for x in self._placements))
+        self.query_one("#tree-info", Static).update("\n".join(lines))
+        ro = bool(self._sp_reason)
+        t.disabled = ro
+        inp = self.query_one("#tree-source", Input)
+        inp.disabled = ro
+        if not inp.has_focus:
+            inp.value = str(ts or "")
+
+    def _fam_reason(self) -> str:
+        """Why Search and Families are read-only ("" = editable; the species lock does not count)."""
+        if self._ro_all:
+            return LOCKED_ALL
+        if self._cfg is None:
+            return "read-only until druid.yaml loads (see the errors below)"
+        return ""
+
+    def _fill_search(self) -> None:
+        reason = self._fam_reason()
+        rs = self.query_one("#se-type", RadioSet)
+        for rid, kind in SEARCH.items():     # the Changed this posts matches _search: a no-op
+            rb = self.query_one(f"#{rid}", RadioButton)
+            if kind == self._search and not rb.value:
+                rb.value = True
+        rs.disabled = bool(reason)
+        for wid, value in (("#se-famfile", self._raw.get("families_source")),
+                           ("#se-hmmdir", (self._raw.get("params") or {}).get("hmm_dir")
+                            if isinstance(self._raw.get("params"), dict) else None)):
+            inp = self.query_one(wid, Input)
+            inp.disabled = bool(reason)
+            if not inp.has_focus:
+                inp.value = str(value or "")
+        self.query_one("#se-hmmdir").display = self._search == "hmm"
+        self.query_one("#se-reason", Static).update(reason)
+
+    def _fill_families(self) -> None:
+        q = self.query_one("#fam-filter", Input).value.strip().lower()
+        self._fam_shown = [i for i, (r, _t) in enumerate(self._fam) if not q or
+                           any(q in v.lower() for v in [_fam_id(r)] + r.fields())]
+        t = self.query_one("#fam-table", DataTable)
+        row = t.cursor_row
+        t.clear()
+        for i in self._fam_shown:
+            r, ticked = self._fam[i]
+            t.add_row("[x]" if ticked else "[ ]", _fam_id(r), r.hmms,
+                      *(getattr(r, c) for c in EDIT_COLS))
+        if self._fam_shown:
+            t.move_cursor(row=min(max(row, 0), len(self._fam_shown) - 1))
+        n = sum(1 for _r, ticked in self._fam if ticked)
+        count = f"{n} ticked / {len(self._fam)} → {self._fam_target or 'params.genefam_info'}"
+        if q:
+            count += f" · {len(self._fam_shown)} shown"
+        if not self._fam_nfile:
+            count += " · the families file has no rows yet"
+        self.query_one("#fam-count", Static).update(count)
+        reason = self._fam_reason()
+        self.query_one("#fam-reason", Static).update(
+            reason or "space: tick / untick · enter: edit the row's settings")
+
     def _fill_config(self) -> None:
         f = paths.config_file()
         try:
@@ -272,18 +560,26 @@ class SetupScreen(Screen):
         self.query_one("#content", ContentSwitcher).current = f"sec-{name}"
         self.query_one("#content").border_title = self.current
         self.refresh_bindings()
+        if self.current == "Families":
+            self._seed_families()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        """enter on a section: into its first control (none for a placeholder or a locked form)."""
+        """enter on a section: into its first control (none for a locked form)."""
+        if event.list_view.id != "sections":
+            return
         target = {"Source": "#src-name", "Species": "#sp-filter", "Analyses": "#sw-generax",
+                  "Tree": "#tree-missing" if self._missing else "#tree-source",
+                  "Search": "#se-type", "Families": "#fam-filter",
                   "Config": "#sec-config"}.get(self.current)
         if target:
             w = self.query_one(target)
-            if not w.disabled:
+            if not w.disabled and w.display:
                 w.focus()
 
     def check_action(self, action: str, parameters: tuple) -> "bool | None":
-        if action in ("toggle", "tick_all"):
+        if action == "toggle":
+            return self.current in ("Species", "Families")
+        if action == "tick_all":
             return self.current == "Species"
         if action == "edit_config":
             return self.current == "Config"
@@ -293,9 +589,12 @@ class SetupScreen(Screen):
         self.dismiss(to)
 
     def action_back(self) -> None:
-        """esc: from a section back to the list; on the list, back to Jobs."""
+        """esc: out of the family edit form to the table; from a section back to the list; on the
+        list, back to Jobs."""
         sections = self.query_one("#sections", ListView)
-        if sections.has_focus:
+        if self._fam_edit is not None:
+            self._close_edit()
+        elif sections.has_focus:
             self.dismiss("jobs")
         else:
             sections.focus()
@@ -305,6 +604,21 @@ class SetupScreen(Screen):
         wid = event.input.id or ""
         if wid == "sp-filter":
             self.query_one("#sp-table").focus()
+        elif wid == "fam-filter":
+            self.query_one("#fam-table").focus()
+        elif wid == "tree-source":
+            self._set_tree_source(event.value.strip())
+        elif wid == "se-famfile":
+            self._set_families_source(event.value.strip())
+        elif wid == "se-hmmdir":
+            self._set_hmm_dir(event.value.strip())
+        elif wid.startswith("fe-"):
+            cols = list(EDIT_COLS)
+            i = cols.index(wid[len("fe-"):])
+            if i + 1 < len(cols):
+                self.query_one(f"#fe-{cols[i + 1]}").focus()
+            else:
+                self._save_edit()
         elif wid.startswith("src-"):
             i = SRC_FIELDS.index(wid[len("src-"):])
             if i + 1 < len(SRC_FIELDS):
@@ -361,6 +675,8 @@ class SetupScreen(Screen):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "sp-filter":
             self._fill_species()
+        elif event.input.id == "fam-filter":
+            self._fill_families()
 
     def _species_editable(self) -> bool:
         """Re-read druid.yaml (a tick starts from the file, not from what was last shown); False,
@@ -373,6 +689,9 @@ class SetupScreen(Screen):
         return True
 
     def action_toggle(self) -> None:
+        if self.current == "Families":
+            self._toggle_family()
+            return
         t = self.query_one("#sp-table", DataTable)
         if not t.has_focus or not self._shown or not self._species_editable():
             return
@@ -403,6 +722,263 @@ class SetupScreen(Screen):
             self._fill_blockers()
             return
         self._write({("params", key): bool(event.value)})
+
+    # ---- Tree -------------------------------------------------------------------------------
+    def _refuse(self, why: str) -> bool:
+        """`why` on the bottom line; False, for `return self._refuse(...)` in a guard."""
+        self._msg = why
+        self._fill_blockers()
+        return False
+
+    def _tree_editable(self) -> bool:
+        """Re-read; False with the reason when the Tree section is read-only or not needed."""
+        self._reload()
+        if self._sp_reason:
+            return self._refuse(self._sp_reason)
+        if not self._tree_on:
+            return self._refuse(TREE_OFF)
+        return True
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.data_table.id == "tree-missing":
+            self._open_place(event.cursor_row)
+        elif event.data_table.id == "fam-table":
+            self._open_edit(event.cursor_row)
+
+    def _open_place(self, row: int) -> None:
+        """enter on a missing species: PlaceScreen on the tree as built now (earlier placements
+        shown); p there places it, esc cancels."""
+        sp = self._missing[row] if 0 <= row < len(self._missing) else None
+        if sp is None or not self._tree_editable():
+            return
+        if sp not in self._missing:              # placed or unticked meanwhile
+            self._refresh()
+            return
+        if self._tree_err:
+            self._refuse(f"ERROR: {self._tree_err}")
+            return
+        if not self._built:
+            self._refuse(f"ERROR: no ticked species is on the tree yet: nothing to place {sp} "
+                         "next to (tick one that is, or set tree_source)")
+            return
+        m = tvm.TreeModel(Tree(self._built, format=1), sep="_")
+        self.app.push_screen(PlaceScreen(m, title=f"place {sp}: p on its sister node · esc: cancel",
+                                         write_guard=paths.writable),
+                             callback=lambda tips, sp=sp: self._placed(sp, tips))
+
+    def _placed(self, sp: str, tips) -> None:
+        if tips is None or not self._tree_editable():
+            return
+        pl = [x for x in self._placements if x.sp != sp] + [sptree.Placement(sp, frozenset(tips))]
+        try:
+            sptree.write_placements(paths.project_root() / "data" / sptree.PLACEMENTS, pl)
+        except (OSError, paths.OutsideProject) as e:
+            self._msg = f"ERROR: {e}"
+        else:
+            names = sorted(tips)
+            self._msg = (f"placed {sp} as the sister of "
+                         + (", ".join(names) if len(names) <= 4 else f"a clade of {len(names)} tips")
+                         + f" (data/{sptree.PLACEMENTS})")
+        self._reload()
+        self._refresh()
+
+    def _set_tree_source(self, value: str) -> None:
+        if not self._tree_editable():
+            return
+        if value == str(self._raw.get("tree_source") or ""):
+            self._refresh()
+            return
+        if value and not _resolve(value, paths.project_root()).is_file():
+            self._refuse(f"ERROR: no such tree file: {_resolve(value, paths.project_root())}")
+            return
+        self._write({("tree_source",): value or None},
+                    done=f"tree_source = {value}" if value else "tree_source cleared: the shipped tree")
+
+    # ---- Search -----------------------------------------------------------------------------
+    def _fam_editable(self) -> bool:
+        """Re-read; False with the reason when Search / Families are read-only."""
+        self._reload()
+        reason = self._fam_reason()
+        return self._refuse(reason) if reason else True
+
+    @staticmethod
+    def _hmm_keys(d) -> set:
+        return {_key(r) for r in families.hmm_rows(d)} if d is not None and d.is_dir() else set()
+
+    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        kind = SEARCH.get(event.pressed.id or "")
+        if kind is None or kind == self._search:  # showing the current value: not a choice
+            return
+        if not self._fam_editable():
+            self._fill_search()                  # put the radio back
+            return
+        old_dir = self._hmm_dir
+        self._search = kind
+        if kind == "hmm":
+            self._msg = "custom HMMs: enter the directory of the <name>.hmm files"
+            self._reload()
+            self._refresh()
+            self.query_one("#se-hmmdir").focus()
+        elif old_dir is None:
+            self._msg = ""
+            self._reload()
+            self._refresh()
+        else:                                    # back to the family file: drop the HMM families
+            keys = self._hmm_keys(old_dir)
+            self._write({("params", "hmm_dir"): None},
+                        done="search: gene family file (params.hmm_dir cleared, its families dropped)",
+                        fam_rows=[r for r, t in self._fam if t and _key(r) not in keys])
+
+    def _set_hmm_dir(self, value: str) -> None:
+        if not self._fam_editable():
+            return
+        if not value:
+            self._refuse("ERROR: enter the directory of the <name>.hmm files")
+            return
+        d = _resolve(value, paths.project_root())
+        if not d.is_dir():
+            self._refuse(f"ERROR: not a directory: {d}")
+            return
+        new = families.hmm_rows(d)
+        if not new:
+            self._refuse(f"ERROR: no *.hmm files in {d}")
+            return
+        same = self._hmm_dir is not None and self._hmm_dir.resolve() == d.resolve()
+        old = set() if same else self._hmm_keys(self._hmm_dir)   # same dir: edits kept
+        rows = [r for r, t in self._fam if t and _key(r) not in old]
+        have = {_key(r) for r in rows}
+        added = [r for r in new if _key(r) not in have]
+        self._write({("params", "hmm_dir"): value},
+                    done=f"params.hmm_dir = {value}: {len(added)} custom families added (ticked; "
+                         "enter on one in Families edits its settings)",
+                    fam_rows=rows + added)
+
+    def _set_families_source(self, value: str) -> None:
+        """Your own families file (empty: the library) as the table's rows, all of them ticked."""
+        if not self._fam_editable():
+            return
+        if value == str(self._raw.get("families_source") or ""):
+            self._refresh()
+            return
+        if value:
+            p = _resolve(value, paths.project_root())
+            if not p.is_file():
+                self._refuse(f"ERROR: no such families file: {p}")
+                return
+            if self._fam_target is not None and p.resolve() == self._fam_target.resolve():
+                self._refuse("ERROR: that is the project's families file (params.genefam_info); "
+                             "give the file it was copied from")
+                return
+            try:
+                rows = families.read(p)
+            except OSError as e:
+                self._refuse(f"ERROR: {e}")
+                return
+            if not rows:
+                self._refuse(f"ERROR: no rows in {p}")
+                return
+        else:
+            rows = families.library()
+        if self._hmm_dir is not None and self._hmm_dir.is_dir():
+            rows = rows + families.hmm_rows(self._hmm_dir)
+        self._write({("families_source",): value or None},
+                    done=f"families from {value or 'the shipped library'}: all {len(rows)} ticked",
+                    fam_rows=rows)
+
+    # ---- Families ---------------------------------------------------------------------------
+    def _seed_families(self) -> None:
+        """First open with an empty families file: write every row of the table (all ticked)."""
+        self._reload()
+        if self._fam_reason() or self._fam_nfile or not self._fam or self._fam_target is None:
+            return
+        self._write({}, done=f"{self._fam_target.name} had no rows: all {len(self._fam)} families "
+                             "written (ticked) · space unticks",
+                    fam_rows=[r for r, _t in self._fam])
+
+    def _toggle_family(self) -> None:
+        t = self.query_one("#fam-table", DataTable)
+        if not t.has_focus or not self._fam_shown:
+            return
+        i = self._fam_shown[t.cursor_row]
+        if not self._fam_editable() or i >= len(self._fam):
+            return
+        r, ticked = self._fam[i]
+        if ticked and sum(1 for _r, x in self._fam if x) == 1:
+            self._refuse("at least one family stays ticked (an empty families file means all ticked)")
+            return
+        self._fam[i] = [r, not ticked]
+        self._write({}, fam_rows=[r for r, x in self._fam if x])
+
+    def _open_edit(self, row: int) -> None:
+        if not 0 <= row < len(self._fam_shown) or not self._fam_editable():
+            return
+        self._fam_edit = self._fam_shown[row]
+        r = self._fam[self._fam_edit][0]
+        for col in EDIT_COLS:
+            self.query_one(f"#fe-{col}", Input).value = getattr(r, col)
+        self.query_one("#fam-edit").display = True
+        self.query_one("#fam-edit-help").display = True
+        self.query_one("#fe-inflation").focus()
+        self._msg = f"editing {_fam_id(r)}"
+        self._fill_blockers()
+
+    def _close_edit(self) -> None:
+        self._fam_edit = None
+        self.query_one("#fam-edit").display = False
+        self.query_one("#fam-edit-help").display = False
+        self.query_one("#fam-table").focus()
+
+    def _save_edit(self) -> None:
+        i = self._fam_edit
+        if i is None:
+            return
+        vals = {c: self.query_one(f"#fe-{c}", Input).value.strip() for c in EDIT_COLS}
+        err = _edit_error(vals)
+        if err:
+            self._refuse(f"ERROR: {err}")
+            return
+        if not self._fam_editable() or i >= len(self._fam):
+            self._close_edit()
+            return
+        row = dataclasses.replace(self._fam[i][0], **vals)
+        self._fam[i] = [row, True]
+        self._close_edit()
+        self._write({}, done=f"{_fam_id(row)}: saved", fam_rows=[r for r, t in self._fam if t])
+
+    # ---- prepare ----------------------------------------------------------------------------
+    def action_prepare(self) -> None:
+        """P: prepare.run in a worker (it refuses a locked project or any blocker itself); the
+        files written, the tree notes or the ERROR on the bottom line."""
+        self._reload()
+        if self._cfg is None:
+            self._msg = "ERROR: prepare: druid.yaml does not load (see the errors below)"
+        else:
+            self._msg = "prepare: running…"
+            self._run_prepare(self._raw, self._cfg, paths.project_root())
+        self._refresh()
+
+    @work(thread=True, exclusive=True, group="prepare")
+    def _run_prepare(self, raw: dict, cfg, root: Path) -> None:
+        notes: list = []
+        try:
+            written = prepare.run(raw, cfg, root, notes)
+        except prepare.PrepareError as e:
+            msg = f"ERROR: {e}"
+        except Exception as e:                   # anything: reported, the screen stays up
+            msg = f"ERROR: prepare: {type(e).__name__}: {e}"
+        else:
+            def rel(p):
+                try:
+                    return str(Path(p).relative_to(root))
+                except ValueError:
+                    return str(p)
+            msg = "\n".join(["prepare wrote " + ", ".join(rel(p) for p in written)] + notes)
+        self.app.call_from_thread(self._prepared, msg)
+
+    def _prepared(self, msg: str) -> None:
+        self._msg = msg
+        self._reload()
+        self._refresh()
 
     # ---- Config -----------------------------------------------------------------------------
     def action_edit_config(self) -> None:

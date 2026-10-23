@@ -1523,12 +1523,12 @@ class PhyloApp(App):
                 snap["phyla"] = model.phyla(self.cfg)
             except Exception as e:
                 notes.append(f"{model.species_info_path(self.cfg)}: {e} (phyla shown as unknown)")
-        if snap["otree"] is None:
+        if snap["otree"] is None and self._origins_on():      # params.origins off: never read
             try:
                 snap["otree"] = model.origin_tree(self.cfg)
             except Exception as e:
                 snap["otree_err"] = f"origin tree {model.origin_tree_path(self.cfg)}: {e}"
-        if snap["otree"] is not None:
+        if snap["otree"] is not None and self._origins_on():
             snap["origins"] = model.og_origins(snap["rows"], snap["otree"])
         snap["sp_note"] = "; ".join(notes)
         if worker.is_cancelled:
@@ -1704,6 +1704,10 @@ class PhyloApp(App):
         key = self._key_at_cursor(self.query_one("#ogs", DataTable))
         return next((o for o in r.ogs if o.id == key), None)
 
+    def _origins_on(self) -> bool:
+        """params.origins (default on): off, ORIGIN_TREE is never read and no origin is shown."""
+        return bool(self.cfg.params.get("origins", True))
+
     def _origin_text(self, og_id: str) -> str:
         """`?` while the origin tree is unreadable, `–` for an OG with no species on it."""
         if self._otree is None:
@@ -1719,11 +1723,17 @@ class PhyloApp(App):
         t = self.query_one("#ogs", SortTable)
         if keep is None:
             keep = self._key_at_cursor(t)
+        on = self._origins_on()
+        cols = OG_COLS if on else [c for c in OG_COLS if c.name != "origin"]
+        if t.cols != cols:                       # params.origins changed in Setup
+            if not on and t.sort_state is not None and t.sort_state[0] == "origin":
+                t.sort_state = None
+            t.set_cols(cols)
         t.clear()
         t.border_title = f"OGs · {r.hg if r else '–'} · {self.res_source or '…'}{self._ftag('ogs')}"
         q = self._flt["ogs"].lower()
         ogs = [o for o in r.ogs if q in o.id.lower() or q in o.name.lower()
-               or q in self._origin_text(o.id).lower()] if r else []
+               or (on and q in self._origin_text(o.id).lower())] if r else []
         keys = dict(OG_KEYS, origin=(lambda o: _origin_key(self._origins.get(o.id)), False))
         if t.sort_state is not None and t.sort_state[0] == "origin":
             placed = [o for o in ogs if self._origins.get(o.id) is not None]
@@ -1734,9 +1744,11 @@ class PhyloApp(App):
         for og in ogs:
             sup = ("–" if og.support is None else "0.0 ⚠" if og.support == 0
                    else f"{og.support:.1f}")
-            t.add_row(_short_og(og.id), str(len(og.genes)),
-                      str(len({m.species for m in og.genes})), sup, escape(_trunc(og.name)),
-                      escape(self._origin_text(og.id)), key=og.id)
+            cells = [_short_og(og.id), str(len(og.genes)), str(len({m.species for m in og.genes})),
+                     sup, escape(_trunc(og.name))]
+            if on:
+                cells.append(escape(self._origin_text(og.id)))
+            t.add_row(*cells, key=og.id)
         keys = [o.id for o in ogs]
         if keys:
             t.move_cursor(row=keys.index(keep) if keep in keys else 0)
@@ -1748,8 +1760,9 @@ class PhyloApp(App):
         self.query_one("#members").border_title = (
             (f"members · {_short_og(og.id)} {escape(og.name)}" if og else "members")
             + self._ftag("members"))
+        origin = f" · origin {self._origin_text(og.id)}" if og and self._origins_on() else ""
         self.query_one("#species_box").border_title = (
-            f"species · {_short_og(og.id)} · origin {self._origin_text(og.id)}" if og else "species")
+            f"species · {_short_og(og.id)}{origin}" if og else "species")
         self._fill_members()
         if r is not None and r.error:
             text = r.error
