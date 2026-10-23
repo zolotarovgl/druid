@@ -113,6 +113,12 @@ def _edit_error(v: dict) -> str:
     return ""
 
 
+def _ticked_note(sps: list, most: int = 5) -> str:
+    """"+3 ticked (Mlei, Hcal, Bova)"; the names left out past `most`: "+42 ticked"."""
+    note = f"+{len(sps)} ticked"
+    return f"{note} ({', '.join(sps)})" if len(sps) <= most else note
+
+
 def _tick(ticked: bool) -> Text:
     """The tick cell as plain text: a str "[x]" is Rich markup to a DataTable and shows nothing."""
     return Text("[x]" if ticked else "[ ]")
@@ -238,7 +244,8 @@ class SetupScreen(Screen):
                     yield Input(placeholder="taxonomy table (default: the shipped one)", id="src-tax")
                 with Vertical(id="sec-species"):
                     yield Static("", id="sp-reason", classes="note", markup=False)
-                    yield Input(placeholder="filter (any column · enter: the list)", id="sp-filter")
+                    yield Input(placeholder="filter (any column) · enter: tick all shown",
+                                id="sp-filter")
                     yield DataTable(id="sp-table", cursor_type="row")
                     yield Static("", id="sp-count", markup=False)
                 with Vertical(id="sec-analyses"):
@@ -709,7 +716,7 @@ class SetupScreen(Screen):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         wid = event.input.id or ""
         if wid == "sp-filter":
-            self.query_one("#sp-table").focus()
+            self._tick_filtered()
         elif wid == "fam-filter":
             self.query_one("#fam-table").focus()
         elif wid == "tree-source":
@@ -815,6 +822,31 @@ class SetupScreen(Screen):
         sel = list(self._sel)
         sel += [(c.sp, c.source) for c in self._shown if (c.sp, c.source) not in sel]
         self._write({("species",): setup_state.species_value(sel)})
+
+    def _tick_filtered(self) -> None:
+        """enter in the filter (Grygoriy, 23/10/2026): tick every species shown (adds only), one
+        write, then clear the filter for the next query; focus stays in it."""
+        f = self.query_one("#sp-filter", Input)
+        if not self._species_editable():
+            return
+        if not f.value.strip():                  # never every candidate by accident
+            self._refuse("type a filter first (a: tick all shown)")
+            return
+        self._fill_species()                     # the filter over the candidates just re-read
+        if not self._shown:
+            self._refuse(f"no species match {f.value.strip()!r}")
+            return
+        sel = list(self._sel)
+        new = [(c.sp, c.source) for c in self._shown if (c.sp, c.source) not in sel]
+        if new:
+            self._write({("species",): setup_state.species_value(sel + new)},
+                        done=_ticked_note([sp for sp, _src in new]))
+        else:
+            self._msg = f"+0 ticked: all {len(self._shown)} shown already ticked"
+        if not self._msg.startswith("ERROR"):
+            f.value = ""
+            self._fill_species()
+        self._fill_blockers()
 
     # ---- Analyses ---------------------------------------------------------------------------
     def on_switch_changed(self, event: Switch.Changed) -> None:

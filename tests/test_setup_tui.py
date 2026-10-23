@@ -209,7 +209,8 @@ def test_species_filter_tick_writes_species(proj):
             await pilot.press("x", "b", "b", "b")                     # taxonomy column: "Metazoa, XBbb"
             await pilot.pause()
             assert t.row_count == 1 and _text(scr, "#sp-count") == "0 ticked / 3 · 1 shown"
-            await pilot.press("enter", "space")
+            t.focus()
+            await pilot.press("space")
             await pilot.pause()
             assert _raw()["species"] == ["Bbb"]
             assert _text(scr, "#sp-count") == "1 ticked / 3 · 1 shown"
@@ -229,6 +230,84 @@ def test_species_filter_tick_writes_species(proj):
             assert setup_state.selected(_raw()) == [("Bbb", "default"), ("Ccc", "mine")]
             assert _text(scr, "#lbl-species").endswith("2")
     _run(go())
+
+
+def test_filter_enter_ticks_all_shown_and_clears(proj, monkeypatch):
+    _root, _prot, mine = proj
+    yamledit.update_config({("sources",): [{"name": "mine", "proteomes_dir": str(mine),
+                                            "proteome_glob": "{sp}_long.pep.fasta",
+                                            "taxonomy": "data/tax.tsv"}]})
+    calls = []
+    real = yamledit.update_config
+    monkeypatch.setattr(yamledit, "update_config", lambda ch: (calls.append(ch), real(ch))[1])
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            f, t = scr.query_one("#sp-filter"), scr.query_one("#sp-table")
+            assert scr.focused is f and "enter: tick all shown" in f.placeholder
+            before = paths.config_file().read_bytes()
+            await pilot.press("enter")                                # empty filter: nothing
+            await pilot.pause()
+            assert calls == [] and paths.config_file().read_bytes() == before
+            assert "type a filter first (a: tick all shown)" in _text(scr, "#blockers")
+            await pilot.press(*"default")                             # source column: Aaa, Bbb
+            await pilot.pause()
+            assert t.row_count == 2
+            await pilot.press("enter")
+            await pilot.pause()
+            assert len(calls) == 1 and _raw()["species"] == ["Aaa", "Bbb"]
+            assert f.value == "" and scr.focused is f and t.row_count == 3
+            assert _text(scr, "#sp-count") == "2 ticked / 3"
+            assert "+2 ticked (Aaa, Bbb)" in _text(scr, "#blockers")
+            await pilot.press(*"ccc", "enter")                        # a second query adds to them
+            await pilot.pause()
+            assert len(calls) == 2 and f.value == "" and scr.focused is f
+            assert _raw()["species"] == ["Aaa", "Bbb", {"sp": "Ccc", "source": "mine"}]
+            assert _text(scr, "#sp-count") == "3 ticked / 3"
+            assert "+1 ticked (Ccc)" in _text(scr, "#blockers")
+            await pilot.press(*"aaa", "enter")                        # already ticked: no write
+            await pilot.pause()
+            assert len(calls) == 2 and f.value == "" and scr.focused is f
+            assert "+0 ticked" in _text(scr, "#blockers")
+            await pilot.press(*"nomatch", "enter")                    # nothing shown: kept
+            await pilot.pause()
+            assert len(calls) == 2 and f.value == "nomatch"
+            assert "no species match" in _text(scr, "#blockers")
+            f.value = ""
+            await pilot.press("tab")                                  # tab still: the table
+            await pilot.pause()
+            assert scr.focused is t
+    _run(go())
+
+
+def test_ticked_note_cuts_long_lists():
+    assert setup_tui._ticked_note(["Mlei", "Hcal", "Bova"]) == "+3 ticked (Mlei, Hcal, Bova)"
+    assert setup_tui._ticked_note([f"S{i}" for i in range(42)]) == "+42 ticked"
+
+
+@pytest.mark.parametrize("lock", ["species_locked", "adopted"])
+def test_filter_enter_refused_when_locked(proj, lock):
+    yamledit.update_config({("species",): ["Aaa"], **({("species_locked",): True}
+                                                        if lock == "species_locked"
+                                                        else {("prepare",): "locked"})})
+    before = paths.config_file().read_bytes()
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            f = scr.query_one("#sp-filter")
+            f.focus()
+            await pilot.press(*"bbb", "enter")
+            await pilot.pause()
+            assert "read-only" in _text(scr, "#blockers")
+            assert str(scr.query_one("#sp-table").get_row_at(0)[0]) == "[ ]"     # Bbb not ticked
+    _run(go())
+    assert paths.config_file().read_bytes() == before
 
 
 def test_species_readonly_when_locked(proj):
