@@ -362,6 +362,22 @@ def adopt(dest: Path = typer.Argument(..., help="an existing phylohpc project (h
 
 
 @app.command()
+def prepare():
+    """Build data/input.fasta, the species trees and species_info.tsv from the ticked proteomes."""
+    from druid import prepare as prep
+    cfg = _cfg()
+    notes = []
+    try:
+        written = prep.run(paths.read_raw(), cfg, paths.project_root(), notes)
+    except (prep.PrepareError, OSError, paths.OutsideProject) as e:
+        _fail(f"ERROR: {e}", 2)
+    for p in written:
+        typer.echo(f"wrote {p}")
+    for n in notes:
+        typer.echo(n)
+
+
+@app.command()
 def doctor():
     """Check tools, python packages, the submodule and the project's inputs (reads only)."""
     from druid import doctor as d
