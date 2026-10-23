@@ -550,6 +550,56 @@ def test_search_custom_hmm_rows_appear_with_defaults(proj, tmp_path):
     assert {p.name: p.stat().st_mtime_ns for p in hd.iterdir()} == mtimes
 
 
+def test_unreadable_hmm_is_an_error_line_not_a_crash(proj, tmp_path):
+    hd = tmp_path / "hmms"
+    hd.mkdir()
+    (hd / "Foo.hmm").write_text("HMMER3/f\nNAME  Foo\n//\n")
+    (hd / "Foo.hmm").chmod(0o000)
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Search")
+            before = paths.config_file().read_bytes()
+            scr.query_one("#rb-hmm").value = True
+            await pilot.pause()
+            scr.query_one("#se-hmmdir").value = str(hd)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert paths.config_file().read_bytes() == before
+            assert f"ERROR: cannot read the HMMs in {hd}: PermissionError" in _text(scr, "#blockers")
+            (hd / "Foo.hmm").chmod(0o644)                              # readable: set it,
+            scr._set_hmm_dir(str(hd))
+            await pilot.pause()
+            assert _raw()["params"]["hmm_dir"] == str(hd)
+            (hd / "Foo.hmm").chmod(0o000)                              # then unreadable again:
+            scr.query_one("#rb-file").value = True                     # switching back is refused
+            await pilot.pause()
+            assert _raw()["params"]["hmm_dir"] == str(hd)
+            assert f"ERROR: cannot read the HMMs in {hd}" in _text(scr, "#blockers")
+            assert app.is_running
+    try:
+        _run(go())
+    finally:
+        (hd / "Foo.hmm").chmod(0o644)
+
+
+def test_switch_on_species_locked_project_notes_stale_trees(proj):
+    yamledit.update_config({("species",): ["Aaa"], ("species_locked",): True})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Analyses")
+            await pilot.press("space")                                 # GeneRax off
+            await pilot.pause()
+            assert _raw()["params"]["run_generax"] is False
+            assert "trees not rebuilt: species are locked" in _text(scr, "#blockers")
+    _run(go())
+
+
 def test_bad_hmm_dir_in_config_is_a_blocker_line(proj, tmp_path):
     yamledit.update_config({("params", "hmm_dir"): str(tmp_path / "gone")})
 

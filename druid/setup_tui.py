@@ -731,7 +731,12 @@ class SetupScreen(Screen):
             self._msg = LOCKED_ALL
             self._fill_blockers()
             return
-        self._write({("params", key): bool(event.value)})
+        # species locked: prepare refuses, so a switch changed now leaves the trees as they are
+        locked = self._cfg is not None and self._try(
+            "species lock", lambda: setup_state.species_locked(self._raw, self._cfg), False)
+        self._write({("params", key): bool(event.value)},
+                    done=f"params.{key} = {bool(event.value)}: trees not rebuilt: species are locked"
+                    if locked else "")
 
     # ---- Tree -------------------------------------------------------------------------------
     def _refuse(self, why: str) -> bool:
@@ -811,11 +816,23 @@ class SetupScreen(Screen):
         reason = self._fam_reason()
         return self._refuse(reason) if reason else True
 
-    @staticmethod
-    def _hmm_keys(d) -> set:
+    def _hmm_rows(self, d):
+        """families.hmm_rows(d), or None with the error on the bottom line (an unreadable .hmm
+        must not crash the app)."""
+        try:
+            return families.hmm_rows(d)
+        except Exception as e:                   # PermissionError, a directory named x.hmm, ...
+            self._refuse(f"ERROR: cannot read the HMMs in {d}: {type(e).__name__}: {e}")
+            return None
+
+    def _hmm_keys(self, d):
         """The _key of each hmm_dir row: by its cus.<name> id, so a CSD.hmm never matches the
-        library's rbp.CSD / tfs.CSD (a custom row whose prefix was edited is no longer matched)."""
-        return {_key(r) for r in families.hmm_rows(d)} if d is not None and d.is_dir() else set()
+        library's rbp.CSD / tfs.CSD (a custom row whose prefix was edited is no longer matched).
+        None (error shown) when the directory cannot be read."""
+        if d is None or not d.is_dir():
+            return set()
+        rows = self._hmm_rows(d)
+        return None if rows is None else {_key(r) for r in rows}
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
         kind = SEARCH.get(event.pressed.id or "")
@@ -825,6 +842,10 @@ class SetupScreen(Screen):
             self._fill_search()                  # put the radio back
             return
         old_dir = self._hmm_dir
+        keys = self._hmm_keys(old_dir) if kind == "file" else set()
+        if keys is None:                         # its families cannot be told apart: refused
+            self._fill_search()                  # put the radio back
+            return
         self._search = kind
         if kind == "hmm":
             self._msg = "custom HMMs: enter the directory of the <name>.hmm files"
@@ -836,7 +857,6 @@ class SetupScreen(Screen):
             self._reload()
             self._refresh()
         else:                                    # back to the family file: drop the HMM families
-            keys = self._hmm_keys(old_dir)
             self._write({("params", "hmm_dir"): None},
                         done="search: gene family file (params.hmm_dir cleared, its families dropped)",
                         fam_rows=[r for r, t in self._fam if t and _key(r) not in keys])
@@ -851,12 +871,16 @@ class SetupScreen(Screen):
         if not d.is_dir():
             self._refuse(f"ERROR: not a directory: {d}")
             return
-        new = families.hmm_rows(d)
+        new = self._hmm_rows(d)
+        if new is None:
+            return
         if not new:
             self._refuse(f"ERROR: no *.hmm files in {d}")
             return
         same = self._hmm_dir is not None and self._hmm_dir.resolve() == d.resolve()
         old = set() if same else self._hmm_keys(self._hmm_dir)   # same dir: edits kept
+        if old is None:
+            return
         rows = [r for r, t in self._fam if t and _key(r) not in old]
         have = {_key(r) for r in rows}
         added = [r for r in new if _key(r) not in have]
@@ -892,7 +916,10 @@ class SetupScreen(Screen):
         else:
             rows = families.library()
         if self._hmm_dir is not None and self._hmm_dir.is_dir():
-            rows = rows + families.hmm_rows(self._hmm_dir)
+            hmm = self._hmm_rows(self._hmm_dir)
+            if hmm is None:
+                return
+            rows = rows + hmm
         self._write({("families_source",): value or None},
                     done=f"families from {value or 'the shipped library'}: all {len(rows)} ticked",
                     fam_rows=rows)
