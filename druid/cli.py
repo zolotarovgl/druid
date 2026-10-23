@@ -743,7 +743,7 @@ def _run(stage: str, hg: str, run_dir: Path = typer.Option(..., "--run-dir")):
 
 if __name__ == "__main__":
     try:
-        app()
+        app(prog_name="druid")                   # usage lines say druid, not cli.py (bin/druid)
     except (paths.NoProject, paths.OutsideProject, core.ConfigError) as e:
         typer.echo(f"ERROR: {e}", err=True)
         sys.exit(2)

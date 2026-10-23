@@ -54,7 +54,9 @@ def test_tui_select_all_and_quit(cli, monkeypatch):
             await pilot.pause()
             await pilot.press("f", "a")                     # actionable -> failed
             assert app.selected == {"tfs.C_x.HG1"}
-            await pilot.press("q")
+            await pilot.press("colon", "q", "exclamation_mark")
+            await pilot.pause()
+            assert not app.is_running
     _run(go())
 
 
@@ -3470,7 +3472,8 @@ def test_phylocli_status_colour_does_not_leak_into_the_tree_status(cli):
 
 
 def _tree_screens(app):
-    return sum(type(s).__name__ == "TreeScreen" for s in app.screen_stack)
+    from treeview.widget import TreeScreen
+    return sum(isinstance(s, TreeScreen) for s in app.screen_stack)   # druid's DruidTreeScreen
 
 
 def _slow_load(monkeypatch, secs=0.3):
@@ -3622,3 +3625,109 @@ def test_every_binding_is_in_a_key_table_and_question_mark_opens_it(cli):
 def test_results_key_table_lists_t():
     _, groups = tui.KEYS["results"]
     assert any(k == "t" for _, rows in groups for k, _ in rows)
+
+
+# ---- q = esc, :q! quits (Grygoriy, 23/10/2026) --------------------------------------------------
+def test_q_is_esc_on_the_main_views(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(150, 40)) as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _press(pilot, "q")                              # overview: esc does nothing
+            assert app.is_running and app.view == "overview"
+            app.open_group("tfs")
+            await pilot.pause()
+            assert app.view == "hgs"
+            await _press(pilot, "q")                              # HG view: back
+            assert app.is_running and app.view == "overview"
+            await _open_results(app, pilot, "tfs")
+            assert app.view == "results"
+            await _press(pilot, "q")                              # Results: back
+            assert app.is_running and app.view == "overview"
+            assert all(not any(k == "q" and d == "quit" for k, d in rows)
+                       for _, gs in tui.KEYS.values() for _, rows in gs)
+            assert not any(b.key == "q" for b in tui.PhyloApp.BINDINGS)
+            assert ":q! quit" in app._help_text
+    _run(go())
+
+
+def test_colon_q_bang_quits_anything_else_cancels(cli):
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(150, 40)) as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.open_group("tfs")
+            await pilot.pause()
+            await _press(pilot, "colon")
+            assert app._cmd == "" and app.query_one("#status").render().plain == ":"
+            await _press(pilot, "x")                              # :x cancels; x is not acted on
+            assert app.is_running and app._cmd is None and app.view == "hgs"
+            assert app.query_one("#status").render().plain == ""
+            await _press(pilot, "colon", "q")
+            assert app._cmd == "q" and app.query_one("#status").render().plain == ":q"
+            flt = app.filter
+            await _press(pilot, "f")                              # :q + another key: cancelled
+            assert app.is_running and app._cmd is None and app.filter == flt
+            await _press(pilot, "colon", "q", "enter")            # :q enter does not quit
+            assert app.is_running and app._cmd is None and app.view == "hgs"
+            await _press(pilot, "colon", "escape")                # esc cancels, does not go back
+            assert app.is_running and app._cmd is None and app.view == "hgs"
+            await _press(pilot, "q")                              # after a cancel q is esc again
+            assert app.view == "overview"
+            await _press(pilot, "colon", "q", "exclamation_mark")
+            assert not app.is_running
+    _run(go())
+
+
+def test_q_and_colon_are_text_in_a_focused_input(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(150, 40)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            await _press(pilot, "slash")
+            inp = app.query_one("#memfilter")
+            assert app.focused is inp
+            await _press(pilot, "q", "colon", "q", "exclamation_mark")
+            assert app.is_running and inp.value == "q:q!" and app._cmd is None
+            assert app.view == "results"
+    _run(go())
+
+
+def test_q_is_esc_on_tree_and_key_screens(cli, monkeypatch):
+    write_results(_cfg())
+    _write_trees(_cfg())
+
+    async def go():
+        from textual.widgets import Static
+        from treeview.keys import KeysScreen
+        from treeview.widget import TreeScreen
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            await _press_t(app, pilot, "#res", 0)
+            scr = app.screen
+            assert isinstance(scr, tui.DruidTreeScreen) and isinstance(scr, TreeScreen)
+            assert scr.query_one("#help", Static).render().plain == tui.TREE_HELP
+            await _press(pilot, "question_mark")                  # the tree's key list
+            assert isinstance(app.screen, KeysScreen)
+            text = app.screen.query_one("#keys").render().plain
+            assert ":q!" in text and "same as esc" in text and "quit\n" not in text
+            await _press(pilot, "q")                              # closes the list only
+            assert app.screen is scr
+            await _press(pilot, "colon")                          # a command on the tree screen
+            assert app._cmd == ""
+            await _press(pilot, "x")
+            assert app._cmd is None and app.screen is scr
+            await _press(pilot, "q")                              # tree: back to Results
+            assert app.is_running and not isinstance(app.screen, TreeScreen)
+            assert app.view == "results"
+            await _press_t(app, pilot, "#res", 0)
+            await _press(pilot, "colon", "q", "exclamation_mark")  # quits from the tree too
+            assert not app.is_running
+    _run(go())

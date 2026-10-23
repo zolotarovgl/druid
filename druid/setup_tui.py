@@ -25,8 +25,8 @@ from textual.widgets import (ContentSwitcher, DataTable, Footer, Header, Input, 
 from ete3 import Tree
 
 from druid import core, families, paths, prepare, setup_state, sptree, yamledit
+from druid.tui import DruidTreeScreen           # the vendored TreeScreen, druid's key help
 from treeview import model as tvm                # vendored: core puts druid/vendor on sys.path
-from treeview.widget import TreeScreen
 
 SWITCHES = {"sw-generax": "run_generax", "sw-origins": "origins"}   # switch id -> params key
 SRC_FIELDS = ("name", "dir", "glob", "tax")                          # #src-<field> inputs, in order
@@ -112,7 +112,12 @@ def _edit_error(v: dict) -> str:
     return ""
 
 
-class PlaceScreen(TreeScreen):
+def _tick(ticked: bool) -> Text:
+    """The tick cell as plain text: a str "[x]" is Rich markup to a DataTable and shows nothing."""
+    return Text("[x]" if ticked else "[ ]")
+
+
+class PlaceScreen(DruidTreeScreen):
     """The species tree as built now (base tree, ticked species, earlier placements) in the
     vendored treeview; p dismisses with the tip names under the cursor node, which the new species
     becomes the sister of (a tip or an internal node); esc leaves without a placement."""
@@ -157,6 +162,7 @@ class SetupScreen(Screen):
         Binding("space", "toggle", "tick"),
         Binding("a", "tick_all", "tick shown"),
         Binding("e", "edit_config", "edit druid.yaml"),
+        Binding("e", "edit_family", "edit row"),     # Families; enter ticks (Grygoriy, 23/10/2026)
         Binding("P", "prepare", "prepare"),
     ]
 
@@ -164,6 +170,7 @@ class SetupScreen(Screen):
         super().__init__()
         self.current = self.SECTIONS[0]
         self._msg = ""                           # the last action's error / note, top of #blockers
+        self._cmd = ""                           # a `:` command being typed, above it
         self._raw: dict = {}
         self._cfg = None                         # core.Config, None when druid.yaml does not load
         self._errors: list = []                  # ERROR: ... lines (config, sources, blockers)
@@ -274,7 +281,8 @@ class SetupScreen(Screen):
         txt = Text()
         txt.append("Jobs │ Results │ ")
         txt.append("[Setup]", style="reverse bold")
-        txt.append("   tab: back to Jobs · enter: open a section · esc: back", style="dim")
+        txt.append("   tab: back to Jobs · enter: open a section · esc q: back · :q! quit",
+                   style="dim")
         self.query_one("#setup-tabbar", Static).update(txt)
         self._reload()
         self._refresh()
@@ -423,8 +431,13 @@ class SetupScreen(Screen):
         self._fill_config()
         self._fill_blockers()
 
+    def show_command(self, text: str) -> None:
+        """The `:` command being typed (PhyloApp._show_cmd), first on the bottom line; "" = none."""
+        self._cmd = text
+        self._fill_blockers()
+
     def _fill_blockers(self) -> None:
-        lines = ([self._msg] if self._msg else []) + self._errors
+        lines = [x for x in (self._cmd, self._msg) if x] + self._errors
         if self._blockers:
             lines.append("blockers: " + " · ".join(self._blockers))
         elif self._cfg is not None:
@@ -454,8 +467,7 @@ class SetupScreen(Screen):
         t.clear()
         ticked = set(self._sel)
         for c in self._shown:
-            t.add_row("[x]" if (c.sp, c.source) in ticked else "[ ]", c.sp, c.name, c.taxonomy,
-                      c.source)
+            t.add_row(_tick((c.sp, c.source) in ticked), c.sp, c.name, c.taxonomy, c.source)
         if self._shown:
             t.move_cursor(row=min(max(row, 0), len(self._shown) - 1))
         count = f"{len(self._sel)} ticked / {len(self._cands)}"
@@ -565,7 +577,7 @@ class SetupScreen(Screen):
         t.clear()
         for i in self._fam_shown:
             r, ticked = self._fam[i]
-            t.add_row("[x]" if ticked else "[ ]", _fam_id(r), r.hmms,
+            t.add_row(_tick(ticked), _fam_id(r), r.hmms,
                       *(getattr(r, c) for c in EDIT_COLS))
         if self._fam_shown:
             t.move_cursor(row=min(max(row, 0), len(self._fam_shown) - 1))
@@ -578,7 +590,7 @@ class SetupScreen(Screen):
         self.query_one("#fam-count", Static).update(count)
         reason = self._fam_reason()
         self.query_one("#fam-reason", Static).update(
-            reason or "space: tick / untick · enter: edit the row's settings")
+            reason or "space enter: tick / untick · e: edit the row's settings")
 
     def _fill_config(self) -> None:
         f = paths.config_file()
@@ -623,6 +635,8 @@ class SetupScreen(Screen):
             return self.current == "Species"
         if action == "edit_config":
             return self.current == "Config"
+        if action == "edit_family":
+            return self.current == "Families"
         return True
 
     def action_leave(self, to: str) -> None:
@@ -788,8 +802,14 @@ class SetupScreen(Screen):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id == "tree-missing":
             self._open_place(event.cursor_row)
-        elif event.data_table.id == "fam-table":
-            self._open_edit(event.cursor_row)
+        elif event.data_table.id in ("sp-table", "fam-table"):
+            self.action_toggle()                 # enter ticks like space
+
+    def action_edit_family(self) -> None:
+        """e on a Families row: its settings form."""
+        t = self.query_one("#fam-table", DataTable)
+        if t.has_focus:
+            self._open_edit(t.cursor_row)
 
     def _open_place(self, row: int) -> None:
         """enter on a missing species: PlaceScreen on the tree as built now (earlier placements
@@ -956,7 +976,7 @@ class SetupScreen(Screen):
         added = [r for r in new if _key(r) not in have]
         self._write({("params", "hmm_dir"): value},
                     done=f"params.hmm_dir = {value}: {len(added)} custom families added (ticked; "
-                         "enter on one in Families edits its settings)",
+                         "e on one in Families edits its settings)",
                     fam_rows=rows + added)
 
     def _set_families_source(self, value: str) -> None:

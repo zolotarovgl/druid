@@ -10,17 +10,19 @@ from pathlib import Path
 from rich.markup import escape
 from rich.measure import Measurement
 from rich.text import Text
-from textual import work
+from textual import events, work
 from textual.actions import SkipAction
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, ScrollableContainer, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Header, Input, Label, Static
+from textual.widgets import DataTable, Footer, Header, Input, Label, Static, TextArea
 from textual.worker import get_current_worker
 
 from druid import core, history, model, paths, setup_state
 from druid.common import fmt_mem, fmt_time
+from treeview import widget as tv_widget       # vendored: core puts druid/vendor on sys.path
+from treeview.keys import KeysScreen
 
 
 def load_raw() -> dict:
@@ -464,7 +466,7 @@ KEYS = {
                   ("o", "results of the group")]),
         ("Group & sort", [("c", "group by category"), ("f", "group by family"),
                           ("s", "sort by the column"), ("h", "only actionable at the column")]),
-        ("Other", [("R", "refresh"), ("?", "this list"), ("q", "quit")]),
+        ("Other", [("R", "refresh"), ("?", "this list"), (":q!", "quit druid")]),
         ("Notes", [("", "search/cluster count families, the other stages HGs"),
                    ("", "default view: failed+ready")])]),
     "overview_results": ("Overview · Results tab", [
@@ -475,7 +477,7 @@ KEYS = {
         ("Source", [("p", "possvm ↔ possvm_prev")]),
         ("Group & sort", [("c", "group by category"), ("f", "group by family"),
                           ("s", "sort by the column"), ("h", "hide rows with 0 in the column")]),
-        ("Other", [("R", "re-read"), ("?", "this list"), ("q", "quit")]),
+        ("Other", [("R", "re-read"), ("?", "this list"), (":q!", "quit druid")]),
         ("Notes", [("⚠", "sup 0 = OGs with support 0 (GeneRax bug case)")])]),
     "hgs": ("HG view", [
         ("Move", [("tab shift+tab", "next / previous pane"), ("↑ ↓", "move"),
@@ -483,8 +485,8 @@ KEYS = {
         ("Select & act", [("space", "select the HG"), ("a", "select all"),
                           ("r", "resubmit the selected"), ("l", "log of the HG")]),
         ("Filter", [("f", "cycle the filter (" + ", ".join(FILTERS) + ")")]),
-        ("Other", [("o", "results of the HG's group"), ("esc", "back to the overview"),
-                   ("R", "refresh"), ("?", "this list"), ("q", "quit")]),
+        ("Other", [("o", "results of the HG's group"), ("esc q", "back to the overview"),
+                   ("R", "refresh"), ("?", "this list"), (":q!", "quit druid")]),
         ("Notes", [("", "default filter: failed+ready; the states are "
                     + " · ".join(STATE_STYLE))])]),
     "results": ("Results", [
@@ -493,10 +495,27 @@ KEYS = {
         ("Look", [("/", "filter this pane"), ("p", "possvm ↔ possvm_prev"),
                   ("t", "gene tree: HG → whole tree · OG → its MRCA, members marked · "
                         "member → its tip")]),
-        ("Other", [("esc", "clear filters, then back"), ("R", "refresh"), ("?", "this list"),
-                   ("q", "quit")]),
+        ("Other", [("esc q", "clear filters, then back"), ("R", "refresh"), ("?", "this list"),
+                   (":q!", "quit druid")]),
         ("Notes", [("⚠", "support 0 = GeneRax bug case; check possvm_prev")])]),
 }
+
+# q = esc, quit = :q! (Grygoriy, 23/10/2026). The vendored treeview says "q quit" in its help strip
+# and `?` list; druid's TreeScreen says what q does here instead (the vendored copy is not edited).
+TREE_HELP = "? keys · esc q back · :q! quit druid"
+TREE_KEYS = [(g, [r for r in rows if r[0] != "q"] + ([("q", "same as esc"), (":q!", "quit druid")]
+                                                     if g == "Other" else []))
+             for g, rows in tv_widget.KEYS]
+
+
+class DruidTreeScreen(tv_widget.TreeScreen):
+    """The vendored TreeScreen with druid's key help (q = esc, :q! quits; PhyloApp.on_event)."""
+
+    def on_mount(self) -> None:                  # the vendored on_mount runs too (Textual MRO)
+        self.query_one("#help", Static).update(TREE_HELP)
+
+    def action_keys(self) -> None:
+        self.app.push_screen(KeysScreen("treeview keys", TREE_KEYS))
 
 
 class PhyloApp(App):
@@ -547,8 +566,7 @@ class PhyloApp(App):
         Binding("slash", "member_filter", "filter members"),
         Binding("R", "refresh", "refresh"),
         Binding("question_mark", "keys", "keys"),
-        Binding("q", "quit", "quit"),
-    ]
+    ]                                            # q = esc and :q! quit: on_event, every screen
 
     OV_BAR = 6
     OV_GLYPHS = (("█", "green"), ("▒", "cyan"), ("▓", "yellow"), ("░", "bright_black"))
@@ -613,6 +631,7 @@ class PhyloApp(App):
         self._rt_foot = ""
         self._tab_text = ""
         self._res_want: "str | None" = None     # source asked for by the opener (Results tab)
+        self._cmd: "str | None" = None          # the `:` command typed so far; None = not in one
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -659,16 +678,68 @@ class PhyloApp(App):
         self._show_view()
         self.load_bg()
         self.set_interval(self.refresh_s, self.load_bg)
-        if self.view == "overview" and self._fresh_project():
-            self._open_setup()                   # nothing to show yet: start on the Setup tab
+        if self.view == "overview" and self._setup_unfinished():
+            self._open_setup()                   # nothing to run yet: start on the Setup tab
 
-    def _fresh_project(self) -> bool:
-        """No species ticked and nothing locks them: a new project, which opens on Setup."""
+    def _setup_unfinished(self) -> bool:
+        """Setup is not finished and can still be (Grygoriy, 23/10/2026: `druid tui` brings Setup
+        back until it is): not adopted (prepare: locked), the species not locked, and prepare has
+        a blocker or has not written params.infasta yet. An error in the check opens on Jobs."""
         try:
-            return (not setup_state.selected(self.raw) and self.raw.get("prepare") != "locked"
-                    and not setup_state.species_locked(self.raw, self.cfg))
-        except Exception:                        # a bad druid.yaml: open as before
+            if self.raw.get("prepare") == "locked" or setup_state.species_locked(self.raw, self.cfg):
+                return False
+            if setup_state.blockers(self.raw, self.cfg, paths.project_root()):
+                return True
+            fa = self.cfg.params.get("infasta")
+            return not fa or not Path(fa).exists()
+        except Exception as e:                   # never keeps the TUI from starting
+            self._notify_once(f"setup check failed, opening on Jobs: {type(e).__name__}: {e}")
             return False
+
+    # ---- q = esc, :q! quits (Grygoriy, 23/10/2026) --------------------------------------------
+    async def on_event(self, event: events.Event) -> None:
+        """Before any binding of any screen (the vendored treeview's and the modal ones too): q
+        is handed on as esc, `:` starts a command, and inside one `q` `!` exits while any other
+        key (esc too) cancels it. A focused Input / TextArea gets these keys as typed text."""
+        if isinstance(event, events.Key) and not event.is_forwarded:
+            event = self._command_key(event)
+            if event is None:
+                return
+        await super().on_event(event)
+
+    def _command_key(self, event: events.Key) -> "events.Key | None":
+        """The key to dispatch in place of `event`; None when it was consumed here."""
+        if self._cmd is not None:
+            typed = self._cmd + (event.character or "\0")      # a key with no character cancels
+            if event.key != "escape" and "q!".startswith(typed):
+                self._cmd = typed
+                if typed == "q!":
+                    self.exit()
+            else:
+                self._cmd = None
+            self._show_cmd()
+            return None
+        if isinstance(self.focused, (Input, TextArea)):
+            return event
+        if event.key == "colon":
+            self._cmd = ""
+            self._show_cmd()
+            return None
+        if event.key == "q":
+            return events.Key("escape", "\x1b")
+        return event
+
+    def _show_cmd(self) -> None:
+        """The command typed so far: on the first screen in the status line, on Setup in its
+        bottom line, elsewhere (tree, key list, resubmit) as a notification when it starts."""
+        text = "" if self._cmd is None else ":" + self._cmd
+        scr = self.screen
+        if scr is self.screen_stack[0]:
+            self._update_status()
+        elif hasattr(scr, "show_command"):
+            scr.show_command(text)
+        elif text == ":":
+            self.notify(": q! quits druid · any other key cancels", timeout=3)
 
     # ---- data -------------------------------------------------------------------------------
     def _collect(self) -> dict:
@@ -741,8 +812,8 @@ class PhyloApp(App):
         if key == "overview":
             glyphs = " ".join(f"[{fg}]{ch}[/] {name}" for (ch, fg), name in
                               zip(self.OV_GLYPHS, ("done", "running", "ready/failed", "blocked")))
-            return f"[b]{title}[/]  {glyphs}  · ? keys"
-        return f"[b]{title}[/]  · ? keys"
+            return f"[b]{title}[/]  {glyphs}  · ? keys · :q! quit"
+        return f"[b]{title}[/]  · ? keys · esc q back · :q! quit"
 
     def _keys_view(self) -> str:
         if self.view == "overview":
@@ -750,7 +821,6 @@ class PhyloApp(App):
         return self.view
 
     def action_keys(self) -> None:
-        from treeview.keys import KeysScreen     # vendored (core puts phylocli/vendor on sys.path)
         title, groups = KEYS[self._keys_view()]
         self.push_screen(KeysScreen(f"phylocli keys · {title}", groups))
 
@@ -770,7 +840,10 @@ class PhyloApp(App):
             text = ""
         self._status = text
         spin = self.query_one("#status", Spinner)
-        if text:
+        if self._cmd is not None:                # a `:` command being typed shows instead
+            spin.stop()
+            spin.update(":" + self._cmd)
+        elif text:
             spin.start(text)                     # turns until the data are applied ...
         else:
             spin.stop()                          # ... or the view no longer waits (esc, tab, R)
@@ -1183,9 +1256,9 @@ class PhyloApp(App):
 
     def check_action(self, action: str, parameters: tuple) -> "bool | None":
         """Footer shows only the keys of the current view."""
-        if action != "quit" and type(self.screen).__name__ in ("TreeScreen", "KeysScreen",
-                                                                 "SetupScreen"):
-            return False                     # the tree / key list / Setup owns the keys; q quits
+        if isinstance(self.screen, (tv_widget.TreeScreen, KeysScreen)) \
+                or type(self.screen).__name__ == "SetupScreen":
+            return False                     # the tree / key list / Setup owns the keys
         f = self.focused
         if action in ("toggle", "select_all", "resubmit", "log", "open_results", "open_tree") \
                 and isinstance(f, SortTable) and f.header:
@@ -1687,9 +1760,8 @@ class PhyloApp(App):
     def _push_tree(self, gen: int, m, focus: int, hl: list, title: str, path, notes: list) -> None:
         if not self._tree_current(gen):
             return
-        from treeview.widget import TreeScreen
-        self.push_screen(TreeScreen(m, title=title, path=path, focus=focus, highlight=hl,
-                                    write_guard=paths.writable))
+        self.push_screen(DruidTreeScreen(m, title=title, path=path, focus=focus, highlight=hl,
+                                         write_guard=paths.writable))
         for n in notes:
             self.notify(n, severity="warning")
 
@@ -1902,7 +1974,7 @@ class ResubmitScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with _Box(id="box"):
-            yield Label(f"[b]resubmit · {self.stage}[/]  enter = dry run · y = submit · esc = cancel")
+            yield Label(f"[b]resubmit · {self.stage}[/]  enter = dry run · y = submit · esc q = cancel")
             for i, (why, res, hgs) in enumerate(self.groups):
                 with Horizontal():
                     yield Label(f"{len(hgs)} {core.unit(self.stage)} · {why or 'other'} · mem ")

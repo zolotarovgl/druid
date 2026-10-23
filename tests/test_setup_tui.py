@@ -796,7 +796,7 @@ def test_family_row_edit_persists(proj):
             await pilot.press(*"PF_A", "enter")
             t = scr.query_one("#fam-table")
             assert t.row_count == 1 and scr.focused is t
-            await pilot.press("enter")                                    # the edit form
+            await pilot.press("e")                                        # the edit form
             await pilot.pause()
             assert scr.query_one("#fam-edit").display and scr.focused is scr.query_one("#fe-inflation")
             assert scr.query_one("#fe-threshold").value == "GA"
@@ -809,7 +809,7 @@ def test_family_row_edit_persists(proj):
             await pilot.press("escape")                                   # cancel
             await pilot.pause()
             assert not scr.query_one("#fam-edit").display and scr.focused is t
-            await pilot.press("enter")
+            await pilot.press("e")
             await pilot.pause()
             for col, v in (("inflation", "1.5"), ("min_seqs", "4"), ("threshold", "1e-10"),
                            ("pref1", "TF"), ("pref2", "tfx")):
@@ -928,7 +928,7 @@ def test_untick_and_edit_rows_sharing_a_class_name(proj):
             await pilot.press("space")                                    # untick rbp.CSD
             await pilot.pause()
             t.move_cursor(row=ids.index("tfs.CSD"))
-            await pilot.press("enter")                                    # edit tfs.CSD
+            await pilot.press("e")                                        # edit tfs.CSD
             await pilot.pause()
             scr.query_one("#fe-inflation").value = "1.5"
             scr.query_one("#fe-pref2").focus()
@@ -1004,4 +1004,140 @@ def test_same_class_name_is_a_warning_not_a_blocker(proj):
             await pilot.pause()
             assert _text(scr, "#blockers").startswith("prepare wrote data/input.fasta")
             assert "warning: family name CSD" in _text(scr, "#blockers")    # still shown after
+    _run(go())
+
+
+# ---- keys and ticks (Task 11, Grygoriy 23/10/2026) -----------------------------------------------
+def _rendered_ticks(t, n=None):
+    """The tick column of the first n rows as drawn (the table's screen lines), not the stored
+    cell values (a str "[x]" was swallowed as markup on screen but read back fine)."""
+    return [t.render_line(t.header_height + i).text.lstrip()[:3]
+            for i in range(min(t.row_count, n or t.row_count))]
+
+
+def test_ticks_render_and_enter_ticks_like_space(proj):
+    root, _prot, _mine_ = proj
+    (root / "data" / "families.csv").write_text("")                      # Families: the library
+
+    async def go():
+        app = _app()
+        async with app.run_test(size=(160, 50)) as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            t = scr.query_one("#sp-table")
+            t.focus()
+            await pilot.pause()
+            assert _rendered_ticks(t) == ["[ ]", "[ ]"]                  # Aaa Bbb
+            await pilot.press("enter")                                    # Aaa: ticked by enter
+            await pilot.pause()
+            assert _raw()["species"] == ["Aaa"]
+            assert _rendered_ticks(t) == ["[x]", "[ ]"]
+            await pilot.press("down", "space")                            # Bbb: by space
+            await pilot.pause()
+            assert _raw()["species"] == ["Aaa", "Bbb"]
+            assert _rendered_ticks(t) == ["[x]", "[x]"]
+            await pilot.press("enter")                                    # enter unticks too
+            await pilot.pause()
+            assert _raw()["species"] == ["Aaa"]
+            await _section(pilot, scr, "Families")
+            assert "e: edit" in _text(scr, "#fam-reason")
+            await pilot.press("enter")                                    # to the table
+            ft = scr.query_one("#fam-table")
+            assert scr.focused is ft
+            n = len(_fams(root))
+            assert _rendered_ticks(ft, 2) == ["[x]", "[x]"]
+            await pilot.press("enter")                                    # row 0 unticked, no form
+            await pilot.pause()
+            assert len(_fams(root)) == n - 1 and not scr.query_one("#fam-edit").display
+            assert _rendered_ticks(ft, 2) == ["[ ]", "[x]"]
+            await pilot.press("space")                                    # ticked again
+            await pilot.pause()
+            assert len(_fams(root)) == n and _rendered_ticks(ft, 2) == ["[x]", "[x]"]
+            await pilot.press("e")                                        # e: the settings form
+            await pilot.pause()
+            assert scr.query_one("#fam-edit").display and scr.focused is scr.query_one("#fe-inflation")
+    _run(go())
+
+
+def test_q_is_esc_on_setup_and_colon_q_bang_quits(proj):
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            assert scr.focused is scr.query_one("#sp-filter")
+            await pilot.press("q")                                        # typed into the filter
+            await pilot.pause()
+            assert scr.query_one("#sp-filter").value == "q" and app.screen is scr
+            scr.query_one("#sp-filter").value = ""
+            scr.query_one("#sp-table").focus()
+            await pilot.press("q")                                        # section -> the list
+            await pilot.pause()
+            assert app.screen is scr and scr.query_one("#sections").has_focus
+            await pilot.press("colon")
+            await pilot.pause()
+            assert _text(scr, "#blockers").startswith(":")
+            await pilot.press("escape")                                   # cancelled: Setup stays
+            await pilot.pause()
+            assert app.screen is scr and not _text(scr, "#blockers").startswith(":")
+            await pilot.press("q")                                        # the list -> Jobs
+            await pilot.pause()
+            assert not isinstance(app.screen, setup_tui.SetupScreen) and app.tab == "jobs"
+            assert app.is_running
+            await pilot.press("shift+tab")                                # back into Setup
+            await pilot.pause()
+            assert isinstance(app.screen, setup_tui.SetupScreen)
+            await pilot.press("colon", "q", "exclamation_mark")
+            await pilot.pause()
+            assert not app.is_running
+    _run(go())
+
+
+def _opens_on_setup() -> bool:
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            return isinstance(app.screen, setup_tui.SetupScreen), app.tab
+    on_setup, tab = _run(go())
+    assert tab == ("setup" if on_setup else "jobs")
+    return on_setup
+
+
+def test_tui_reopens_setup_until_it_is_finished(proj):
+    root, _prot, _mine_ = proj
+    fa = root / "data" / "input.fasta"
+    assert _opens_on_setup()                                              # fresh: nothing ticked
+    yamledit.update_config({("species",): ["Aaa", "Bbb"]})
+    cfg = core.load_config(paths.config_file())
+    assert setup_state.blockers(_raw(), cfg, root) == [] and not fa.exists()
+    assert _opens_on_setup()                                              # no blockers, not prepared
+    fa.write_text(">Aaa_x\nM\n>Bbb_x\nM\n")
+    assert str(fa) == cfg.params["infasta"]
+    assert not _opens_on_setup()                                          # prepared: Jobs
+    yamledit.update_config({("species",): ["Aaa", "Zzz"]})               # Zzz: no taxonomy row
+    assert setup_state.blockers(_raw(), cfg, root)
+    assert _opens_on_setup()                                              # a blocker: Setup again
+    yamledit.update_config({("species_locked",): True})
+    assert not _opens_on_setup()                                          # species locked: Jobs
+    yamledit.update_config({("species_locked",): False, ("prepare",): "locked"})
+    fa.unlink()
+    assert not _opens_on_setup()                                          # adopted: Jobs
+
+
+def test_setup_check_error_opens_on_jobs(proj, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("unreadable")
+    monkeypatch.setattr(setup_state, "blockers", boom)
+
+    async def go():
+        app = _app()
+        notes = []
+        orig = app.notify
+        monkeypatch.setattr(app, "notify",
+                            lambda msg, *a, **k: (notes.append(str(msg)), orig(msg, *a, **k)))
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert not isinstance(app.screen, setup_tui.SetupScreen) and app.tab == "jobs"
+            assert any("setup check failed" in n and "unreadable" in n for n in notes)
     _run(go())
