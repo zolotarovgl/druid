@@ -336,9 +336,14 @@ def _family_status(cfg: core.Config, fam: str, show_history: bool):
     _print_latest(con, states, history.latest_by_stage(atts))
 
 
+def _on_terminal() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 @app.command()
-def init(dest: Path = typer.Argument(..., help="new or empty directory")):
-    """Make a druid project directory."""
+def init(dest: Path = typer.Argument(..., help="new or empty directory"),
+         no_tui: bool = typer.Option(False, "--no-tui", help="do not open the TUI afterwards")):
+    """Make a druid project directory, then open the TUI on it."""
     from datetime import date
     from druid import project
     try:
@@ -347,6 +352,13 @@ def init(dest: Path = typer.Argument(..., help="new or empty directory")):
         _fail(f"ERROR: {e}", 2)
     typer.echo(f"druid project at {Path(dest).resolve()}: {written[0].name}, "
                f"data/ ({len(written) - 1} files)")
+    if no_tui:
+        return
+    if not _on_terminal():
+        typer.echo(f"not a terminal: TUI not opened; run `druid tui` in {Path(dest).resolve()}")
+        return
+    paths.use(dest)
+    _run_tui(30, hint=f" (project initialised; run `druid tui` in {Path(dest).resolve()})")
 
 
 @app.command()
@@ -677,16 +689,21 @@ def jobs(job_id: str = typer.Argument(None, help="array job id: list its tasks w
 @app.command()
 def tui(refresh: int = typer.Option(30, "--refresh", min=5, help="seconds between refreshes")):
     """Interactive view: stages, HGs, arrays; select failed HGs and resubmit them."""
+    _run_tui(refresh)
+
+
+def _run_tui(refresh: int, hint: str = "") -> None:
+    """Run the TUI on the current project (shared by `druid tui` and `druid init`)."""
     try:
         from druid import tui as tui_mod
     except ModuleNotFoundError as e:
         if (e.name or "").startswith("textual"):
-            _fail("textual not installed: pip install textual", 1)
+            _fail(f"textual not installed: pip install textual{hint}", 1)
         raise
     try:
         tui_mod.PhyloApp(_cfg(), refresh_s=refresh, raw=tui_mod.load_raw()).run(mouse=False)
     except (paths.NoProject, paths.OutsideProject, core.ConfigError) as e:
-        _fail(f"ERROR: {e}", 2)
+        _fail(f"ERROR: {e}{hint}", 2)
     finally:
         # Leave a clean terminal however the app ended (q, Ctrl-C, crash): mouse reporting
         # off, main screen, cursor shown, then clear (else e.g. "35;98;12M" leaks into the shell).

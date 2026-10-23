@@ -656,3 +656,37 @@ def test_usage_says_druid_not_cli_py(results_tree, monkeypatch, capsys):
             runpy.run_path(str(paths.DRUID_HOME / "druid" / "cli.py"), run_name="__main__")
         out = capsys.readouterr().out
         assert e.value.code == 0 and want in out and "cli.py" not in out
+
+
+def _tty(monkeypatch, on):
+    from druid import tui as tui_mod
+    started = []
+    monkeypatch.setattr(tui_mod.PhyloApp, "run", lambda self, **kw: started.append(self))
+    monkeypatch.setattr(cli_mod, "_on_terminal", lambda: on)  # CliRunner swaps sys.stdin/stdout
+    return started
+
+
+def test_init_not_a_tty_does_not_open_tui(tmp_path, monkeypatch):
+    from druid import tui as tui_mod
+    started = []
+    monkeypatch.setattr(tui_mod.PhyloApp, "run", lambda self, **kw: started.append(self))
+    r = CliRunner().invoke(cli_mod.app, ["init", str(tmp_path / "p")])
+    assert r.exit_code == 0 and not started
+    assert "druid tui" in r.output and (tmp_path / "p" / "druid.yaml").is_file()
+
+
+def test_init_no_tui_never_starts_app(tmp_path, monkeypatch):
+    started = _tty(monkeypatch, True)
+    r = CliRunner().invoke(cli_mod.app, ["init", str(tmp_path / "p"), "--no-tui"])
+    assert r.exit_code == 0 and not started
+
+
+def test_init_on_a_tty_opens_tui_on_new_project(tmp_path, monkeypatch):
+    started = _tty(monkeypatch, True)
+    try:
+        r = CliRunner().invoke(cli_mod.app, ["init", str(tmp_path / "p")])
+        assert r.exit_code == 0, r.output
+        assert len(started) == 1
+        assert Path(started[0].cfg.nextflow_dir).resolve() == (tmp_path / "p").resolve()  # project root
+    finally:
+        paths.use(None)
