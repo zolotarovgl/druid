@@ -57,31 +57,35 @@ def _fam_id(r: families.Row) -> str:
 
 
 def _key(r: families.Row) -> tuple:
-    return r.class_name, r.hmms
+    """A row's family: its id and HMMs. The id alone is not unique (the library has neu.Synapsin
+    twice, with different HMMs), nor is class_name + hmms (rbp.CSD and tfs.CSD)."""
+    return _fam_id(r), r.hmms
 
 
 def _merge(universe: list, file_rows: list) -> list:
     """[[Row, ticked]]: the universe in its order, each row replaced by its families-file row
-    (ticked) — an identical row first, else one with the same class_name and hmms (its settings
-    edited); file rows matching none are appended, ticked. An empty file: everything ticked."""
+    (ticked) — an identical row first, else the same family (id and hmms; settings edited), else
+    the one row with that class_name and hmms (its prefix edited; never a guess between two, e.g.
+    rbp.CSD / tfs.CSD); file rows matching none are appended, ticked. Empty file: all ticked."""
     if not file_rows:
         return [[r, True] for r in universe]
     out = [[r, False] for r in universe]
-    rest = []
-    for f in file_rows:                          # pass 1: the identical row
-        i = next((i for i, (r, t) in enumerate(out) if not t and r.fields() == f.fields()), None)
-        if i is None:
-            rest.append(f)
-        else:
-            out[i] = [f, True]
-    extra = []
-    for f in rest:                               # pass 2: same family, edited settings
-        i = next((i for i, (r, t) in enumerate(out) if not t and _key(r) == _key(f)), None)
-        if i is None:
-            extra.append([f, True])
-        else:
-            out[i] = [f, True]
-    return out + extra
+
+    def match(rows, same, unique=False) -> list:
+        left = []
+        for f in rows:
+            hits = [i for i, (r, t) in enumerate(out) if not t and same(r, f)]
+            if hits and (not unique or len(hits) == 1):
+                out[hits[0]] = [f, True]
+            else:
+                left.append(f)
+        return left
+
+    rest = match(file_rows, lambda r, f: r.fields() == f.fields())        # identical
+    rest = match(rest, lambda r, f: _key(r) == _key(f))                     # settings edited
+    rest = match(rest, lambda r, f: (r.class_name, r.hmms) == (f.class_name, f.hmms),
+                 unique=True)                                               # prefix edited
+    return out + [[f, True] for f in rest]
 
 
 def _edit_error(v: dict) -> str:
@@ -165,6 +169,7 @@ class SetupScreen(Screen):
         self._sel: list = []                     # [(sp, source)], the species: order
         self._shown: list = []                   # candidates passing the filter, as in #sp-table
         self._blockers: list = []
+        self._warnings: list = []                # core.family_warnings: shown, never blocking
         self._ro_all = False                     # prepare: locked
         self._sp_reason = ""                     # why Species / Tree are read-only ("" = editable)
         self._tree_on = True                     # GeneRax or origins on: a species tree is needed
@@ -306,6 +311,10 @@ class SetupScreen(Screen):
             self._sp_reason = ""
         self._blockers = [] if self._cfg is None else self._try(
             "blockers", lambda: setup_state.blockers(raw, self._cfg, root), [])
+        # duplicate ids, a class_name under two prefixes (rbp.CSD + tfs.CSD): allowed, not wanted
+        # (Grygoriy, 23/10/2026): a warning line, never a blocker
+        self._warnings = [] if self._cfg is None else self._try(
+            "families file", lambda: core.family_warnings(self._cfg), [])
         params = raw.get("params") if isinstance(raw.get("params"), dict) else {}
         self._reload_tree(raw, params, root)
         self._reload_families(raw, params, root)
@@ -407,6 +416,7 @@ class SetupScreen(Screen):
             lines.append("blockers: " + " · ".join(self._blockers))
         elif self._cfg is not None:
             lines.append("no blockers: ready for prepare")
+        lines += self._warnings                  # last: the blockers line stays in view
         self.query_one("#blockers", Static).update("\n".join(lines))
 
     def _fill_source(self) -> None:
@@ -803,6 +813,8 @@ class SetupScreen(Screen):
 
     @staticmethod
     def _hmm_keys(d) -> set:
+        """The _key of each hmm_dir row: by its cus.<name> id, so a CSD.hmm never matches the
+        library's rbp.CSD / tfs.CSD (a custom row whose prefix was edited is no longer matched)."""
         return {_key(r) for r in families.hmm_rows(d)} if d is not None and d.is_dir() else set()
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:

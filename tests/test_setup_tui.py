@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 
 import pytest
 import yaml
@@ -734,4 +735,128 @@ def test_prepare_key_runs_and_reports(proj):
             assert text.startswith("prepare wrote data/input.fasta, data/species_tree.binary.newick")
             assert (root / "data" / "input.fasta").read_text() == ">Aaa_x\nM\n>Bbb_x\nM\n"
             assert sptree.tips((root / "data" / "species_tree.binary.newick").read_text()) == {"Aaa", "Bbb"}
+    _run(go())
+
+
+def _ids_ticks(scr, ids):
+    t = scr.query_one("#fam-table")
+    rows = [[str(c) for c in t.get_row_at(i)] for i in range(t.row_count)]
+    return [(r[1], r[0], r[3]) for r in rows if r[1] in ids]           # (id, tick, inflation)
+
+
+def test_merge_shared_class_name_on_the_library():
+    lib = families.library()
+    ids = [setup_tui._fam_id(r) for r in lib]
+    assert ids.count("rbp.CSD") == 1 and ids.count("tfs.CSD") == 1    # same class_name and hmms
+    edited = [dataclasses.replace(r, inflation="1.5") if setup_tui._fam_id(r) == "tfs.CSD" else r
+              for r in lib if setup_tui._fam_id(r) != "rbp.CSD"]
+    out = setup_tui._merge(lib, edited)
+    assert len(out) == len(lib)                                        # nothing appended
+    got = {setup_tui._fam_id(r): (t, r.inflation) for r, t in out if r.class_name == "CSD"}
+    assert got == {"rbp.CSD": (False, "1.1"), "tfs.CSD": (True, "1.5")}
+    # both Synapsin rows share the id neu.Synapsin: each edit stays on its own row (by hmms)
+    syn = [dataclasses.replace(r, min_seqs="9") if r.hmms == "Synapsin" else r for r in lib]
+    out = setup_tui._merge(lib, syn)
+    assert sorted((r.hmms, r.min_seqs) for r, t in out if r.class_name == "Synapsin" and t) == \
+        [("Synapsin", "9"), ("Synapsin,Synapsin_C", "3")]
+    # a prefix edit with two candidates (rbp.CSD and tfs.CSD both unticked): no guess, appended
+    pre = [dataclasses.replace(r, pref2="tfx") if setup_tui._fam_id(r) == "tfs.CSD" else r
+           for r in lib if setup_tui._fam_id(r) != "rbp.CSD"]
+    out = setup_tui._merge(lib, pre)
+    got = sorted((setup_tui._fam_id(r), t) for r, t in out if r.class_name == "CSD")
+    assert got == [("rbp.CSD", False), ("tfs.CSD", False), ("tfx.CSD", True)]
+
+
+def test_untick_and_edit_rows_sharing_a_class_name(proj):
+    root, _prot, _mine_ = proj
+    (root / "data" / "families.csv").write_text("")
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Families")                        # all 356 written
+            t = scr.query_one("#fam-table")
+            ids = [str(t.get_row_at(i)[1]) for i in range(t.row_count)]
+            t.focus()
+            t.move_cursor(row=ids.index("rbp.CSD"))
+            await pilot.press("space")                                    # untick rbp.CSD
+            await pilot.pause()
+            t.move_cursor(row=ids.index("tfs.CSD"))
+            await pilot.press("enter")                                    # edit tfs.CSD
+            await pilot.pause()
+            scr.query_one("#fe-inflation").value = "1.5"
+            scr.query_one("#fe-pref2").focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert _ids_ticks(scr, {"rbp.CSD", "tfs.CSD"}) == [("rbp.CSD", "[ ]", "1.1"),
+                                                              ("tfs.CSD", "[x]", "1.5")]
+            fam_ids = [setup_tui._fam_id(r) for r in families.read(root / "data" / "families.csv")]
+            assert "rbp.CSD" not in fam_ids and fam_ids.count("tfs.CSD") == 1
+            assert len(fam_ids) == 355
+            t.move_cursor(row=ids.index("rbp.CSD"))
+            await pilot.press("space")                                    # tick it again: no duplicate
+            await pilot.pause()
+            rows = families.read(root / "data" / "families.csv")
+            fam_ids = [setup_tui._fam_id(r) for r in rows]
+            assert fam_ids.count("rbp.CSD") == 1 and fam_ids.count("tfs.CSD") == 1
+            assert len(rows) == 356
+            assert [r.inflation for r in rows if setup_tui._fam_id(r) == "tfs.CSD"] == ["1.5"]
+    _run(go())
+
+
+def test_hmm_named_like_a_library_family_switch_back(proj, tmp_path):
+    root, _prot, _mine_ = proj
+    lib = [r.fields() for r in families.library()]
+    (root / "data" / "families.csv").write_text("".join("\t".join(f) + "\n" for f in lib))
+    hd = tmp_path / "hmms"
+    hd.mkdir()
+    (hd / "CSD.hmm").write_text("HMMER3/f\nNAME  CSD\nGA    20.0 20.0;\n//\n")
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Search")
+            scr.query_one("#rb-hmm").value = True
+            await pilot.pause()
+            scr.query_one("#se-hmmdir").value = str(hd)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert _fams(root) == lib + [["CSD", "CSD", "1.1", "3", "GA", "custom", "cus"]]
+            scr.query_one("#rb-file").value = True                        # back: only cus.CSD goes
+            await pilot.pause()
+            assert _raw()["params"]["hmm_dir"] is None
+            assert _fams(root) == lib
+    _run(go())
+
+
+def test_same_class_name_is_a_warning_not_a_blocker(proj):
+    root, _prot, _mine_ = proj
+    yamledit.update_config({("species",): ["Aaa", "Bbb"]})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Families")                        # GENEFAM: no collision
+            assert "warning" not in _text(scr, "#blockers")
+            t = scr.query_one("#fam-table")
+            t.focus()
+            for fid in ("rbp.CSD", "tfs.CSD"):                            # tick both
+                ids = [str(t.get_row_at(i)[1]) for i in range(t.row_count)]
+                t.move_cursor(row=ids.index(fid))
+                await pilot.press("space")
+                await pilot.pause()
+            fam_ids = [setup_tui._fam_id(r) for r in families.read(root / "data" / "families.csv")]
+            assert {"rbp.CSD", "tfs.CSD"} <= set(fam_ids) and len(fam_ids) == 7
+            text = _text(scr, "#blockers")
+            assert "warning: family name CSD is listed under 2 prefixes (rbp, tfs)" in text
+            assert "no blockers: ready for prepare" in text
+            assert not any("CSD" in b for b in scr._blockers)
+            await pilot.press("P")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert _text(scr, "#blockers").startswith("prepare wrote data/input.fasta")
+            assert "warning: family name CSD" in _text(scr, "#blockers")    # still shown after
     _run(go())
