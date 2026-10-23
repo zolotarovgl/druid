@@ -212,8 +212,19 @@ def test_init_copies_taxonomy_and_base_trees(tmp_path):
     shipped = paths.DRUID_HOME / "druid/data"
     assert (dest / "data/genome_sources.tsv").read_bytes() == (shipped / "genome_sources.tsv").read_bytes()
     for src, name in (("species_tree.binary.newick", "base_tree.binary.newick"),
-                      ("species_tree.newick", "base_tree.newick")):
+                      ("species_tree.newick", "base_tree.newick"),
+                      ("species_tree.chromo94.newick", "base_tree.chromo94.newick")):
         assert (dest / "data" / name).read_bytes() == (shipped / src).read_bytes()
+
+
+def test_shipped_chromo_tree():
+    """The 2026_chromo species tree (SOURCE): byte copy, 94 tips, binary."""
+    from ete3 import Tree
+    f = paths.DRUID_HOME / "druid/data/species_tree.chromo94.newick"
+    assert _md5(f) == "5a8e45f5fc151b31897b525c3ba74a4c"
+    t = Tree(f.read_text(), format=1)
+    assert len(t) == 94 and all(len(n.children) in (0, 2) for n in t.traverse())
+    assert "species_tree.chromo94.newick" in (paths.DRUID_HOME / "druid/data/SOURCE").read_text()
 
 
 def test_template_new_keys(tmp_path):

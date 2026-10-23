@@ -1,7 +1,7 @@
 """The TUI Setup tab (sub-project 2, 23/10/2026): proteome sources, the species picker, the analyses
-switches, the placement of ticked species missing from the species tree, the search type, the
-families and druid.yaml, with the blockers `prepare` would report on the bottom line; `P` runs
-prepare. Config writes go through yamledit.update_config, the placements and families files through
+switches, the base species tree (v3 curated / chromo / custom) and the placement of ticked species
+missing from it, the search type, the families and druid.yaml, with the blockers `prepare` would
+report on the bottom line; `P` runs prepare. Config writes go through yamledit.update_config, the placements and families files through
 sptree / families (paths). An adopted project (prepare: locked) is read-only throughout; a
 species-locked one in the Species and Tree sections (the families stay editable). Imported by
 druid.tui when the Setup tab opens."""
@@ -38,7 +38,10 @@ EDIT_COLS = {"inflation": "inflation (per family; the cluster stage uses params.
              "threshold": "threshold (GA: hmmsearch --cut_ga; else a --domE e-value)",
              "pref1": "pref1 (category)",
              "pref2": "pref2 (id prefix: the family id is <pref2>.<class_name>; pref1 when empty)"}
-TREE_OFF = "not needed: GeneRax and origins are off"
+TREE_OFF = "placement not needed: GeneRax and origins are off (prepare reads and writes no species tree)"
+# radio id -> setup_state.tree_base; the base tree the Tree section shows as
+TREE_BASES = {"rb-tree-v3": "v3", "rb-tree-chromo": "chromo", "rb-tree-custom": "custom"}
+TREE_LABELS = {"v3": "v3 curated, 59 tips", "chromo": "chromo, 94 tips", "custom": "tree_source"}
 LOCKED_ALL = "read-only: adopted project (prepare: locked); druid never changes its druid.yaml here"
 
 
@@ -141,6 +144,7 @@ class SetupScreen(Screen):
     SetupScreen #fam-edit-help { display: none; }
     SetupScreen #fam-edit Input { width: 1fr; }
     SetupScreen #se-type { height: auto; }
+    SetupScreen #tree-base { height: auto; }
     SetupScreen .row { height: auto; }
     SetupScreen .row Label { padding: 1 1; }
     SetupScreen .note { color: $text-muted; height: auto; }
@@ -178,6 +182,7 @@ class SetupScreen(Screen):
         self._built = ""                         # the binary tree as built now (newick)
         self._missing: list = []                 # ticked species not on it
         self._placements: list = []              # sptree.Placement, data/placements.tsv
+        self._tree_custom = False                # "custom" chosen, its tree_source not yet entered
         self._search = None                      # "file" | "hmm"; hmm_dir set in druid.yaml wins
         self._hmm_dir = None                     # params.hmm_dir resolved, None when unset
         self._fam_target = None                  # params.genefam_info (data/families.csv)
@@ -218,11 +223,15 @@ class SetupScreen(Screen):
                     yield Static("Both off: no species tree is needed.", classes="note")
                 with Vertical(id="sec-tree"):
                     yield Static("", id="tree-info", classes="note", markup=False)
-                    yield DataTable(id="tree-missing", cursor_type="row")
-                    yield Static("custom route: one species tree of your own, used for both trees "
-                                 "(tree_source; empty: the shipped curated tree)",
+                    with RadioSet(id="tree-base"):
+                        yield RadioButton("v3 curated (59)", id="rb-tree-v3", value=True)
+                        yield RadioButton("chromo (94)", id="rb-tree-chromo")
+                        yield RadioButton("custom", id="rb-tree-custom")
+                    yield Static("custom: one species tree of your own, used for both trees "
+                                 "(tree_source; empty: the v3 curated tree)",
                                  id="tree-source-note", classes="note")
                     yield Input(placeholder="tree_source (newick)", id="tree-source")
+                    yield DataTable(id="tree-missing", cursor_type="row")
                 with Vertical(id="sec-search"):
                     yield Static("", id="se-reason", classes="note", markup=False)
                     with RadioSet(id="se-type"):
@@ -321,15 +330,19 @@ class SetupScreen(Screen):
 
     def _reload_tree(self, raw: dict, params: dict, root: Path) -> None:
         """The base binary tree, the placements, the tree built from them and who is missing; a
-        bad tree is the Tree section's own note (setup_state.blockers lists it as a blocker)."""
-        self._tree_on = bool(params.get("run_generax")) or bool(params.get("origins", True))
+        bad tree is the Tree section's own note (setup_state.blockers lists it as a blocker). Both
+        switches off: only the base's path, nothing is read (Ruling K)."""
+        self._tree_on = setup_state.trees_needed(params)
         self._tree_err, self._built, self._missing, self._placements = "", "", [], []
-        self._tree_file = None
+        try:
+            self._tree_file = setup_state.base_tree_files(raw, root)[0]
+        except Exception as e:                   # tree_source: ~nouser/... (expanduser), ...
+            self._tree_file, self._tree_err = None, f"tree_source unusable: {type(e).__name__}: {e}"
+            return
         if not self._tree_on:
             return
         species = list(dict.fromkeys(sp for sp, _src in self._sel))
         try:
-            self._tree_file = setup_state.base_tree_files(raw, root)[0]
             self._placements = sptree.read_placements(root / "data" / sptree.PLACEMENTS)
             base = self._tree_file.read_text().strip()
             self._built = sptree.build_trees(base, base, species, self._placements)[0]
@@ -463,13 +476,40 @@ class SetupScreen(Screen):
             sw.disabled = self._ro_all
         self.query_one("#an-reason", Static).update(LOCKED_ALL if self._ro_all else "")
 
+    def _tree_base(self) -> str:
+        """The base shown as chosen: "custom" while one is being entered, else from tree_source."""
+        if self._tree_custom:
+            return "custom"
+        try:
+            return setup_state.tree_base(self._raw, paths.project_root())
+        except Exception:                        # tree_source: ~nouser/... (expanduser), ...
+            return "custom"
+
     def _fill_tree(self) -> None:
+        """The base choice and tree_source (always: Ruling K), the missing species (a switch on)."""
+        base = self._tree_base()
+        ro = bool(self._sp_reason)
+        for rid, kind in TREE_BASES.items():     # the Changed this posts matches _tree_base: a no-op
+            rb = self.query_one(f"#{rid}", RadioButton)
+            if kind == base and not rb.value:
+                rb.value = True
+        self.query_one("#tree-base", RadioSet).disabled = ro
+        ts = self._raw.get("tree_source")
+        inp = self.query_one("#tree-source", Input)
+        inp.disabled = ro
+        if not inp.has_focus:
+            inp.value = str(ts or "")
         t = self.query_one("#tree-missing", DataTable)
-        for wid in ("#tree-missing", "#tree-source-note", "#tree-source"):
-            self.query_one(wid).display = self._tree_on
+        t.display = self._tree_on
+        t.disabled = ro
+        lines = [self._sp_reason] if self._sp_reason else []
+        lines.append(f"species tree: {self._tree_file} ({TREE_LABELS[base]})")
         if not self._tree_on:
             t.clear()
-            self.query_one("#tree-info", Static).update(TREE_OFF)
+            lines.append(TREE_OFF)
+            if self._tree_err:
+                lines.append(f"ERROR: {self._tree_err}")
+            self.query_one("#tree-info", Static).update("\n".join(lines))
             return
         src = dict(self._sel)
         row = t.cursor_row
@@ -478,10 +518,6 @@ class SetupScreen(Screen):
             t.add_row(sp, src.get(sp, ""))
         if self._missing:
             t.move_cursor(row=min(max(row, 0), len(self._missing) - 1))
-        ts = self._raw.get("tree_source")
-        lines = [self._sp_reason] if self._sp_reason else []
-        lines.append(f"species tree: {self._tree_file} "
-                     f"({'tree_source' if ts else 'the shipped curated tree'})")
         if self._tree_err:
             lines.append(f"ERROR: {self._tree_err}")
         elif self._missing:
@@ -493,12 +529,6 @@ class SetupScreen(Screen):
             lines.append("placed: " + " · ".join(f"{x.sp} (sister of {len(x.tipset)} tips)"
                                                 for x in self._placements))
         self.query_one("#tree-info", Static).update("\n".join(lines))
-        ro = bool(self._sp_reason)
-        t.disabled = ro
-        inp = self.query_one("#tree-source", Input)
-        inp.disabled = ro
-        if not inp.has_focus:
-            inp.value = str(ts or "")
 
     def _fam_reason(self) -> str:
         """Why Search and Families are read-only ("" = editable; the species lock does not count)."""
@@ -578,7 +608,7 @@ class SetupScreen(Screen):
         if event.list_view.id != "sections":
             return
         target = {"Source": "#src-name", "Species": "#sp-filter", "Analyses": "#sw-generax",
-                  "Tree": "#tree-missing" if self._missing else "#tree-source",
+                  "Tree": "#tree-missing" if self._tree_on and self._missing else "#tree-base",
                   "Search": "#se-type", "Families": "#fam-filter",
                   "Config": "#sec-config"}.get(self.current)
         if target:
@@ -745,12 +775,13 @@ class SetupScreen(Screen):
         self._fill_blockers()
         return False
 
-    def _tree_editable(self) -> bool:
-        """Re-read; False with the reason when the Tree section is read-only or not needed."""
+    def _tree_editable(self, place: bool = True) -> bool:
+        """Re-read; False with the reason when the Tree section is read-only or, for a placement
+        (place), not needed. The base tree can be chosen with both switches off (Ruling K)."""
         self._reload()
         if self._sp_reason:
             return self._refuse(self._sp_reason)
-        if not self._tree_on:
+        if place and not self._tree_on:
             return self._refuse(TREE_OFF)
         return True
 
@@ -798,16 +829,50 @@ class SetupScreen(Screen):
         self._refresh()
 
     def _set_tree_source(self, value: str) -> None:
-        if not self._tree_editable():
+        if not self._tree_editable(place=False):
             return
         if value == str(self._raw.get("tree_source") or ""):
+            self._tree_custom = False
             self._refresh()
             return
         if value and not _resolve(value, paths.project_root()).is_file():
             self._refuse(f"ERROR: no such tree file: {_resolve(value, paths.project_root())}")
             return
+        self._tree_custom = False
         self._write({("tree_source",): value or None},
-                    done=f"tree_source = {value}" if value else "tree_source cleared: the shipped tree")
+                    done=f"tree_source = {value}" if value else "tree_source cleared: the v3 curated tree")
+
+    def _set_tree_base(self, kind: str) -> None:
+        """A base chosen in the radio set: v3 unsets tree_source, chromo sets it to CHROMO_TREE
+        (one tree for both), custom waits for a tree_source to be entered. Placements whose sister
+        tips are not on the new base are skipped with a note (sptree.build_trees)."""
+        if kind == self._tree_base():            # showing the current value: not a choice
+            return
+        if not self._tree_editable(place=False):
+            self._fill_tree()                    # put the radio back
+            return
+        if kind == "custom":
+            self._tree_custom = True
+            self._msg = "custom tree: enter its newick path in tree_source"
+            self._refresh()
+            self.query_one("#tree-source").focus()
+            return
+        self._tree_custom = False
+        if kind == "v3":
+            if self._raw.get("tree_source"):
+                self._write({("tree_source",): None}, done="species tree: v3 curated (59 tips)")
+            else:                                # custom was chosen, nothing entered
+                self._msg = ""
+                self._refresh()
+            return
+        chromo = paths.project_root() / setup_state.CHROMO_TREE
+        if not chromo.is_file():                 # a project made before 23/10/2026
+            self._refuse(f"ERROR: no such tree file: {chromo} (copy it from "
+                         f"{paths.DRUID_HOME / 'druid' / 'data' / 'species_tree.chromo94.newick'})")
+            self._fill_tree()
+            return
+        self._write({("tree_source",): setup_state.CHROMO_TREE},
+                    done=f"species tree: chromo (94 tips, {setup_state.CHROMO_TREE})")
 
     # ---- Search -----------------------------------------------------------------------------
     def _fam_editable(self) -> bool:
@@ -835,6 +900,11 @@ class SetupScreen(Screen):
         return None if rows is None else {_key(r) for r in rows}
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        if event.radio_set.id == "tree-base":
+            kind = TREE_BASES.get(event.pressed.id or "")
+            if kind is not None:
+                self._set_tree_base(kind)
+            return
         kind = SEARCH.get(event.pressed.id or "")
         if kind is None or kind == self._search:  # showing the current value: not a choice
             return

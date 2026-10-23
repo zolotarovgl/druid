@@ -154,6 +154,26 @@ def glob_problem(src: Source):
     return None
 
 
+def trees_needed(params: dict) -> bool:
+    """GeneRax or origins on (origins default on). Both off (Ruling K, 23/10/2026): no species tree
+    is read or written by prepare, and the species universe is the ticked species."""
+    return bool(params.get("run_generax")) or bool(params.get("origins", True))
+
+
+# the 2026_chromo tree (94 tips, binary; druid/data/SOURCE), copied by init: as tree_source it is
+# the one tree for both (the Setup Tree section's "chromo (94)" base)
+CHROMO_TREE = "data/base_tree.chromo94.newick"
+
+
+def tree_base(raw: dict, root: Path) -> str:
+    """"v3" (tree_source unset: the curated v3 pair), "chromo" (tree_source = CHROMO_TREE) or
+    "custom" (any other tree_source)."""
+    ts = raw.get("tree_source")
+    if not ts:
+        return "v3"
+    return "chromo" if _resolve(ts, root) == Path(root) / CHROMO_TREE else "custom"
+
+
 def base_tree_files(raw: dict, root: Path):
     """(binary, origin) newick paths: raw["tree_source"] (one user tree for both) if set, else the
     project's data/base_tree.binary.newick and data/base_tree.newick."""
@@ -164,9 +184,9 @@ def base_tree_files(raw: dict, root: Path):
     return Path(root) / "data" / "base_tree.binary.newick", Path(root) / "data" / "base_tree.newick"
 
 
-def _tree_blockers(raw: dict, root: Path, species: list, generax: bool, needed: bool) -> list:
-    """needed = GeneRax or origins on. Off, the base must still read: prepare writes it pruned (the
-    species universe of the Results panel), but a species missing from it is simply absent."""
+def _tree_blockers(raw: dict, root: Path, species: list, generax: bool) -> list:
+    """GeneRax or origins on: the base must read, every ticked species be on it (placements
+    included) and, for GeneRax, a tree_source be binary."""
     from druid import sptree
     binary_f, _origin_f = base_tree_files(raw, root)
     try:
@@ -176,8 +196,6 @@ def _tree_blockers(raw: dict, root: Path, species: list, generax: bool, needed: 
         built = sptree.build_trees(base, base, species, pl)[0]
     except Exception as e:                      # unreadable / unparsable newick
         return [f"species tree unreadable ({binary_f}): {e}"]
-    if not needed:
-        return []
     out = []
     if miss:
         out.append(f"{len(miss)} ticked species not on the tree: {', '.join(miss)}")
@@ -217,12 +235,11 @@ def blockers(raw: dict, cfg: core.Config, root: Path) -> list:
     _cands, rowless = candidates(list(srcs.values()))
     for r in rowless:
         out.append(f"no taxonomy row for {r}")
-    # species tree / placement check (missing / polytomy only with GeneRax or origins on)
+    # species tree / placement check; both switches off: no tree is read (Ruling K)
     params = raw.get("params") or {}
-    gx = bool(params.get("run_generax"))
-    if sel:
-        out.extend(_tree_blockers(raw, root, list(dict.fromkeys(sp for sp, _ in sel)), gx,
-                                  needed=gx or bool(params.get("origins", True))))
+    if sel and trees_needed(params):
+        out.extend(_tree_blockers(raw, root, list(dict.fromkeys(sp for sp, _ in sel)),
+                                  bool(params.get("run_generax"))))
     if not core.family_ids(cfg, strict=False):
         out.append("no families in params.genefam_info")
     return out

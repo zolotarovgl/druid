@@ -411,12 +411,73 @@ def test_tree_section_hidden_when_switches_off(proj):
             await pilot.press("space")                                    # origins off
             await pilot.pause()
             await _section(pilot, scr, "Tree")
-            assert not t.display and not scr.query_one("#tree-source").display
-            assert _text(scr, "#tree-info") == setup_tui.TREE_OFF
+            # Ruling K: placement hidden; the base choice and tree_source stay usable
+            assert not t.display
+            for wid in ("#tree-base", "#tree-source"):
+                assert scr.query_one(wid).display and not scr.query_one(wid).disabled
+            assert scr.focused is scr.query_one("#tree-base")
+            assert setup_tui.TREE_OFF in _text(scr, "#tree-info")
             assert _text(scr, "#lbl-tree").endswith("·")
             assert "not on the tree" not in _text(scr, "#blockers")
             assert _text(scr, "#blockers") == "no blockers: ready for prepare"
+            scr.query_one("#rb-tree-chromo").value = True
+            await pilot.pause()
+            assert _raw()["tree_source"] == setup_state.CHROMO_TREE
+            assert _text(scr, "#blockers").endswith("no blockers: ready for prepare")
+            scr._placed("Bbb", frozenset({"Aaa"}))                        # placement: refused
+            await pilot.pause()
+            assert _text(scr, "#blockers").startswith(setup_tui.TREE_OFF)
+            assert not (root / "data" / sptree.PLACEMENTS).exists()
     _run(go())
+
+
+def test_tree_base_choice(proj):
+    """v3 curated (tree_source unset) / chromo (94) / custom; the missing list follows the base."""
+    root, prot, _mine_ = proj
+    (prot / "Mlei_long.pep.fasta").write_text(">x\nM\n")
+    (root / "data" / "tax.tsv").write_text(TAX + "Mlei\tMnemiopsis leidyi\t1\t1\t1\tMetazoa\tsrc\t1\tMT\tNA\n")
+    yamledit.update_config({("species",): ["Aaa", "Mlei"]})            # fixture base: Aaa, Bbb, Ccc
+    chromo = sptree.tips((root / "data" / "base_tree.chromo94.newick").read_text())
+    assert len(chromo) == 94 and "Mlei" in chromo and "Aaa" not in chromo
+
+    def missing(scr):
+        t = scr.query_one("#tree-missing")
+        return [str(t.get_row_at(i)[0]) for i in range(t.row_count)]
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Tree")
+            assert scr.query_one("#rb-tree-v3").value and missing(scr) == ["Mlei"]
+            scr.query_one("#rb-tree-chromo").value = True
+            await pilot.pause()
+            assert _raw()["tree_source"] == setup_state.CHROMO_TREE
+            assert missing(scr) == ["Aaa"] and "chromo, 94 tips" in _text(scr, "#tree-info")
+            assert "1 ticked species not on the tree: Aaa" in _text(scr, "#blockers")
+            scr.query_one("#rb-tree-custom").value = True                 # nothing written yet
+            await pilot.pause()
+            assert _raw()["tree_source"] == setup_state.CHROMO_TREE
+            assert scr.focused is scr.query_one("#tree-source") and scr.query_one("#rb-tree-custom").value
+            scr.query_one("#rb-tree-v3").value = True
+            await pilot.pause()
+            assert not _raw().get("tree_source") and missing(scr) == ["Mlei"]
+            assert scr.query_one("#rb-tree-v3").value
+    _run(go())
+    yamledit.update_config({("species_locked",): True})
+    before = paths.config_file().read_bytes()
+
+    async def locked():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Tree")
+            assert scr.query_one("#tree-base").disabled
+            scr.query_one("#rb-tree-chromo").value = True                 # behind the UI: refused
+            await pilot.pause()
+            assert scr.query_one("#rb-tree-v3").value and "read-only" in _text(scr, "#blockers")
+    _run(locked())
+    assert paths.config_file().read_bytes() == before
 
 
 def test_place_as_sister_writes_placements(proj):

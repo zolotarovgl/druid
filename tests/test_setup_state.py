@@ -174,6 +174,21 @@ def test_blockers_prefix_with_underscore(proj):
     assert "Aa_b: a species prefix cannot contain '_' (gene ids are split at the first '_')" in out
 
 
+def test_blockers_trees_off_read_no_tree(proj, monkeypatch):
+    """Ruling K: GeneRax and origins off: no tree line, and no base tree is read."""
+    root, _prot = proj
+    for f in ("base_tree.binary.newick", "base_tree.newick"):
+        (root / "data" / f).unlink()
+    raw, cfg = _raw()
+    off = {**raw, "species": ["Aaa", "Bbb"],
+           "params": {**raw.get("params", {}), "run_generax": False, "origins": False}}
+    from druid import sptree
+    monkeypatch.setattr(sptree, "build_trees", lambda *a: pytest.fail("a base tree was read"))
+    assert ss.blockers(off, cfg, root) == []
+    on = {**off, "params": {**off["params"], "origins": True}}
+    assert ss.blockers(on, cfg, root)[0].startswith("species tree unreadable")
+
+
 def _locked_when_called(monkeypatch):
     seen = []
 

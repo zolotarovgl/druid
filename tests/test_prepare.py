@@ -102,33 +102,30 @@ def test_refuses_locked_and_species_locked(proj):
     assert _snap(root) == snap
 
 
-def test_trees_always_record_the_species_universe(proj):
-    root, _ = proj
+def test_trees_on_are_the_pruned_base(proj):
     yamledit.update_config({("params", "origins"): True})
     out, cfg, _ = _go()
     t = cfg.params["SPECIES_TREE"].read_text()
     assert "Zzzz" not in t and "Abcd" in t and cfg.params["ORIGIN_TREE"].is_file()
     assert cfg.params["SPECIES_TREE"] in out and cfg.params["ORIGIN_TREE"] in out
-    # both switches off: the trees are still the pruned base, so the Results species panel
-    # (model.species_universe) counts against the ticked species, not the shipped 59-tip tree;
-    # a ticked species missing from the base is simply absent (no blocker: no tree is needed)
-    yamledit.update_config({("params", "origins"): False, ("params", "run_generax"): False})
-    for f in ("base_tree.binary.newick", "base_tree.newick"):
-        (root / "data" / f).write_text("((Abcd:1,Wxyz:1)n1:1,(Zzzz:1,Qqqq:1)n2:1)R;")
-    out, cfg, _ = _go()
-    assert cfg.params["SPECIES_TREE"] in out and cfg.params["ORIGIN_TREE"] in out
-    assert sorted(model.species_universe(cfg)) == ["Abcd", "Wxyz"]
-    assert "Hsap" not in cfg.params["ORIGIN_TREE"].read_text()
+    assert model.species_universe(cfg) == ["Abcd", "Wxyz", "Hsap"]           # tree order
 
 
-def test_trees_off_unreadable_base_refuses(proj):
+def test_trees_off_no_tree_read_or_written(proj):
+    """Ruling K: GeneRax and origins off: no base tree is read or required, no tree is written, and
+    the species universe is the ticked species (one on no tree included)."""
     root, _ = proj
     yamledit.update_config({("params", "origins"): False, ("params", "run_generax"): False})
-    (root / "data" / "base_tree.binary.newick").unlink()
-    snap = _snap(root)
-    with pytest.raises(prepare.PrepareError, match="species tree unreadable"):
-        _go()
-    assert _snap(root) == snap
+    for f in ("base_tree.binary.newick", "base_tree.newick"):
+        (root / "data" / f).unlink()
+    cfg = core.config_from_raw(paths.read_raw())
+    trees = [Path(cfg.params[k]) for k in ("SPECIES_TREE", "ORIGIN_TREE")]
+    before = {t: (t.read_bytes(), t.stat().st_mtime_ns) for t in trees if t.exists()}
+    out, cfg, notes = _go()
+    assert cfg.params["infasta"] in out and model.species_info_path(cfg) in out
+    assert not set(trees) & set(out) and notes == []
+    assert {t: (t.read_bytes(), t.stat().st_mtime_ns) for t in trees if t.exists()} == before
+    assert model.species_universe(cfg) == ["Wxyz", "Abcd", "Hsap"]           # species: order
 
 
 @pytest.mark.parametrize("glob", ["*.faa", "{sp.x}.faa"])

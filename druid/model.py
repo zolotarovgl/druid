@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from druid import core, history, paths
+from druid import core, history, paths, setup_state
 import og_origin  # noqa: E402  (core puts workflow/ on sys.path)
 from druid.common import FAILED_STATES, RUNNING_STATES, expand_indices, ids_path, runs_dir
 
@@ -860,7 +860,10 @@ _NEWICK_TIP = re.compile(r"[(,]\s*([^\s():,;\[\]]+)")    # a name right after '(
 
 def species_universe(cfg: core.Config) -> list[str]:
     """Tip names of params.SPECIES_TREE in newick order (names after ')' are clades: skipped).
-    Only the names are read: no tree parsing, no ete3."""
+    Only the names are read: no tree parsing, no ete3. GeneRax and origins off (Ruling K): prepare
+    writes no tree, so the universe is the project's ticked species, in species: order."""
+    if not setup_state.trees_needed(cfg.params):
+        return list(dict.fromkeys(sp for sp, _src in setup_state.selected(paths.read_raw())))
     text = Path(cfg.params["SPECIES_TREE"]).read_text()
     return list(dict.fromkeys(_NEWICK_TIP.findall(text)))
 

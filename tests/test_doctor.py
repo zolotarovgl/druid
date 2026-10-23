@@ -156,12 +156,22 @@ def test_bad_proteome_glob_is_a_fail_line_not_a_crash(results_tree, tmp_path):
     cfg, root = results_tree
     prot = tmp_path / "prot"
     prot.mkdir()
-    for glob in ("{typo}_long.pep.fasta", "{}_long.pep.fasta", "{sp", "/abs/{sp}.fasta"):
+    (prot / "Mlei_long.pep.fasta").write_text(">x\nM\n")
+    # setup_state.glob_problem: no {sp} (every species the same file), {sp.x} (AttributeError), ...
+    for glob in ("{typo}_long.pep.fasta", "{}_long.pep.fasta", "{sp", "/abs/{sp}.fasta",
+                 "*_long.pep.fasta", "{sp.x}_long.pep.fasta"):
         raw = yaml.safe_load((root / "druid.yaml").read_text())
         raw.update(proteomes_dir=str(prot), proteome_glob=glob, species=["Mlei"])
         (root / "druid.yaml").write_text(yaml.safe_dump(raw))
         c = _names(doctor.checks())["proteomes"]
-        assert not c.ok and "proteome_glob" in c.detail, glob
+        assert not c.ok and f"source default: proteome_glob {glob!r}" in c.detail, (glob, c.detail)
+    # a custom source's bad glob names that source (the default one is fine)
+    raw.update(proteome_glob="{sp}_long.pep.fasta", species=["Mlei", {"sp": "Abcd", "source": "mine"}],
+               sources=[{"name": "mine", "proteomes_dir": str(prot), "proteome_glob": "{sp.y}.faa"}])
+    (root / "druid.yaml").write_text(yaml.safe_dump(raw))
+    c = _names(doctor.checks())["proteomes"]
+    assert not c.ok and "source mine: proteome_glob '{sp.y}.faa' unusable (AttributeError" in c.detail
+    assert "source default" not in c.detail
 
 
 def test_explicit_project_without_druid_yaml_is_a_fail_not_a_skip(tmp_path, monkeypatch):

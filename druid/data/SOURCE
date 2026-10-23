@@ -9,6 +9,9 @@ species_info.tsv            $V3/species_info.tsv                     22b73c915ff
 Mmus_gene_names.csv         $V3/Mmus_gene_names.csv                  c3706f1abf7846de2fbaf85a6c6bc08f  14/10/2026
 families_library.csv        $V3/gene_families_searchinfo.csv         004a92741107ff48f217bea0db774e9b  14/10/2026
 genome_sources.tsv          ~/ant/xgraubove/genomes/genome_sources_2025-10-13.tsv  4f010d40e071fc13a9e15cdadf423b3e  23/10/2026
+species_tree.chromo94.newick  /users/asebe/gzolotarov/projects/2026_chromo/phylohpc/data/species_tree.newick  5a8e45f5fc151b31897b525c3ba74a4c  23/10/2026
 
 genome_sources.tsv = Xavi's species taxonomy table (476 rows), byte copy; the default source's `taxonomy`.
 families_library.csv = v3 data/gene_families_searchinfo.csv (356 rows; the spec's 304 was the older phylohpc copy).
+species_tree.chromo94.newick = 2026_chromo species tree, 94 tips, binary; 50 of the 59 v3 species (byte copy of
+  the 11/06/2026 file; Grygoriy, 23/10/2026). The Setup Tree section's "chromo (94)" base (tree_source).

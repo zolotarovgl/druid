@@ -424,6 +424,17 @@ def test_species_universe_reads_tip_names(cli):
         model.species_universe(cfg)
 
 
+def test_species_universe_trees_off_is_the_ticked_species(cli):
+    """Ruling K: GeneRax and origins off: SPECIES_TREE is not read (prepare writes none); the
+    universe is the ticked species in species: order, a custom-source one and one on no tree too."""
+    from druid import yamledit
+    yamledit.update_config({("params", "run_generax"): False, ("params", "origins"): False,
+                            ("species",): ["Nvec", {"sp": "Qqqq", "source": "mine"}, "Mlei"]})
+    cfg = _cfg()
+    Path(cfg.params["SPECIES_TREE"]).unlink(missing_ok=True)
+    assert model.species_universe(cfg) == ["Nvec", "Qqqq", "Mlei"]
+
+
 def test_phyla_from_species_info(cli):
     cfg = _cfg()
     write_results(cfg)

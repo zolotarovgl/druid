@@ -10,7 +10,8 @@ from druid import core, paths
 ShippedData = ("species_tree.binary.newick", "species_tree.newick", "species_info.tsv",
                "Mmus_gene_names.csv")
 BaseTrees = (("species_tree.binary.newick", "base_tree.binary.newick"),   # shipped -> project copy
-             ("species_tree.newick", "base_tree.newick"))
+             ("species_tree.newick", "base_tree.newick"),
+             ("species_tree.chromo94.newick", "base_tree.chromo94.newick"))   # setup_state.CHROMO_TREE
 TEMPLATE =paths.DRUID_HOME / "druid" / "templates" / "druid.yaml"
 DATA = paths.DRUID_HOME / "druid" / "data"
 

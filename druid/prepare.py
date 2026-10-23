@@ -1,5 +1,6 @@
 """Prepare (sub-project 2): build the project's data/input.fasta from the ticked proteomes (the
-`<prefix>_` is added to headers only in the copy), the two species trees and data/species_info.tsv.
+`<prefix>_` is added to headers only in the copy), the two species trees (only with GeneRax or
+origins on) and data/species_info.tsv.
 Every input is checked before anything is written; each output is written to a temp file under the
 project and moved into place, so an interrupted run keeps the old files."""
 from __future__ import annotations
@@ -65,8 +66,8 @@ def _prefixed(src_file: Path, sp: str) -> str:
 
 
 def run(raw: dict, cfg: core.Config, root: Path, notes: Optional[list] = None) -> List[Path]:
-    """Write input.fasta, the species trees (pruned to the ticked species; placements added) and
-    species_info.tsv.
+    """Write input.fasta, the species trees (pruned to the ticked species; placements added; none
+    with GeneRax and origins off) and species_info.tsv.
     Returns the paths written; the tree build's notes are appended to `notes` if given."""
     if raw.get("prepare") == "locked":
         raise PrepareError("this project is adopted (prepare: locked): its inputs are not rebuilt")
@@ -84,17 +85,19 @@ def run(raw: dict, cfg: core.Config, root: Path, notes: Optional[list] = None) -
                 fh.read(1)
         except OSError as e:
             raise PrepareError(f"cannot read {f}: {e}")
-    # the trees are written even with GeneRax and origins off: SPECIES_TREE is the project's species
-    # universe (model.species_universe, the Results species panel), never the shipped 59-tip tree
-    from druid import sptree
-    bin_f, org_f = ss.base_tree_files(raw, root)
-    try:
-        trees = sptree.build_trees(bin_f.read_text(encoding="utf-8").strip(),
-                                   org_f.read_text(encoding="utf-8").strip(),
-                                   list(dict.fromkeys(sp for sp, _ in sel)),
-                                   sptree.read_placements(Path(root) / "data" / sptree.PLACEMENTS))
-    except Exception as e:
-        raise PrepareError(f"species tree: {e}")
+    # GeneRax and origins off (Ruling K): no base tree is read and no tree written; the species
+    # universe is then the ticked species (model.species_universe), not SPECIES_TREE
+    trees = None
+    if ss.trees_needed(raw.get("params") or {}):
+        from druid import sptree
+        bin_f, org_f = ss.base_tree_files(raw, root)
+        try:
+            trees = sptree.build_trees(bin_f.read_text(encoding="utf-8").strip(),
+                                       org_f.read_text(encoding="utf-8").strip(),
+                                       list(dict.fromkeys(sp for sp, _ in sel)),
+                                       sptree.read_placements(Path(root) / "data" / sptree.PLACEMENTS))
+        except Exception as e:
+            raise PrepareError(f"species tree: {e}")
     info = _species_info_text(sel, srcs)
 
     written, tmps = [], []
@@ -107,14 +110,16 @@ def run(raw: dict, cfg: core.Config, root: Path, notes: Optional[list] = None) -
             except OSError as e:
                 raise PrepareError(f"cannot read {f}: {e}")
         jobs = [(fa, Path(cfg.params["infasta"]))]
-        binary, origin, tree_notes = trees
-        if notes is not None:
-            notes.extend(tree_notes)
-        for text, dst in ((binary, cfg.params["SPECIES_TREE"]), (origin, cfg.params["ORIGIN_TREE"])):
-            t = paths.mkstemp("tree_", ".newick")
-            tmps.append(t)
-            paths.write_text(t, text + "\n", encoding="utf-8")
-            jobs.append((t, Path(dst)))
+        if trees is not None:
+            binary, origin, tree_notes = trees
+            if notes is not None:
+                notes.extend(tree_notes)
+            for text, dst in ((binary, cfg.params["SPECIES_TREE"]),
+                              (origin, cfg.params["ORIGIN_TREE"])):
+                t = paths.mkstemp("tree_", ".newick")
+                tmps.append(t)
+                paths.write_text(t, text + "\n", encoding="utf-8")
+                jobs.append((t, Path(dst)))
         t = paths.mkstemp("species_info_", ".tsv")
         tmps.append(t)
         paths.write_text(t, info, encoding="utf-8")

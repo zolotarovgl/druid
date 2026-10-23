@@ -118,25 +118,23 @@ def _project() -> list:
     # the default source is always checked; a custom one only when a ticked species uses it
     used = [srcs[setup_state.DEFAULT]] + [srcs[n] for n in dict.fromkeys(src for _sp, src in sel)
                                           if n in srcs and n != setup_state.DEFAULT]
+    # a glob without {sp} or a malformed one (setup_state.glob_problem: the blockers' check) names
+    # its source and glob; never a traceback
+    probs = [w for w in (setup_state.glob_problem(s) for s in used) if w]
     bad = [s for s in used if not (s.proteomes_dir.is_dir()
                                    and os.access(s.proteomes_dir, os.R_OK | os.X_OK))]
     if bad:
-        out.append(Check(False, "proteomes", f"not readable: {', '.join(str(s.proteomes_dir) for s in bad)}"))
+        probs.append(f"not readable: {', '.join(str(s.proteomes_dir) for s in bad)}")
+    if probs:
+        out.append(Check(False, "proteomes", "; ".join(probs)))
     else:
-        try:
-            lost = [sp for sp, src in sel
-                    if src not in srcs or setup_state.proteome_file(srcs[src], sp) is None]
-        except (KeyError, IndexError, ValueError, NotImplementedError) as e:
-            glob = next(s.glob for s in used)
-            out.append(Check(False, "proteomes",
-                             f"proteome_glob {glob!r} unusable ({type(e).__name__}: {e}); "
-                             f"it is a relative pattern with {{sp}} as the only placeholder"))
-        else:
-            where = ", ".join(f"{s.proteomes_dir}" + ("" if s.name == setup_state.DEFAULT else f" ({s.name})")
-                              for s in used)
-            out.append(Check(not lost, "proteomes",
-                             f"{len(sel) - len(lost)}/{len(sel)} species have a file in {where}"
-                             + (f"; missing: {', '.join(lost)}" if lost else "")))
+        lost = [sp for sp, src in sel
+                if src not in srcs or setup_state.proteome_file(srcs[src], sp) is None]
+        where = ", ".join(f"{s.proteomes_dir}" + ("" if s.name == setup_state.DEFAULT else f" ({s.name})")
+                          for s in used)
+        out.append(Check(not lost, "proteomes",
+                         f"{len(sel) - len(lost)}/{len(sel)} species have a file in {where}"
+                         + (f"; missing: {', '.join(lost)}" if lost else "")))
     tree = Path(cfg.params.get("SPECIES_TREE") or "")
     try:
         from ete3 import Tree
