@@ -566,7 +566,8 @@ class PhyloApp(App):
         Binding("slash", "member_filter", "filter members"),
         Binding("R", "refresh", "refresh"),
         Binding("question_mark", "keys", "keys"),
-    ]                                            # q = esc and :q! quit: on_event, every screen
+    ]   # q = esc and :q! quit: on_event, every screen; plain q is rewritten to escape there, so a
+    #     binding of plain q can never fire (ctrl+q stays Textual's quit)
 
     OV_BAR = 6
     OV_GLYPHS = (("█", "green"), ("▒", "cyan"), ("▓", "yellow"), ("░", "bright_black"))
@@ -708,8 +709,13 @@ class PhyloApp(App):
         await super().on_event(event)
 
     def _command_key(self, event: events.Key) -> "events.Key | None":
-        """The key to dispatch in place of `event`; None when it was consumed here."""
+        """The key to dispatch in place of `event`; None when it was consumed here. Plain `q` is
+        rewritten to escape below, so a binding of plain q can never fire anywhere."""
         if self._cmd is not None:
+            if event.key.startswith("ctrl+"):    # ctrl+c / ctrl+q ...: cancel, then Textual's own
+                self._cmd = None
+                self._show_cmd()
+                return event
             typed = self._cmd + (event.character or "\0")      # a key with no character cancels
             if event.key != "escape" and "q!".startswith(typed):
                 self._cmd = typed
@@ -1256,9 +1262,10 @@ class PhyloApp(App):
 
     def check_action(self, action: str, parameters: tuple) -> "bool | None":
         """Footer shows only the keys of the current view."""
-        if isinstance(self.screen, (tv_widget.TreeScreen, KeysScreen)) \
-                or type(self.screen).__name__ == "SetupScreen":
-            return False                     # the tree / key list / Setup owns the keys
+        if action != "quit" and (isinstance(self.screen, (tv_widget.TreeScreen, KeysScreen))
+                                 or type(self.screen).__name__ == "SetupScreen"):
+            return False                     # the tree / key list / Setup owns the keys; ctrl+q
+            #                                  (Textual's quit; plain q is never bound) still quits
         f = self.focused
         if action in ("toggle", "select_all", "resubmit", "log", "open_results", "open_tree") \
                 and isinstance(f, SortTable) and f.header:

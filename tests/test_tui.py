@@ -3731,3 +3731,23 @@ def test_q_is_esc_on_tree_and_key_screens(cli, monkeypatch):
             await _press(pilot, "colon", "q", "exclamation_mark")  # quits from the tree too
             assert not app.is_running
     _run(go())
+
+
+def test_ctrl_keys_pass_through_a_colon_command_and_ctrl_q_quits_a_tree(cli):
+    write_results(_cfg())
+    _write_trees(_cfg())
+
+    async def go():
+        from treeview.widget import TreeScreen
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _press(pilot, "colon", "ctrl+c")              # cancelled; Textual's ctrl+c acts
+            assert app._cmd is None and app.is_running
+            await _open_results(app, pilot, "tfs")
+            await _press_t(app, pilot, "#res", 0)
+            assert isinstance(app.screen, TreeScreen)
+            await _press(pilot, "colon", "q", "ctrl+q")         # cancelled, then ctrl+q quits
+            assert app._cmd is None and not app.is_running
+    _run(go())

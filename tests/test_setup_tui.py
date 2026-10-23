@@ -1265,3 +1265,43 @@ def test_place_screen_rows_internal_nodes_between_tips(proj):
             await pilot.pause()
             assert app.screen is scr and pl_file.read_text() == "Ddd\tAaa,Bbb\n"
     _run(go())
+
+
+def test_ctrl_q_quits_from_setup(proj):
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            scr.query_one("#sp-table").focus()
+            await pilot.press("ctrl+q")
+            await pilot.pause()
+            assert not app.is_running
+    _run(go())
+
+
+@pytest.mark.parametrize("lock", ["species_locked", "adopted"])
+def test_enter_on_a_species_row_refused_when_locked(proj, lock):
+    yamledit.update_config({("species",): ["Aaa"], **({("species_locked",): True}
+                                                        if lock == "species_locked"
+                                                        else {("prepare",): "locked"})})
+    before = paths.config_file().read_bytes()
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            t = scr.query_one("#sp-table")
+            t.focus()
+            await pilot.pause()
+            assert scr.focused is t and t.row_count == 2
+            scr._msg = ""
+            await pilot.press("enter", "down", "enter")                   # tick Bbb / untick Aaa
+            await pilot.pause()
+            assert "read-only" in _text(scr, "#blockers")
+            assert [str(t.get_row_at(i)[0]) for i in range(2)] == ["[x]", "[ ]"]
+            scr.action_toggle()                                           # behind the UI too
+            await pilot.pause()
+    _run(go())
+    assert paths.config_file().read_bytes() == before
