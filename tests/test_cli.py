@@ -643,3 +643,16 @@ def test_submit_history_dir_outside_the_project_is_a_clean_error(cli, monkeypatc
     assert r.exit_code == 2 and "ERROR:" in r.output and "outside the project" in r.output
     assert "Traceback" not in r.output and not (tmp_path / "outside").exists()
     assert not dry_dir().exists() or not list(dry_dir().glob("*"))
+
+
+def test_usage_says_druid_not_cli_py(results_tree, monkeypatch, capsys):
+    """bin/druid runs druid/cli.py: the usage lines name druid (Grygoriy, 23/10/2026)."""
+    import runpy
+    import sys
+    for args, want in ((["--help"], "Usage: druid [OPTIONS] COMMAND"),
+                       (["init", "--help"], "Usage: druid init [OPTIONS]")):
+        monkeypatch.setattr(sys, "argv", [str(paths.DRUID_HOME / "druid" / "cli.py"), *args])
+        with pytest.raises(SystemExit) as e:
+            runpy.run_path(str(paths.DRUID_HOME / "druid" / "cli.py"), run_name="__main__")
+        out = capsys.readouterr().out
+        assert e.value.code == 0 and want in out and "cli.py" not in out
