@@ -989,8 +989,8 @@ class PhyloApp(App):
         self.push_screen(SetupScreen(), callback=self._setup_closed)
 
     def _setup_closed(self, to: "str | None" = None) -> None:
-        """Back from Setup (tab / esc: Jobs, shift+tab: Results): druid.yaml is read again, so the
-        edits made there take effect (and the species trees are re-read on the next Results load)."""
+        """Back from Setup (esc on its list: Jobs; tab only moves inside it): druid.yaml is read
+        again, so the edits made there take effect (and the species trees are re-read on the next Results load)."""
         try:                                     # both or neither: raw is written into run dirs
             raw = load_raw()
             cfg = core.load_config(paths.config_file())

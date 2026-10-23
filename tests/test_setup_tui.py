@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 pytest.importorskip("textual")
+from textual.color import Color  # noqa: E402
 
 from druid import core, families, paths, project, setup_state, setup_tui, sptree, tui, yamledit  # noqa: E402
 from tests.conftest import GENEFAM  # noqa: E402
@@ -74,7 +75,7 @@ def _text(scr, wid):
     return str(scr.query_one(wid).render())
 
 
-def test_tab_cycles_to_setup_and_back(cli):
+def test_tab_cycles_to_setup_and_esc_back(cli):
     async def go():
         app = tui.PhyloApp(core.load_config(paths.config_file()), refresh_s=3600)
         async with app.run_test() as pilot:
@@ -90,7 +91,10 @@ def test_tab_cycles_to_setup_and_back(cli):
             assert isinstance(scr, setup_tui.SetupScreen) and app.tab == "setup"
             assert scr.query_one("#sections").has_focus
             yamledit.update_config({("params", "min_seqs"): 7})      # an edit made while in Setup
-            await pilot.press("tab")
+            await pilot.press("tab")                                  # inside Setup: the next pane
+            await pilot.pause()
+            assert app.screen is scr and not scr.query_one("#sections").has_focus
+            await pilot.press("escape", "escape")                     # section -> the list -> Jobs
             await pilot.pause()
             assert not isinstance(app.screen, setup_tui.SetupScreen) and app.tab == "jobs"
             assert app.raw["params"]["min_seqs"] == 7 and app.cfg.params["min_seqs"] == 7
@@ -116,7 +120,7 @@ def test_leaving_setup_with_invalid_config_keeps_raw_and_cfg(cli):
             f.write_text(yaml.safe_dump(bad))
             with pytest.raises(core.ConfigError):
                 core.config_from_raw(paths.read_raw())
-            await pilot.press("tab")
+            await pilot.press("escape")                               # esc on the list: leave
             await pilot.pause()
             assert not isinstance(app.screen, setup_tui.SetupScreen) and app.tab == "jobs"
             assert app.raw is raw0 and app.cfg is cfg0 and "outdir" in app.raw   # neither half-updated
@@ -135,6 +139,55 @@ def test_fresh_project_opens_on_setup(proj):
             for s in setup_tui.SetupScreen.SECTIONS:
                 assert scr.query_one(f"#sec-{s.lower()}")
             assert _text(scr, "#lbl-species").endswith("!")          # nothing ticked yet
+    _run(go())
+
+
+def test_tab_moves_between_setup_panes(proj):
+    """tab: the list -> the section's controls in screen order -> the warnings when shown -> the
+    list; shift+tab the other way; Setup never closes on it (Grygoriy, 23/10/2026)."""
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            lst = scr.query_one("#sections")
+            orange = Color.parse("orange")
+
+            async def walk(key, n):
+                ids = []
+                for _ in range(n):
+                    await pilot.press(key)
+                    await pilot.pause()
+                    assert app.screen is scr
+                    ids.append(scr.focused.id)
+                return ids
+
+            lst.index = setup_tui.SetupScreen.SECTIONS.index("Species")
+            await pilot.pause()
+            assert scr.focused is lst and lst.styles.border_top[1] == orange
+            assert scr.query_one("#content").styles.border_top[1] != orange
+            assert await walk("tab", 3) == ["sp-filter", "sp-table", "sections"]
+            assert await walk("shift+tab", 3) == ["sp-table", "sp-filter", "sections"]
+            await pilot.press("tab")
+            await pilot.pause()                                       # the pane in focus is lit
+            assert scr.query_one("#content").styles.border_top[1] == orange
+            assert lst.styles.border_top[1] != orange
+            lst.focus()
+            lst.index = setup_tui.SetupScreen.SECTIONS.index("Tree")
+            await pilot.pause()
+            assert await walk("tab", 4) == ["tree-base", "tree-source", "tree-missing", "sections"]
+            scr._warnings = ["warning: x"]                           # w shows the warnings box
+            await pilot.press("w")
+            await pilot.pause()
+            assert scr.query_one("#warnings").display
+            assert await walk("shift+tab", 2) == ["warnings", "tree-missing"]
+            assert await walk("tab", 2) == ["warnings", "sections"]
+            await pilot.press("shift+tab")
+            await pilot.pause()
+            assert scr.query_one("#warnings").styles.border_top[1] == orange
+            lst.focus()
+            await pilot.press("escape")                               # esc on the list: Jobs
+            await pilot.pause()
+            assert not isinstance(app.screen, setup_tui.SetupScreen) and app.tab == "jobs"
     _run(go())
 
 
@@ -366,7 +419,14 @@ def test_setup_on_locked_project_writes_nothing(cli, monkeypatch, tmp_path):
             assert all(str(t.get_row_at(i)[0]) == ("[x]" if i == 0 else "[ ]") for i in range(2))
             assert all(scr.query_one(f"#src-{k}").disabled for k in ("name", "dir", "glob", "tax"))
             assert "prepare: locked" in _text(scr, "#sp-reason")
-            await pilot.press("tab")
+            await pilot.press("tab")                                  # read-only: tab still moves
+            await pilot.pause()
+            assert app.screen is scr and scr.focused is scr.query_one("#sections")
+            await pilot.press("shift+tab", "shift+tab")               # back: the table, the filter
+            await pilot.pause()
+            assert scr.focused is scr.query_one("#sp-filter")
+            scr.query_one("#sections").focus()
+            await pilot.press("escape")                               # esc on the list: Jobs
             await pilot.pause()
             assert not isinstance(app.screen, setup_tui.SetupScreen)
     _run(go())

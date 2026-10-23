@@ -145,6 +145,7 @@ class SetupScreen(Screen):
     SetupScreen #sections { width: 18; border: round $primary; }
     SetupScreen #sections:focus { border: round orange; }
     SetupScreen #content { width: 1fr; border: round $primary; }
+    SetupScreen #content:focus-within { border: round orange; }
     SetupScreen #content > * { height: 1fr; }
     SetupScreen #sp-table { height: 1fr; }
     SetupScreen #sp-table:focus { border: round orange; }
@@ -165,12 +166,15 @@ class SetupScreen(Screen):
     SetupScreen RadioSet:focus { border: tall orange; }
     SetupScreen .note { color: $text-muted; height: auto; }
     SetupScreen #blockers { height: auto; max-height: 8; color: $warning; }
-    SetupScreen #warnings { height: auto; max-height: 6; display: none; }
+    SetupScreen #warnings { height: auto; max-height: 8; display: none; border: round $primary; }
+    SetupScreen #warnings:focus { border: round orange; }
     SetupScreen #warn-text { color: $text-muted; }
     """
     BINDINGS = [
-        Binding("tab", "leave('jobs')", "Jobs", priority=True),
-        Binding("shift+tab", "leave('results')", "Results", show=False, priority=True),
+        # tab moves between the panes and controls, never out of Setup: esc on the list leaves
+        # (Grygoriy, 23/10/2026); the app's own tab would switch the first-screen tabs
+        Binding("tab", "focus_move(1)", "next pane"),
+        Binding("shift+tab", "focus_move(-1)", "previous pane", show=False),
         Binding("escape", "back", "back"),
         Binding("space", "toggle", "tick"),
         Binding("a", "tick_all", "tick shown"),
@@ -304,8 +308,8 @@ class SetupScreen(Screen):
         txt = Text()
         txt.append("Jobs │ Results │ ")
         txt.append("[Setup]", style="reverse bold")
-        txt.append("   tab: back to Jobs · enter: open a section · esc q: back · w: warnings · "
-                   ":q! quit", style="dim")
+        txt.append("   tab: next pane · enter: open a section · esc q: back (on the list: to Jobs) · "
+                   "w: warnings · :q! quit", style="dim")
         self.query_one("#setup-tabbar", Static).update(txt)
         self._reload()
         self._refresh()
@@ -682,8 +686,13 @@ class SetupScreen(Screen):
             return isinstance(self.focused, Switch)
         return True
 
-    def action_leave(self, to: str) -> None:
-        self.dismiss(to)
+    def action_focus_move(self, d: int) -> None:
+        """tab / shift+tab: the next / previous focusable widget in screen order (the list, the
+        shown section's controls, the warnings box when shown); disabled ones are skipped."""
+        if d > 0:
+            self.focus_next()
+        else:
+            self.focus_previous()
 
     def action_back(self) -> None:
         """esc: out of the family edit form to the table; from a section back to the list; on the
