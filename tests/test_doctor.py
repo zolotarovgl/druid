@@ -186,3 +186,22 @@ def test_walk_up_finding_nothing_stays_a_skip(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     c = _names(doctor.checks())["project"]
     assert c.ok and c.detail.startswith("SKIP")
+
+
+def test_doctor_proteomes_per_source(results_tree, tmp_path):
+    import yaml
+    cfg, root = results_tree
+    prot, mine = tmp_path / "prot", tmp_path / "mine"
+    for d, f in ((prot, "Mlei_long.pep.fasta"), (mine, "Abcd.faa")):
+        d.mkdir()
+        (d / f).write_text(">x\nM\n")
+    raw = yaml.safe_load((root / "druid.yaml").read_text())
+    raw.update(proteomes_dir=str(prot), proteome_glob="{sp}_long.pep.fasta",
+               sources=[{"name": "mine", "proteomes_dir": str(mine), "proteome_glob": "{sp}.faa"}],
+               species=["Mlei", {"sp": "Abcd", "source": "mine"}, {"sp": "Gone", "source": "mine"}])
+    (root / "druid.yaml").write_text(yaml.safe_dump(raw))
+    c = _names(doctor.checks())["proteomes"]
+    assert not c.ok and "2/3" in c.detail and "missing: Gone" in c.detail and "(mine)" in c.detail
+    raw["species"] = ["Mlei", {"sp": "Abcd", "source": "mine"}]
+    (root / "druid.yaml").write_text(yaml.safe_dump(raw))
+    assert _names(doctor.checks())["proteomes"].ok

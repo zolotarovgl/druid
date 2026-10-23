@@ -594,6 +594,9 @@ def sbatch_all(w: Written, submitted: list[str] | None = None) -> tuple[list[str
     """`submitted`, if given, is filled in place as arrays are queued, so a caller that sees an
     exception mid-way still knows which job ids exist."""
     submitted = [] if submitted is None else submitted
+    from druid import setup_state
+    raw = paths.read_raw()                           # the species list is frozen at the first real submit
+    setup_state.lock_species(raw, core.config_from_raw(raw))
     for i, (res, ids_, ids_file, script) in enumerate(w.arrays):
         try:
             r = _slurm(["sbatch", "--parsable", str(script)])

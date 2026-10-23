@@ -112,23 +112,30 @@ def _project() -> list:
                                            f"hmmpress (druid never writes there)"))
     else:
         out.append(Check(True, "pfam_db", str(pf)))
-    prot = Path(raw.get("proteomes_dir") or "").expanduser()
-    if not prot.is_absolute():                      # relative to the project, like the other paths
-        prot = paths.project_root() / prot
-    sps = list(raw.get("species") or [])
-    if not (prot.is_dir() and os.access(prot, os.R_OK | os.X_OK)):
-        out.append(Check(False, "proteomes", f"not readable: {prot}"))
+    from druid import setup_state
+    srcs = {s.name: s for s in setup_state.sources(raw, paths.project_root())}
+    sel = setup_state.selected(raw)
+    # the default source is always checked; a custom one only when a ticked species uses it
+    used = [srcs[setup_state.DEFAULT]] + [srcs[n] for n in dict.fromkeys(src for _sp, src in sel)
+                                          if n in srcs and n != setup_state.DEFAULT]
+    bad = [s for s in used if not (s.proteomes_dir.is_dir()
+                                   and os.access(s.proteomes_dir, os.R_OK | os.X_OK))]
+    if bad:
+        out.append(Check(False, "proteomes", f"not readable: {', '.join(str(s.proteomes_dir) for s in bad)}"))
     else:
-        glob = raw.get("proteome_glob") or "{sp}_long.pep.fasta"
         try:
-            lost = [s for s in sps if not list(prot.glob(glob.format(sp=s)))]
+            lost = [sp for sp, src in sel
+                    if src not in srcs or setup_state.proteome_file(srcs[src], sp) is None]
         except (KeyError, IndexError, ValueError, NotImplementedError) as e:
+            glob = next(s.glob for s in used)
             out.append(Check(False, "proteomes",
                              f"proteome_glob {glob!r} unusable ({type(e).__name__}: {e}); "
                              f"it is a relative pattern with {{sp}} as the only placeholder"))
         else:
+            where = ", ".join(f"{s.proteomes_dir}" + ("" if s.name == setup_state.DEFAULT else f" ({s.name})")
+                              for s in used)
             out.append(Check(not lost, "proteomes",
-                             f"{len(sps) - len(lost)}/{len(sps)} species have a file in {prot}"
+                             f"{len(sel) - len(lost)}/{len(sel)} species have a file in {where}"
                              + (f"; missing: {', '.join(lost)}" if lost else "")))
     tree = Path(cfg.params.get("SPECIES_TREE") or "")
     try:
