@@ -48,7 +48,7 @@
 - [ ] **Step 2:** run `pytest tests/test_project.py -q` → the three fail.
 - [ ] **Step 3:** copy the file (read-only source), add the SOURCE row, add the keys to the template (one comment line each, house style), extend `ShippedData`/`init` copies.
 - [ ] **Step 4:** `pytest tests/test_project.py tests/test_write_boundary.py -q` → PASS.
-- [ ] **Step 5: commit** `data: ship Xavi's genome_sources (25/10/13) as the default taxonomy; init copies it and the base trees`.
+- [ ] **Step 5: commit** `data: ship Xavi's genome_sources_2025-10-13 as the default taxonomy; init copies it and the base trees`.
 
 ### Task 2: `druid/yamledit.py` — comment-preserving key writes
 
