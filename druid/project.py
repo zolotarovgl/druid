@@ -9,7 +9,9 @@ from druid import core, paths
 
 ShippedData = ("species_tree.binary.newick", "species_tree.newick", "species_info.tsv",
                "Mmus_gene_names.csv")
-TEMPLATE = paths.DRUID_HOME / "druid" / "templates" / "druid.yaml"
+BaseTrees = (("species_tree.binary.newick", "base_tree.binary.newick"),   # shipped -> project copy
+             ("species_tree.newick", "base_tree.newick"))
+TEMPLATE =paths.DRUID_HOME / "druid" / "templates" / "druid.yaml"
 DATA = paths.DRUID_HOME / "druid" / "data"
 
 
@@ -24,6 +26,8 @@ def init(dest: Path, today: str) -> list:
     paths.mkdir(dest / "data", parents=True, exist_ok=True, root=dest)
     out = [paths.write_text(dest / "druid.yaml", TEMPLATE.read_text().format(today=today), root=dest)]
     out += [paths.copy2(DATA / f, dest / "data" / f, root=dest) for f in ShippedData]
+    out.append(paths.copy2(DATA / "genome_sources.tsv", dest / "data" / "genome_sources.tsv", root=dest))
+    out += [paths.copy2(DATA / src, dest / "data" / name, root=dest) for src, name in BaseTrees]
     out.append(paths.write_text(dest / "data" / "families.csv", "", root=dest))
     return out
 

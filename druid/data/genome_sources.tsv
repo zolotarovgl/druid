@@ -1,0 +1,476 @@
+Hsap	Homo sapiens	1	1	1	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Mammalia	Ensembl 102	1	MT	NA
+Mondom	Monodelphis domestica	1	1	1	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Mammalia	Ensembl 102	1	MT	NA
+Mmus	Mus musculus	1	1	1	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Mammalia	Ensembl 102	1	MT	NA
+Ratnor	Rattus norvegicus	1	1	1	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Mammalia	Ensembl 102	1	MT	NA
+Ornana	Ornithorhynchus anatinus	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Mammalia	Ensembl 102	0		
+Xentro	Xenopus tropicalis	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Amphibia	Ensembl 102	1	MT	NA
+Xenlae	Xenopus laevis	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Amphibia	NCBI GCA_001663975.1 Xenopus_laevis_v2 (aka Xenbase 10.0)	0		
+Anocar	Anolis carolinensis	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Reptilia	Ensembl 102	0		
+Galgal	Gallus gallus	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Dinosauria	Ensembl 102	0		
+Taegut	Taeniopygia guttata	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Dinosauria	Ensembl 102	0		
+Drer	Danio rerio	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Actinopterygii	Ensembl 102	0		
+Lepocu	Lepisosteus oculatus	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Actinopterygii	Ensembl 102	0		
+Calmil	Callorhinchus milii	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Chondrichthyes	Ensembl 102	0		
+Latcha	Latimeria chalumnae	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Coelacanthiformes	Ensembl 102	0		
+Petmar	Petromyzon marinus	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Cyclostomata	NCBI GCF_010993605.1 kPetMar1.pri ; Previosuly: Ensembl 102	0		
+Eptbur	Eptatretus burgeri	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Vertebrata, Cyclostomata	NCBI GCA_900186335.2 Eburgeri_3.2	0		
+Cint	Ciona intestinalis	1	1	1	Metazoa, Bilateria, Deuterostomia, Chordata, Tunicata, Ascidiacea	Ensembl 102	1	MT	NA
+Halaur	Halocynthia aurantium	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Tunicata, Ascidiacea	ANISEED CNRS DB https://www.aniseed.cnrs.fr/aniseed/download/download_data	0		
+Botlea	Botrylloides leachii	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Tunicata, Ascidiacea	ANISEED CNRS DB https://www.aniseed.cnrs.fr/aniseed/download/download_data assembly SBv3 annot v5	0		
+Stycla	Styela clava	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Tunicata, Ascidiacea	NCBI GCF_013122585.1 ASM1312258v2	0		
+Oikdio	Oikopleura dioica	1	1	1	Metazoa, Bilateria, Deuterostomia, Chordata, Tunicata, Appendicularia	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_907165135.1/ 	0		
+Bflo	Branchiostoma floridae, S238N-H82	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Cephalochordata	NCBI GCA_000003815.2 Bfl_VNyyK, strain S238N-H82	0		
+Bflz	Branchiostoma floridae, bjbf	1	1	1	Metazoa, Bilateria, Deuterostomia, Chordata, Cephalochordata	NCBI GCA_015852565.1, haplotype from hybrid bjbf isolate	0		
+Brabel	Branchiostoma belcheri	1	1	0	Metazoa, Bilateria, Deuterostomia, Chordata, Cephalochordata	NCBI GCF_001625305.1	0		
+Bralan	Branchiostoma lanceolatum	1	1	1	Metazoa, Bilateria, Deuterostomia, Chordata, Cephalochordata	NCBI GCA_927797965.1; v3	0		
+Spur	Strongylocentrotus purpuratus	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Echinoidea	NCBI GCA_000002235.4 Spur_5.0	1	NC_001453.1	NA
+Pliv	Paracentrotus lividus	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Echinoidea	NCBI GCA_940671915.1; formerly provided by Lorenza Rusciano	0		
+Lytvar	Lytechinus variegatus	1	1	1	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Echinoidea	NCBI GCA_018143015.1 Lvar_3.0	0		
+Lytpic	Lytechinus pictus	1	1	1	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Echinoidea	NCBI GCF_037042905.1, https://test.echinobase.org/echinobase/static-echinobase/ftpDatafiles.jsp	0		
+Helery	Heliocidaris erythrogramma	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Echinoidea	NCBI GCA_025617745.1, https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_025617745.1/	0		
+Heltub	Heliocidaris tuberculata	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Echinoidea	NCBI GCA_036244855.1, https://cell-innovation.nig.ac.jp/cgi-bin/Tree_public/Tree_annot_download.cgi	0		
+Temree	Temnopleurus reevesii	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Echinoidea	NCBI GCA_025618425.1, https://datadryad.org/stash/dataset/doi:10.5061/dryad.sj3tx966v	0		
+	Echinometra lucunter	0	0	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Echinoidea	NCBI GCF_037042905.1, https://test.echinobase.org/echinobase/static-echinobase/ftpDatafiles.jsp	0		
+Diaset	Diadema setosum	1	1	1	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Acroechinoidea	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_964275005.1/ 	0		
+Apla	Acanthaster planci	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Asteroidea	NCBI GCA_001949145.1 OKI-Apl_1.0	0		
+Astrub	Asterias rubens	1	1	1	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Asteroidea	NCBI GCF_902459465.1_eAstRub1.3	0		
+Astamu	Asterias amurensis	1	1	1	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Asteroidea	NCBI GCA_032118995.1, https://figshare.com/articles/dataset/Chromosome-level_genome_assembly_of_em_Asterias_amurensis_em_/23538585/2	0		
+Patpec	Patiria pectinifera	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Asteroidea	NCBI GCA_029964075.1, https://figshare.com/articles/dataset/Re_classified_repeats_gff3/23118647/2	0		
+Patmin	Patiria miniata	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Asteroidea	NCBI GCF_015706575.1, https://test.echinobase.org/echinobase/static-echinobase/ftpDatafiles.jsp	0		
+Apojap	Apostichopus japonicus	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Holothuroidea	NCBI GCA_002754855.1_ASM275485v1	0		
+Holgla	Holothuria glaberrima	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Holothuroidea	NCBI GCA_009936505.3, http://ryanlab.whitney.ufl.edu/genomes/Holothuria_glaberrima/downloads/	0		
+Holsca	Holothuria scabra	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Holothuroidea	NCBI GCA_037179385.1, https://figshare.com/articles/dataset/Genome_data_of_the_tropical_sea_cucumber_Holothuria_scabra_/24771183	0		
+Holleu	Holothuria leucospilota	1	1	1	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Holothuroidea	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_029531755.1/ 	0		
+Annjap	Anneissia japonica	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Crinoidea	NCBI GCF_011630105.1_ASM1163010v1	0		
+Antmed	Antedon mediterranea	1	1	1	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Crinoidea	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_964355755.1/ 	0		
+Ophsar	Ophiura sarsii	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Ophiuroidea	NCBI GCA_035610835.1, https://figshare.com/articles/dataset/Ophiura_sarsii_genome_annotation/24912420	0		
+Ampfil	Amphiura filiformis	1	1	1	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Echinodermata, Ophiuroidea	NCBI GCA_039555335.1, https://zenodo.org/records/10785182	0		
+Skow	Saccoglossus kowalevskii	1	1	0	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Hemichordata	NCBI GCA_000003605.1 Skow_1.1	0		
+Ptyfla	Ptychodera flava	1	1	1	Metazoa, Bilateria, Deuterostomia, Ambulacraria, Hemichordata	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_041260155.1/ ; FORMERLY: OIST v3, https://marinegenomics.oist.jp/acornworm/viewer/download?project_id=33	0		
+Hmia	Hofstenia miamia	1	1	0	Metazoa, Bilateria, Xenacoelomorpha	Ensembl Metazoa 49 HmiaM1	0		
+Xboc	Xenoturbella bocki	1	0	0	Metazoa, Bilateria, Xenacoelomorpha	Manually produced Xboc_FINAL_PROTEINS.fasta file	0		
+Symros	Symsagittifera roscoffensis	0	1	1	Metazoa, Bilateria, Xenacoelomorpha	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_963678635.1/ 	0		
+	Convolutriloba macropyga 	0	1	1	Metazoa, Bilateria, Xenacoelomorpha	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_964194025.3/ 	0		
+Dpul	Daphnia pulex	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Crustacea, Branchiopoda	JGI v1.1 20110204	0		
+Lepsal	Lepeophtheirus salmonis	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Crustacea, Copepoda	Ensembl Metazoa 49, LSalAtl2s	0		
+Polpol	Pollicipes pollicipes	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Crustacea, Cirripedia	NCBI GCF_011947565.2_Ppol_2	0		
+Penmon	Penaeus monodon	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Crustacea, Decapoda	NCBI GCF_015228065.1_NSTDA_Pmon_1	0		
+	Paralithodes platypus	0	0	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Crustacea, Decapoda	NCBI GCA_013283005.1 ASM1328300v1 ONLY ASSEMBLY: https://datadryad.org/stash/dataset/doi:10.5061/dryad.jm63xsj6c	0		
+Apimel	Apis mellifera	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Hymenoptera	Ensembl Metazoa 49, Amel_4.5	0		
+Nasvit	Nasonia vitripennis	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Hymenoptera	Ensembl Metazoa 49, Nvit_2.1	0		
+Anogam	Anopheles gambiae	1	1	1	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Diptera	Ensembl Metazoa 49 PEST AgamP4	1	Mt	NA
+Aedaeg	Aedes aegypti	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Diptera	Ensembl Metazoa 49 LVP_AGWG AaegL5	0		
+Culqui	Culex quinquefasciatus	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Diptera	Ensembl Metazoa 49 Johannesburg CpipJ2	0		
+Dmel	Drosophila melanogaster	1	1	1	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Diptera	Ensembl Metazoa 49 BDGP6.28	1	mitochondrion_genome	NA
+Luccup	Lucilia cuprina	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Diptera	Ensembl Metazoa 49, ASM118794v1	0		
+Glomor	Glossina morsitans	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Diptera	Ensembl Metazoa 49, GmorY1.8	0		
+Musdom	Musca domestica	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Diptera	Ensembl Metazoa 49, MdomA1.3	0		
+Lutlon	Lutzomyia longipalpis	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Diptera	Ensembl Metazoa 49 Jacobina LlonJ1.4	0		
+Phlpap	Phlebotomus papatasi	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Diptera	Ensembl Metazoa 49 Israel PpapI1.4	0		
+Tcas	Tribolium castaneum	1	1	1	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Coleoptera	NCBI GCF_031307605.1_icTriCast1.1; formerly: Ensembl Metazoa 49, Tcas5.2	1	NC_003081.2	NA
+Bommor	Bombyx mori	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Lepidoptera	Ensembl Metazoa 49, ASM15162v1	0		
+Zoonev	Zootermopsis nevadensis	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Isoptera	Ensembl Metazoa 49, ZooNev1.0	0		
+Rhopro	Rhodnius prolixus	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Insecta, Hemiptera	Ensembl Metazoa 49, RproC3.3	0		
+Strmar	Strigamia maritima	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Myriapoda	Ensembl Metazoa 49, Smar1	0		
+Ixosca	Ixodes scapularis	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Arachnida	Vectorbase IscaW1.6	0		
+Lpol	Limulus polyphemus	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Arachnida	NCBI GCF_000517525.1	0		
+Cscu	Centruroides sculpturatus	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Arachnida	NCBI GCF_000671375.1_Cexi_2.0	0		
+	Mesobuthus martensii	0	0	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Arachnida	http://lifecenter.sgst.cn/main/en/scorpion.jsp	0		
+Stemim	Stegodyphus mimosarum	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Arachnida	NCBI GCA_000611955.2_Stegodyphus_mimosarum_v1	0		
+Orccin	Orchesella cincta	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Collembola	Ensembl Metazoa 49, ASM171814v1	0		
+Folcan	Folsomia candida	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Arthropoda, Collembola	Ensembl Metazoa 49 ASM221717v1	0		
+	Euperipatoides rowelli	0	0	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Onychophora	UNAVAILABLE || NCBI GCA_003024985.2 Erow_1.0 || GFF UNAVAILABLE || https://www.hgsc.bcm.edu/arthropods/velvet-worm-genome-project	0		
+	Ooperipatellus sp.	0	0	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Onychophora	PRJNA523702 (ref from Laumer 2019)	0		
+	Peripatoides sp.	0	0	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Onychophora	PRJNA523703 (ref from Laumer 2019)	0		
+	Peripatopsis overbergiensis	0	0	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Onychophora	SRR1145776 (ref from Laumer 2019)	0		
+	Peripatus sp.	0	0	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Onychophora	PRJNA523712 (ref from Laumer 2019)	0		
+Hduj	Hypsibius dujardini	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Tardigrada	NCBI GCA_002082055.1_nHd_3.1	0		
+Ramvar	Ramazzottius varieornatus	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Tardigrada	NCBI GCA_001949185.1_Rvar_4.0	0		
+Cele	Caenorhabditis elegans	1	1	1	Metazoa, Bilateria, Protostomia, Ecdysozoa, Nematoda	Ensembl Metazoa 49 WBcel235	1	MtDNA	NA
+Brumal	Brugia malayi	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Nematoda	NCBI GCF_000002995.3_ASM299v2	0		
+Trispi	Trichinella spiralis	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Nematoda	NCBI GCF_000181795.1_Trichinella_spiralis-3.7.1	0		
+Romcul	Romanomermis culicivorax	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Nematoda	Nematodes DB http://nematodes.org/genomes/romanomermis_culicivorax/ assembly 2.0 annotation 2.0.1	0		
+Pricau	Priapulus caudatus	1	1	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Scalidophora, Priapulida	GCF_000485595.1 Priapulus caudatus-5.0.1	0		
+	Meiopriapulus fijiensis	0	0	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Scalidophora, Priapulida	PRJNA523695 (ref from Laumer 2019)	0		
+	Tubiluchus corallicola	0	0	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Scalidophora, Priapulida	PRJNA523693 (ref from Laumer 2019)	0		
+	Echinoderes dujardinii	0	0	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Scalidophora, Kinorhyncha	PRJNA523695 (ref from Laumer 2019)	0		
+	Pycnophyes kielensis	0	0	0	Metazoa, Bilateria, Protostomia, Ecdysozoa, Scalidophora, Kinorhyncha	SRR1141803 (ref from Laumer 2019)	0		
+Ctel	Capitella teleta	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Annelida	NCBI GCA_000328365.1_Capca1	0		
+Helrob	Helobdella robusta	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Annelida	NCBI GCF_000326865.1_Helobdella_robusta_v1.0	0		
+Dimgyr	Dimorphilus gyrociliatus	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Annelida	NCBI GCA_904063045.1	0		
+	Hydroides elegans	0	0	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Annelida	InvasionDB http://www.insect-genome.com/invasiondb/download/species_download.php?species_name=Hydroides_elegans	0		
+Owefus	Owenia fusiformis	1	1	1	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Annelida	Liang et al. 2022, https://github.com/ChemaMD/OweniaGenome	0		
+Linana	Lingula anatina	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Brachiopoda, Linguliformea	NCBI GCF_001039355.2_LinAna2.0	0		
+Phoaus	Phoronis australis	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Phoronida	OIST v2, https://marinegenomics.oist.jp/pau_v2/viewer/info?project_id=51	0		
+Dicjap	Dicyema japonicum	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Dicyemida	https://marinegenomics.oist.jp/dicyemid/viewer/download?project_id=77	0		
+Aplcal	Aplysia californica	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Gastropoda	NCBI GCF_000002075.1_AplCal3.0	0		
+Elychl	Elysia chlorotica	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Gastropoda	NCBI GCA_003991915.1_ElyChl2	0		
+	Arion vulgaris	0	0	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Gastropoda		0		
+Pomcan	Pomacea canaliculata  	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Gastropoda	NCBI GCF_003073045.1_ASM307304v1	0		
+Lgig	Lottia gigantea	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Gastropoda	NCBI GCF_000327385.1_Helro1	0		
+Biogla	Biomphalaria glabrata	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Gastropoda	NCBI GCA_002082055.1_nHd_3.1	0		
+Octbim	Octopus bimaculoides	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Cephalopoda	NCBI GCF_001194135.1_Octopus_bimaculoides_v2_0	0		
+Octsin	Octopus sinensis	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Cephalopoda	NCBI GCF_006345805.1_ASM634580v1	0		
+Naupom	Nautilus pompilius	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Cephalopoda	annotation from CNCB GWHBECW00000000, genome from NCBI GCA_018389105.1_ASM1838910v1	0		
+Seppha	Sepia pharaonis	1	0	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Cephalopoda	NCBI peptides only from IPG database: https://www.ncbi.nlm.nih.gov/ipg?term=txid158019[Organism:noexp]	0		
+Eupsco	Euprymna scolopes	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Cephalopoda	https://metazoa.csb.univie.ac.at/data/v2/	0		
+	Hapalochlaena maculosa	0	0	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Cephalopoda	https://academic.oup.com/gigascience/article/9/11/giaa120/5974087	0		
+Argarg	Argonauta argo	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Cephalopoda	https://academic.oup.com/gbe/article/14/11/evac140/6730389	0		
+Ampfan	Amphioctopus fangsiao	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Cephalopoda	https://bmcbiol.biomedcentral.com/articles/10.1186/s12915-022-01500-2	0		
+	Architeuthis dux	0	0	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Cephalopoda	https://www.ncbi.nlm.nih.gov/data-hub/genome/GCA_006491835.1/	0		
+Cgig	Crassostrea gigas	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Bivalvia	NCBI GCF_902806645.1_cgigas_uk_roslin_v1	0		
+Pecmax	Pecten maximus	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Bivalvia	NCBI GCF_902652985.1_xPecMax1.1	0		
+Mytcor	Mytilus coruscus	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Bivalvia	NCBI GCA_011752425.2_MCOR1.1	0		
+Acagra	Acanthopleura granulata	1	0	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Mollusca, Polyplacophora	BOX: https://alabama.app.box.com/s/1hsryfff61i01qrljyasrjnu8j7qg2nj (future: Dryad)	0		
+Notgen	Notospermus geniculatus	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Nemertea	OIST v2, https://marinegenomics.oist.jp/nge_v2/viewer/info?project_id=52	0		
+Linlon	Lineus longissimus	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Nemertea	NCBI GCA_910592395.2, Ensembl annotation 2022_03	0		
+Adivag	Adineta vaga	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Rotifera	Ensembl Metazoa 49, AMS_PRJEB1171_v1	0		
+Bracal	Brachionus calyciflorus 	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Rotifera	GenBank GCA_905250105.1	0		
+Brapli	Brachionus plicatilis 	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Rotifera	GenBank GCA_003710015.1	0		
+Intlin	Intoshia linei	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Orthonectida	NCBI GCA_001642005.1_IntLin1.0	0		
+Bugner	Bugula neritina	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Bryozoa	NCBI GCA_010799875.2_ASM1079987v2	0		
+Smed	Schmidtea mediterranea	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Platyhelminthes	Planmine DB, assembly SMESG1, annotation Smes_g4-high confidence; ttp://planmine.mpi-cbg.de/planmine/; previous dataset is a transcriptome (smed6)	0		
+Dugjap	Dugesia japonica	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Platyhelminthes	Planarian JP DB http://planarian.jp/download.html	0		
+Maclig	Macrostomum lignano	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Platyhelminthes	NCBI GCA_002269645.1_Mlig_3_7	0		
+Sman	Schistosoma mansoni	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Platyhelminthes	NCBI GCF_000237925.1_ASM23792v2	0		
+Emul	Echinoccocus multilocularis	1	1	0	Metazoa, Bilateria, Protostomia, Lophotrochozoa, Platyhelminthes	NCBI GCA_000469725.3_EMULTI002	0		
+Nvec	Nematostella vectensis	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Actiniaria, Edwardsiidae	chromosomal assembly jaNemVect1.1, GCF_932526225.1; Combined JGI + Vienna annotation (https://doi.org/10.1016/j.cell.2018.05.019)	1	OW052000.1	NA
+	Edwardsiella lineata	0	0	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Actiniaria, Edwardsiidae		0		
+Scocal	Scolanthus callimorphus	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Actiniaria, Edwardsiidae	Stowers Institute SIMRBASE version Scal100_v1.20200813	0		
+Actieq	Actinia equina	1	1	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Actiniaria, Actiniidae	Reef Genomics v1 http://aequ.reefgenomics.org/download/ ; NCBI GCA_011057435.1	0		
+Actite	Actinia tenebrosa	1	1	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Actiniaria, Actiniidae	NCBI GCF_009602425.1 https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_009602425.1/ 	0		
+Acticb	Actinostola sp. cb2023	1	1	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Actiniaria, Actiniidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_033675265.1/ 	0		
+Antxan	Anthopleura xanthogrammica	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Actiniaria, Actiniidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Anthopleura_xanthogrammica/GCA_964019055.1/ 	0		
+Metsen	Metridium senile	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Actiniaria, Acuticulata, Metridiidae	NCBI GCA_949775045.1, jaMetSeni4.1 DTOL; in-home annotation	1	OX459111.1	NA
+Dialin	Diadumene lineata	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Actiniaria, Acuticulata, Diadumenidae	NCBI GCA_918843875.1, jaDiaLine6.1 DTOL; in-home annotation	1	OU974085.1	NA
+Exapal	Exaiptasia diaphana	1	1	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Actiniaria, Acuticulata, Aiptasiidae	NCBI GCF_001417965.1_Aiptasia_genome_1.1	0	JACAZJ010008919.1	NA
+Adig	Acropora digitifera	1	1	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Acroporidae	NCBI GCF_000222465	0		
+Amil	Acropora millepora	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Acroporidae	NCBI assembly: GCA_013753865.1 (v2.1); annotation from Fuller 2020 (via https://drive.google.com/file/d/1ww7rbr6v8676Mul8OxoHkTp3fau0h27F/view?usp=sharing)	0		
+Acrcer	Acropora cervicornis	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Acroporidae	NCBI GCA_964034985.1 jaAcrCerv1.1; in-home annotation	0		
+Acrpal	Acropora palmata	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Acroporidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_964030605.3/ ; FORMERLY IN-HOME ANNOTATION	0		
+Acrmur	Acropora muricata	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Acroporidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_036669905.1/ 	0		
+Moncap	Montipora capitata	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Acroporidae	NCBI GCA_949126865.1 jaMonCapi2.1; in-home annotation	0		
+Monfol	Montipora foliosa	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Acroporidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_036669935.1/	0		
+Moncpr	Montipora capricornis	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Acroporidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_036669925.1/ 	0		
+Gfas	Galaxea fascicularis	1	1	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Euphylliidae	Reef Genomics v1 http://gfas.reefgenomics.org/download/	0		
+Porlut	Porites lutea	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Poritidae	NCBI GCA_958299795.1, annotated from ERR12708749; in-home annotation	0		
+Spis	Stylophora pistillata	1	1	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Pocilloporidae	Combination: NCBI GCA_002571385.1 Stylophora pistillata v1 + reefgenomics (see Methods from Levy et al Cell 2021)	0		
+Pocdam	Pocillopora damicornis	1	1	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Pocilloporidae	NCBI GCF_003704095.1_ASM370409v1	0		
+Pocver	Pocillopora verrucosa	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Pocilloporidae	NCBI GCA_036669915.2_ASM3666991v2, annotated from SRR11880672; in-home annotation	0		
+Ocupat	Oculina patagonica	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Oculinidae	Own, unpublished; in-home annotation	0		
+Ocuarb	Oculina arbuscula	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Oculinidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_964656845.1/; in-home annotation	0		
+Fspp	Fungia sp.	1	1	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Fungiidae	Reef Genomics v1 http://ffun.reefgenomics.org/download/	0		
+Sidrad	Siderastrea radians	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Siderastreidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Siderastrea_radians/GCA_964017195.1/	0		
+Gasp	Coelastrea aspera	1	1	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Merulinidae	Reef Genomics v1 http://gasp.reefgenomics.org/download/; formerly Goniastrea aspera	0		
+Orbfav	Orbicella faveolata	1	1	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Merulinidae	NCBI GCF_002042975.1	0		
+Lopper	Lophelia pertusa	1	1	0	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Caryophylliidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_029204205.1/ 	0		
+Miclor	Micromussa lordhowensis	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Lobophylliidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Micromussa_lordhowensis/GCA_964020085.1/ 	0		
+Meamea	Meandrina meandrites	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Meandrinidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Meandrina_meandrites/GCA_963693305.1/	0		
+Blawel	Blastomussa wellsi	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Scleractinia, Blastomussa	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Blastomussa_wellsi/GCA_947652115.1/	0		
+Ricflo	Ricordea florida	1	1	1	Metazoa, Cnidaria, Anthozoa, Hexacorallia, Corallimorpharia, Ricordeidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Ricordea_florida/GCA_949710055.1/ 	0		
+Dgig	Dendronephthya gigantea	1	1	0	Metazoa, Cnidaria, Anthozoa, Octocorallia, Malacalcyonacea, Nephtheidae	NCBI GCF_004324835.1_DenGig_1.0	0		
+Xesp	Xenia sp.	1	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Malacalcyonacea, Xeniidae	Carnegie Coral & Marine Organisms database, https://cmo.carnegiescience.edu/data/ 	0		
+Murmur	Muricea muricata	1	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Malacalcyonacea, Plexauridae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Muricea_muricata/GCA_963855995.1/ 	0		
+	Eunicea knighti	0	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Malacalcyonacea, Plexauridae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_965233905.1/ 	0		
+Lepsar	Leptogorgia sarmentosa	1	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Malacalcyonacea, Gorgoniidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Leptogorgia_sarmentosa/GCA_964658295.1/ 	0		
+	Gorgonia ventalina	0	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Malacalcyonacea, Gorgoniidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_964194065.1/ 	0		
+Eunver	Eunicella verrucosa	1	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Malacalcyonacea, Eunicellidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Eunicella_verrucosa/GCA_964289765.2/	0		
+Euncav	Eunicella cavolini	1	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Malacalcyonacea, Eunicellidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Eunicella_cavolini/GCA_965177985.1/ 	0		
+Cavobe	Cavernularia obesa	1	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Scleralcyonacea, Coralliidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_041682505.1/ ; In-home annotation	0		
+Hemimp	Hemicorallium imperiale	1	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Scleralcyonacea, Coralliidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_045791825.1/ ; In-home annotation	0		
+	Corallium rubrum	0	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Scleralcyonacea, Coralliidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_964265095.1/ 	0		
+	Veretillum cynomorium	0	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Scleralcyonacea, Veretillidae	DTOL, Ensembl, Aquatic Symbiosis	0		
+Calgra	Callogorgia gracilis	1	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Scleralcyonacea, Primnoidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Callogorgia_gracilis/GCA_964204845.1/ 	0		
+Ptegri	Pteroeides griseum	1	1	1	Metazoa, Cnidaria, Anthozoa, Octocorallia, Scleralcyonacea, Pennatulidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Pteroeides_griseum/GCA_964659595.1/ 	0		
+Hvul	Hydra vulgaris	1	1	1	Metazoa, Cnidaria, Medusozoa, Hydrozoa, Anthoathecata, Hydridae	NIH https://research.nhgri.nih.gov/hydra/	0		
+Hydrsy	Hydractinia symbiolongicarpus 	1	1	1	Metazoa, Cnidaria, Medusozoa, Hydrozoa, Anthoathecata, Hydractiniidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_029227915.1/; in-home annotation	0		
+Turdoh	Turritopsis dohrnii	1	1	0	Metazoa, Cnidaria, Medusozoa, Hydrozoa, Anthoathecata, Oceaniidae	Kazusa turritopsis.kazusa.or.jp, v2.0.1	0		
+Chem	Clytia hemisphaerica	1	1	0	Metazoa, Cnidaria, Medusozoa, Hydrozoa, Leptothecata, Clytiidae	MARIMBA Database http://marimba.obs-vlfr.fr/downloads/	0		
+Aaur	Aurelia aurita	1	1	0	Metazoa, Cnidaria, Medusozoa, Scyphozoa, Semaeostomeae	OIST ABSv1 (Atlantic strain, Baltic isolate) https://marinegenomics.oist.jp/aurelia_aurita/viewer/download?project_id=69	0		
+Aurdaw	Aurelia sp. 4 Dawson et al 2005	1	1	1	Metazoa, Cnidaria, Medusozoa, Scyphozoa, Semaeostomeae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Aurelia_sp_4_Dawson_et_al_2005/GCA_964019985.1/ 	0		
+Sanmal	Sanderia malayensis	1	1	0	Metazoa, Cnidaria, Medusozoa, Scyphozoa, Semaeostomeae	NCBI GCA_013076295.1_ASM1307629v1 / annotation: https://github.com/nongwy/JellyfishGenomeData/blob/master/Sanderia_malayensis.gff3.gz	0		
+Pelnoc	Pelagia noctiluca	1	1	1	Metazoa, Cnidaria, Medusozoa, Scyphozoa, Semaeostomeae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Pelagia_noctiluca/GCA_963924455.1 	0		
+Nemnom	Nemopilema nomurai	1	1	0	Metazoa, Cnidaria, Medusozoa, Scyphozoa, Rhizostomeae	Jellyfish Genome DB http://www.jellyfishgenome.com/%27%27Nemopilema_nomurai%27%27_genome	0		
+Rhoesc	Rhopilema esculentum	1	1	1	Metazoa, Cnidaria, Medusozoa, Scyphozoa, Rhizostomeae	NCBI GCA_013076305.1_ASM1307630v1 / annotation: https://github.com/nongwy/JellyfishGenomeData (scaffolds need to be mapped to NCBI names)	0		
+Maspap	Mastigias papua	1	1	1	Metazoa, Cnidaria, Medusozoa, Scyphozoa, Rhizostomeae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Mastigias_papua/GCA_964019165.1/ 	0		
+Catmos	Catostylus mosaicus	1	1	1	Metazoa, Cnidaria, Medusozoa, Scyphozoa, Rhizostomeae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Catostylus_mosaicus/GCA_964019065.1/ 	0		
+Casssp	Cassiopea sp. PORT0000214	1	1	1	Metazoa, Cnidaria, Medusozoa, Scyphozoa, Rhizostomeae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Cassiopea_sp_port0000214/GCA_964204825.1/ 	0		
+	Pseudorhiza haeckeli	0	1	1	Metazoa, Cnidaria, Medusozoa, Scyphozoa, Rhizostomeae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_964026355.1/ 	0		
+	Cassiopea ornata	0	1	1	Metazoa, Cnidaria, Medusozoa, Scyphozoa, Rhizostomeae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_964304725.1/ 	0		
+	Cassiopea xamachana	0	1	1	Metazoa, Cnidaria, Medusozoa, Scyphozoa, Rhizostomeae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_964235115.1/ 	0		
+Morvir	Morbakka virulenta	1	1	0	Metazoa, Cnidaria, Medusozoa, Cubozoa	OIST MOR05 https://marinegenomics.oist.jp/morbakka_virulenta/ 	0		
+	Alatinidae sp. Z8VKAUB7J3	0	0	0	Metazoa, Cnidaria, Medusozoa, Cubozoa	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_010016025.2/ 	0		
+Alaala	Alatina alata	1	0	0	Metazoa, Cnidaria, Medusozoa, Cubozoa	NCBI GEUJ01.1	0		
+Chiyam	Chironex yamaguchii	1	0	0	Metazoa, Cnidaria, Medusozoa, Cubozoa	NCBI GHAX01.1	0		
+Copsiv	Copula sivickisi	1	0	0	Metazoa, Cnidaria, Medusozoa, Cubozoa	NCBI GHBG01.1	0		
+Tricys	Tripedalia cystophora	1	0	0	Metazoa, Cnidaria, Medusozoa, Cubozoa	NCBI GHAQ01.1	0		
+Haloct	Haliclystus octoradiatus 	1	1	1	Metazoa, Cnidaria, Medusozoa, Staurozoa	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_916610825.1/; in-home annotation	0		
+Calcru	Calvadosia cruxmelitensis	1	0	0	Metazoa, Cnidaria, Medusozoa, Staurozoa	NCBI HAHC01.1	0		
+Cracon	Craterolophus convolvulus	1	0	0	Metazoa, Cnidaria, Medusozoa, Staurozoa	NCBI HAGZ01.1	0		
+Haliau	Haliclystus auricula	1	0	0	Metazoa, Cnidaria, Medusozoa, Staurozoa	NCBI HAHA01.1	0		
+Lucqua	Lucernaria quadricornis	1	0	0	Metazoa, Cnidaria, Medusozoa, Staurozoa	NCBI HAHD01.1	0		
+Thekit	Thelohanellus kitauei	1	1	0	Metazoa, Cnidaria, Myxozoa	NCBI GCA_000827895.1_ASM82789v1	0		
+Tadh	Trichoplax adhaerens H1	1	1	1	Metazoa, Placozoa	Ensembl Metazoa 49	0		
+TrH2	Trichoplax sp. H2	1	1	0	Metazoa, Placozoa	NCBI GCA_003344405.1_TrispH2_1.0	0		
+Hhon	Hoilungia hongkongensis H13	1	1	0	Metazoa, Placozoa	Bitbucket: https://bitbucket.org/molpalmuc/hoilungia-genome/src/master/	0		
+HoiH04	Hoilungia sp. H4	1	1	0	Metazoa, Placozoa	Genome from Laumer et al. 2018; GenomeThreader annotation	0		
+HoiH06	Cladtertia sp. H6	1	1	0	Metazoa, Placozoa	Genome from Laumer et al. 2018; GenomeThreader annotation	0		
+HoiH23	Cladtertia collaboinventa	1	1	0	Metazoa, Placozoa	Bitbucket: https://bitbucket.org/molpalmuc/hoilungia-genome/src/master/	0		
+HoiH11	Hoilungia sp. H11	1	1	0	Metazoa, Placozoa	Genome from Laumer et al. 2018; GenomeThreader annotation	0		
+Mlei	Mnemiopsis leidyi	1	1	1	Metazoa, Ctenophora, Tentaculata, Lobata	NIH https://research.nhgri.nih.gov/mnemiopsis/, version 2.3	0		
+Bolmic	Bolinopsis microptera	1	1	1	Metazoa, Ctenophora, Tentaculata, Lobata	NCBI genome GCA_026151205.1; FORMERLY IN-HOME ANNOTATION	0		
+Bolinf	Bolinopsis infundibulum	1	0	0	Metazoa, Ctenophora, Tentaculata, Lobata	Neurobase (Moroz 2014)	0		
+Plebac	Pleurobrachia bachei	1	1	0	Metazoa, Ctenophora, Tentaculata, Lobata	DNA-ZOO v1.1 based on NCBI GCA_000695325.1 + annotation based on SRS173516	0		
+Horcal	Hormiphora californiensis	1	1	0	Metazoa, Ctenophora, Tentaculata, Lobata	Genome v1, annotation v93; https://github.com/conchoecia/hormiphora/releases/tag/Hcv1.av93zen; BEWARE, misformatted GFF! Copying peptides manually;	0		
+Berova	Beroe ovata	1	1	0	Metazoa, Ctenophora, Nuda, Beroida	BovaDB 1.4, Ryan et al http://ryanlab.whitney.ufl.edu/bovadb/	0		
+Beraby	Beroe abyssicola	1	0	0	Metazoa, Ctenophora, Nuda, Beroida	Neurobase (Moroz 2014)	0		
+Berfor	Beroe forskalii	1	1	0	Metazoa, Ctenophora, Nuda, Beroida	NCBI GCA_011033025.1; in-home annotation with Helixer (Grisha)	0		
+Vmul	Vallicula multiformis	1	0	0	Metazoa, Ctenophora, Tentaculata, Platyctenida	Neurobase (Moroz 2014) & Simion 2017 https://neurobase.rc.ufl.edu/pleurobrachia/download	0		
+Coeast	Coeloplana astericola	1	0	0	Metazoa, Ctenophora, Tentaculata, Platyctenida	Neurobase (Moroz 2014)	0		
+Coemet	Coeloplana meteoris	1	0	0	Metazoa, Ctenophora, Tentaculata, Platyctenida	Simion et al 2017 PMID 28318975	0		
+Drygla	Dryodora glandiformis	1	0	0	Metazoa, Ctenophora, Tentaculata, Cydippida	Neurobase (Moroz 2014)	0		
+Eupdun	Euplokamis dunlapae	1	0	0	Metazoa, Ctenophora, Tentaculata, Cydippida	Neurobase (Moroz 2014)	0		
+Mertsp	Mertensiidae sp.	1	0	0	Metazoa, Ctenophora, Tentaculata, Cydippida	Neurobase (Moroz 2014)	0		
+Merovu	Mertensia ovum	1	1	1	Metazoa, Ctenophora, Tentaculata, Cydippida	NCBI GCA_965231305.1; in-home annotation with Helixer (Grisha)	0		
+Lampan	Lampea pancerina	1	0	0	Metazoa, Ctenophora, Tentaculata, Cydippida	Simion et al 2017 PMID 28318975	0		
+Aque	Amphimedon queenslandica	1	1	0	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Haplosclerida, Niphatidae	Assembly Ensembl Metazoa 39 v1, annotation Bernie Degnan Aqu2.1	0		
+Halamb	Haliclona amboinensis	1	0	0	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Haplosclerida, Chalinidae	COMPAGEN HAMB_T-PEP_160127	0		
+Halind	Haliclona indistincta	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Haplosclerida, Chalinidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Haliclona_indistincta/GCA_964017065.1/ 	0		
+Petfic	Petrosia ficiformis	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Haplosclerida, Petrosiidae	NCBI GCA_947044365.1, in-home annotation with ERR10378034	0		
+Xestes	Xestospongia testudinaria	1	0	0	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Haplosclerida, Petrosiidae	COMPAGEN XTES-160304	0		
+Xesmut	Xestospongia muta	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Haplosclerida, Petrosiidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Xestospongia_muta/GCA_963693285.1/  	0		
+Spolac	Spongilla lacustris	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Spongillida, Spongillidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Spongilla_lacustris/GCA_949361645.1/	1	OX442438.1	
+Emue	Ephydatia muelleri	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Spongillida, Spongillidae	Ephybase database: https://spaces.facsci.ualberta.ca/ephybase/resources/	0		
+Euncar	Eunapius carteri	1	0	0	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Spongillida, Spongillidae	Riesgo et al 2014	0		
+Eunfra	Eunapius fragilis	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Spongillida, Spongillidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Eunapius_fragilis/GCA_963681505.1/ 	0		
+Stycar	Stylissa carteri	1	0	0	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Axinellida, Axinellidae	COMPAGEN SCAR_T-PEP_160304	0		
+Axidam	Axinella damicornis	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Axinellida, Axinellidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_963931865.1/ ; own annotation	0		
+Ageoro	Agelas oroides	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Agelasida, Agelasidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Agelas_oroides/GCA_949130485.1/ 	0		
+Tetwil	Tethya wilhelma	1	1	0	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Tethyida, Tethyidae	Francis et al 2017, https://bitbucket.org/molpalmuc/tethya_wilhelma-genome/src/master/	0		
+Halpan	Halichondria panicea	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Suberitida, Halichondriidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_963675165.1/	0		
+Diaery	Diacarnus erythraeanus	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Poecilosclerida, Podospongiidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Diacarnus_erythraeanus/GCA_964016965.1/	0		
+Cracra	Crambe crambe	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Poecilosclerida, Crambeidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Crambe_crambe/GCA_963924555.1/ 	0		
+Lychyp	Lycopodina hypogea	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Poecilosclerida, Cladorhizidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Lycopodina_hypogea/GCA_963969325.1/	0		
+Cliori	Cliona orientalis	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Clionaida, Clionaidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Cliona_orientalis/GCA_963930775.1/ 	0		
+Theswi	Theonella swinhoei	1	1	1	Metazoa, Porifera, Demospongiae, Heteroscleromorpha, Tetractinellida, Theonellidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Theonella_swinhoei/GCA_963970385.1/ 	0		
+Choren	Chondrosia reniformis	1	1	1	Metazoa, Porifera, Demospongiae, Verongimorpha, Chondrillida, Chondrillidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Chondrosia_reniformis/GCA_947172415.1/ 	0		
+Chocar	Chondrilla caribensis	1	1	1	Metazoa, Porifera, Demospongiae, Verongimorpha, Chondrillida, Chondrillidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Chondrilla_caribensis/GCA_964020155.1/	0		
+Aplaer	Aplysina aerophoba	1	1	1	Metazoa, Porifera, Demospongiae, Verongimorpha, Verongiida, Aplysinidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Aplysina_aerophoba/GCA_949841015.1/	0		
+Ianbas	Ianthella basta	1	1	1	Metazoa, Porifera, Demospongiae, Verongimorpha, Verongiida, Ianthellidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Ianthella_basta/GCA_964019415.1/ 	0		
+Plespi	Pleraplysilla spinifera	1	0	0	Metazoa, Porifera, Demospongiae, Keratosa, Dendroceratida, Darwinellidae	Simion et al 2017 PMID 28318975	0		
+Halcae	Halisarca caerulea	1	1	1	Metazoa, Porifera, Demospongiae, Keratosa, Chondrillida, Halisarcidae	DTOL, Ensembl, Aquatic Symbiosis https://ftp.ebi.ac.uk/pub/ensemblorganisms/Halisarca_caerulea/GCA_963170055.1/ 	0		
+Dysava	Dysidea avara	1	1	1	Metazoa, Porifera, Demospongiae, Keratosa, Dictyoceratida, Dysideidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_963678975.1/	0		
+Scil	Sycon ciliatum	1	1	1	Metazoa, Porifera, Calcarea, Calcaronea, Leucosolenida, Sycettidae	NCBI GCF_964019385.1	0		
+Lcom	Leucosolenia complicata	1	0	0	Metazoa, Porifera, Calcarea, Calcaronea, Leucosolenida, Leucosoleniidae	Fortunato 2014, DRYAD: https://datadryad.org/stash/dataset/doi:10.5061/dryad.tn0f3; can’t find GFF	0		
+Gracom	Grantia compressa	1	0	0	Metazoa, Porifera, Calcarea, Calcaronea, Leucosolenida, Grantiidae	Simion et al 2017 PMID 28318975	0		
+Leuniv	Leuconia nivea	1	0	0	Metazoa, Porifera, Calcarea, Calcaronea, Baerida, Baeriidae	Simion et al 2017 PMID 28318975	0		
+Clacla	Clathrina clathrus	1	1	1	Metazoa, Porifera, Calcarea, Calcinea, Clathrinida, Clathrinidae	Catalan Biogenome; own assembly and annotation	0		
+Clacor	Clathrina coriacea	1	0	0	Metazoa, Porifera, Calcarea, Calcinea, Clathrinida, Clathrinidae	Simion et al 2017 PMID 28318975	0		
+	Clathrina lutea	0	1	0	Metazoa, Porifera, Calcarea, Calcinea, Clathrinida, Clathrinidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_028571005.1/	0		
+	Nicola tetela	0	1	0	Metazoa, Porifera, Calcarea, Calcinea, Clathrinida, Clathrinidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_028565695.1/	0		
+Ocar	Oscarella carmela	1	1	0	Metazoa, Porifera, Homoscleromorpha, Homosclerophorida, Oscarellidae	COMPAGEN Nichols et al. 2012, http://www.compagen.org/datasets/OCAR_WGA_120614	0		
+Opea	Oscarella pearsei	1	0	0	Metazoa, Porifera, Homoscleromorpha, Homosclerophorida, Oscarellidae	COMPAGEN Nichols et al. 2012, http://www.compagen.org/datasets/OCAR_T-PEP_130911.zip	0		
+Osclob	Oscarella lobularis	1	1	1	Metazoa, Porifera, Homoscleromorpha, Homosclerophorida, Oscarellidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_947507565.1/ ; FORMERLY: Darwin Tree of Life; assembly from NCBI GCA_947507565.1; in-home annotation with ERR10149558	0		
+Plajan	Plakina jani	1	0	0	Metazoa, Porifera, Homoscleromorpha, Homosclerophorida, Plakinidae	Simion et al 2017 PMID 28318975	0		
+Corcan	Corticium candelabrum	1	1	1	Metazoa, Porifera, Homoscleromorpha, Homosclerophorida, Plakinidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_963422355.1/ 	0		
+Aphrbe	Aphrocallistes beatrix	1	1	1	Metazoa, Porifera, Hexactinellida, Hexasterophora, Hexactinosida, Sceptrulophora, Aphrocallistidae	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_963281255.1/	0		
+Aphvas	Aphrocallistes vastus	1	1	0	Metazoa, Porifera, Hexactinellida, Hexasterophora, Hexactinosida, Sceptrulophora, Aphrocallistidae	Francis et al 2023 PMID: 37351491 https://github.com/PalMuc/Aphrocallistes_vastus_genome/	0		
+Oopmin	Oopsacas minuta 	1	1	0	Metazoa, Porifera, Hexactinellida, Hexasterophora, Lyssacinosida, Leucopsacidae, Oopsacas	NCBI https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_024704765.1/	0		
+Mbre	Monosiga brevicollis	1	1	0	Choanoflagellata, Craspedida	Ensembl Protists 49	0		
+Sros	Salpingoeca rosetta	1	1	0	Choanoflagellata, Craspedida	Ensembl Protists 49	0		
+Acaspe	Acanthoeca spectabilis	1	0	0	Choanoflagellata, Acanthoecida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Acanthoeca_spectabilis Version 2, 10.7554/eLife.34226	0		
+Acas10	Acanthoecidae sp 10tr	1	0	0	Choanoflagellata, Acanthoecida	https://doi.org/10.6084/m9.figshare.12410606, MMETSP0105,MMETSP0106, 10.1371/journal.pbio.1001889,10.1093/molbev/msw209	0		
+Helnan	Helgoeca nana	1	0	0	Choanoflagellata, Acanthoecida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Helgoeca_nana Version 2, 10.7554/eLife.34226	0		
+Savpar	Savillea parva	1	0	0	Choanoflagellata, Acanthoecida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Savillea_parva Version 2, 10.7554/eLife.34226	0		
+Didcos	Didymoeca costata	1	0	0	Choanoflagellata, Acanthoecida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Didymoeca_costata Version 2, 10.7554/eLife.34226	0		
+Diagra	Diaphanoeca grandis	1	0	0	Choanoflagellata, Acanthoecida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Diaphanoeca_grandis Version 2, 10.7554/eLife.34226	0		
+Stedip	Stephanoeca diplocostata	1	0	0	Choanoflagellata, Acanthoecida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Stephanoeca_diplocostata.France Version 2, 10.7554/eLife.34226	0		
+Codhol	Codosiga hollandica	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Codosiga_hollandica Version 2, 10.7554/eLife.34226	0		
+Microa	Microstomoeca roanoka	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Microstomoeca_roanoka Version 2, 10.7554/eLife.34226	0		
+Choper	Choanoeca perplexa	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Choanoeca_perplexa Version 2, 10.7554/eLife.34226	0		
+Mylflu	Mylnosiga fluctuans	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Mylnosiga_fluctuans Version 2, 10.7554/eLife.34226	0		
+Salhel	Salpingoeca helianthica	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Salpingoeca_helianthica Version 2, 10.7554/eLife.34226	0		
+Salinf	Salpingoeca infusionum	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Salpingoeca_infusionum Version 2, 10.7554/eLife.34226	0		
+Salkve	Salpingoeca kvevrii	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Salpingoeca_kvevrii Version 2, 10.7554/eLife.34226	0		
+Salurc	Salpingoeca urceolata	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Salpingoeca_urceolata Version 2, 10.7554/eLife.34226	0		
+Salmac	Salpingoeca macrocollata	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Salpingoeca_macrocollata Version 2, 10.7554/eLife.34226	0		
+Salpun	Salpingoeca punica	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Salpingoeca_punica Version 2, 10.7554/eLife.34226	0		
+Saldol	Salpingoeca dolichothecata	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Salpingoeca_dolichothecata Version 2, 10.7554/eLife.34226	0		
+Harbal	Hartaetosiga balthica	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Hartaetosiga_balthica Version 2, 10.7554/eLife.34226	0		
+Hargra	Hartaetosiga gracilis	1	0	0	Choanoflagellata, Craspedida	https://dx.doi.org/10.6084/m9.figshare.5686984.v2, Hartaetosiga_gracilis Version 2, 10.7554/eLife.34226	0		
+Chofle	Choanoeca flexa	1	0	0	Choanoflagellata, Craspedida	https://doi.org/10.6084/m9.figshare.8216291, Version 2, 10.1126/science.aay2346	0		
+Cowc	Capsaspora owczarzaki	1	1	1	Filasterea	UNPUBLISHED! Hiroshi Suga's genome and annotation 2023 / previously: Ensembl Protists 49	0		
+Mvib	Ministeria vibrans	1	1	0	Filasterea	https://figshare.com/articles/dataset/Genomic_data_for_Ministeria_vibrans_Parvularia_atlantis_Pigoraptor_vietnamica_and_Pigoraptor_chileana/19895962/1; FORMERLY: Torruella et al. 2015, Transcriptome; http://dx.doi.org/10.1016/j.cub.2015.07.053	0		
+Pigovi	Pigoraptor vietnamica	1	1	0	Filasterea	https://figshare.com/articles/dataset/Genomic_data_for_Ministeria_vibrans_Parvularia_atlantis_Pigoraptor_vietnamica_and_Pigoraptor_chileana/19895962/1; FORMERLY: https://doi.org/10.5061/dryad.26bv4, Opistho-1_predicted_peptides, 10.1016/j.cub.2017.06.006	0		
+Pigoch	Pigoraptor chileana	1	1	0	Filasterea	https://figshare.com/articles/dataset/Genomic_data_for_Ministeria_vibrans_Parvularia_atlantis_Pigoraptor_vietnamica_and_Pigoraptor_chileana/19895962/1; FORMERLY: https://doi.org/10.5061/dryad.26bv4, Opistho-2_predicted_peptides, 10.1016/j.cub.2017.06.006	0		
+Cfra	Creolimax fragrantissima	1	1	0	Teretosporea, Ichthyosporea, Ichthyophonida	de Mendoza et al. 2015 (coding only), Figshare: https://figshare.com/articles/dataset/Creolimax_fragrantissima_genome_data/1403592	0		
+Sarc	Sphaeroforma arctica	1	1	0	Teretosporea, Ichthyosporea, Ichthyophonida	Dudin et al. 2019 (Sarc4), Figshare: https://figshare.com/articles/Sphaeroforma_arctica_transcriptome/8299529	0		
+Ihof	Ichthyophonus hoferi	1	1	0	Teretosporea, Ichthyosporea, Ichthyophonida	Grau-Bové et al. 2017, Figshare: https://figshare.com/articles/Genome_-_Ichthyophonus_hoferi/5426488	0		
+Apar	Amoebidium parasiticum	1	1	0	Teretosporea, Ichthyosporea, Ichthyophonida	UNPUBLISHED! AdM	0		
+Chrper	Chromosphaera perkinsii	1	1	0	Teretosporea, Ichthyosporea, Dermocystida	Grau-Bové et al. 2017, Figshare: https://figshare.com/articles/Genome_-_Chromosphaera_perkinsii/5426494	0		
+Sphdes	Sphaerothecum destruens	1	0	0	Teretosporea, Ichthyosporea, Dermocystida	UK-Cefas-1, https://figshare.com/articles/Transcriptome_-_Sphaerothecum_destruens_rosette_agent_/5446489, 10.1016/j.cub.2015.07.053	0		
+Clim	Corallochytrium limacisporum	1	1	0	Teretosporea, Corallochytrea	Grau-Bové et al. 2017, Figshare: https://figshare.com/articles/Genome_-_Corallochytrium_limacisporum/5426470	0		
+Sysmul	Syssomonas multiformis	1	0	0	Teretosporea, Pluriformea	Colp12 strain, https://datadryad.org/resource/doi:10.5061/dryad.26bv4/2, 10.1016/j.cub.2017.06.006	0		
+Tununi	Tunicaraptor unikontum	1	0	0	Tunicaraptor	Isolate Opistho-3, https://sra-download.ncbi.nlm.nih.gov/traces/wgs01/wgs_aux/GI/QG/GIQG01/GIQG01.1.fsa_nt.gz	0		
+Aspory	Aspergillus oryzae	1	1	0	Fungi, Dikarya, Ascomycota, Pezizomycotina	NCBI GCA_000269785.2_AspOry3042	0		
+Claful	Cladosporium fulvum	1	1	0	Fungi, Dikarya, Ascomycota, Pezizomycotina	JGI v1	0		
+Fusgra	Fusarium graminearum	1	1	0	Fungi, Dikarya, Ascomycota, Pezizomycotina	NCBI GCF_000240135.3_ASM24013v3	0		
+Ncra	Neurospora crassa	1	1	0	Fungi, Dikarya, Ascomycota, Pezizomycotina	Ensembl Fungi 49, NC12	0		
+Tmel	Tuber melanosporum	1	1	0	Fungi, Dikarya, Ascomycota, Pezizomycotina	Ensembl Fungi 49, ASM15164v1	0		
+Scer	Saccharomyces cerevisiae	1	1	0	Fungi, Dikarya, Ascomycota, Saccharomycotina	SGD http://sgd-archive.yeastgenome.org/sequence/S288C_reference/genome_releases/ S288C_reference_genome_R64-5-1_20240529 R64-5-1	0		
+Ylip	Yarrowia lipolytica	1	1	0	Fungi, Dikarya, Ascomycota, Saccharomycotina	Ensembl Fungi 49, GCA_000002525.1	0		
+Spom	Schizosaccharomyces pombe	1	1	0	Fungi, Dikarya, Ascomycota, Taphrinomycotina	Ensembl Fungi 49, ASM294v2	0		
+Ccin	Coprinopsis cinerea	1	1	0	Fungi, Dikarya, Basidiomycota, Agaricomycotina	Ensembl Fungi 49, CC3	0		
+Cneo	Cryptococcus neoformans	1	1	0	Fungi, Dikarya, Basidiomycota, Agaricomycotina	Ensembl Fungi 49, ASM9104v1 (chromosomal assembly)	0		
+Umay	Ustilago maydis	1	1	0	Fungi, Dikarya, Basidiomycota, Ustilaginomycotina	Ensembl Fungi 49, Umaydis521_2.0	0		
+Amac	Allomyces macrogynus	1	1	0	Fungi, Blastocladiomycota	Ensembl Fungi 49, A_macrogynus_V3	0		
+Cang	Catenaria anguillulae	1	1	0	Fungi, Blastocladiomycota	Ensembl Fungi 49, pl171_gca_002102555.Catan2	0		
+Spun	Spizellomyces punctatus	1	1	0	Fungi, Chytridiomycota	Ensembl Fungi 49, V1, DAOM BR117	0		
+Rhiglo	Rhizoclosmatium globosum	1	1	0	Fungi, Chytridiomycota	Ensembl Fungi 49 gca_002104985.Rhihy1	0		
+Bden	Batrachochytrium dendrobatidis	1	1	0	Fungi, Chytridiomycota	Ensembl Fungi 49, v1, JAM81	0		
+Gpro	Gonapodya prolifera	1	1	0	Fungi, Chytridiomycota	Ensembl Fungi 49, Ganpr1, JEL478	0		
+Pisp	Piromyces spE2	1	1	0	Fungi, Chytridiomycota	Ensembl Fungi 49	0		
+Rall	Rozella allomycis	1	1	0	Fungi, Cryptomycota	Ensembl Fungi 49, Rozella_k41_t100, CSF55	0		
+Rirr	Rhizophagus irregularis	1	1	0	Fungi, Mucoromycota, Glomeromycotina	NCBI GCF_000439145.1_ASM43914v3	0		
+Morelo	Mortierella elongata	1	1	0	Fungi, Mucoromycota, Mortierellomycotina	Ensembl Fungi 49, gca_001651415.Mortierella_elongata_AG-77_v2.0	0		
+Mcir	Mucor circinelloides	1	1	0	Fungi, Mucoromycota, Mucoromycotina	Ensembl Fungi 49, f_circinelloides_1006phl_gca_000401635	0		
+Rhidel	Rhizopus delemar	1	1	0	Fungi, Mucoromycota, Mucoromycotina	Ensembl Fungi 49 , RO3 (formerly Rhizopus oryzae), RA 99-880	0		
+Umbram	Umbelopsis ramanniana	1	1	0	Fungi, Mucoromycota, Mucoromycotina	JGI v1, AG	0		
+Phybla	Phycomyces blakesleeanus	1	1	0	Fungi, Mucoromycota	NCBI GCF_001638985.1_Phybl2	0		
+Concor	Conidiobolus coronatus	1	1	0	Fungi, Zoopagomycota, Entomophthoromycotina	Ensembl Fungi 49, NRRL 28638	0		
+Coerev	Coemansia reversa	1	1	0	Fungi, Zoopagomycota, Kickxellomycotina	Ensembl Fungi 49, NRRL 1564 v1	0		
+Enccun	Encephalitozoon cuniculi	1	1	0	Fungi, Microsporidia	Ensembl Fungi 49, EcunIII-L	0		
+Nempar	Nematocida parisii	1	1	0	Fungi, Microsporidia	Ensembl Fungi 49, Nema_parisii_ERTm1_V3	0		
+Partri	Paraphelidium tribonemae	1	0	0	Fungi, Aphelidea	X-108, https://doi.org/10.6084/m9.figshare.7339469.v1, Version 1.5, 10.1038/s42003-018-0235-z	0		
+Falb	Fonticula alba	1	1	0	Rotosphaerida, Fonticula	NCBI GCF_000388065.1; assembly Font_alba_ATCC_38817_V2	0		
+Paratl	Parvularia atlantis	1	1	0	Rotosphaerida, Nucleariidae	https://figshare.com/articles/dataset/Genomic_data_for_Ministeria_vibrans_Parvularia_atlantis_Pigoraptor_vietnamica_and_Pigoraptor_chileana/19895962/1; FORMERLY: https://figshare.com/articles/Nuclearia_sp_ATCC_50694_-_Transcriptome/3898485, a-Unigene Version 4, 10.1016/j.cub.2015.07.053	0		
+Litglo	Lithocolla globosa	1	0	0	Rotosphaerida, Pompholyxophryids	https://figshare.com/articles/Rotosphaerida_datasets_and_trees/7814411, cleaned_NUC, 10.1098/rstb.2019.0094	0		
+Ttra	Thecamonas trahens	1	1	0	Apusomonadida	Ensembl Protist 39, v1 2010, ATCC 50062	0		
+ApAF17	Apusomonadida sp. AF-17	1	0	0	Apusomonadida	https://datadryad.org/bitstream/handle/10255/dryad.103230/Amastigomonas_sp_transcriptome.fasta.zip Transcriptome assembly of Amastigomonas sp 10.1098/rspb.2015.2802	0		
+Manber	Manchomonas bermudensis	1	0	0	Apusomonadida	ATCC-50234 https://figshare.com/articles/dataset/Data_Associated_with_PhyloFisher/15141900/1 PhyloFisher_v1.0_input_proteomes/Manchomonas_bermudensis 10.1093/nar/gkl770,10.1371/journal.pbio.3001365	0		
+Pygbif	Pygsuia biforma	1	0	0	Breviatea	ftp://ftp.ncbi.nlm.nih.gov/sra/wgs_aux/GC/RY/GCRY01/GCRY01.1.fsa_nt.gz, GCRY01000000, 10.1098/rspb.2013.1755	0		
+Ddis	Dictyostelium discoideum	1	1	0	Amoebozoa, Evosea, Eumycetozoa	Ensembl Protist 49, dicty_2.7	0		
+Tielac	Tieghemostelium lacteum	1	1	0	Amoebozoa, Evosea, Eumycetozoa	Ensembl Protist 49, gca_001606155.ASM160615v1	0		
+Hetalb	Heterostelium album	1	1	0	Amoebozoa, Evosea, Eumycetozoa	NCBI GCF_000004825.1_PolPal_Dec2009, formerly polysphondylium pallidum	0		
+Cavfas	Cavenderia fasciculata	1	1	0	Amoebozoa, Evosea, Eumycetozoa	Ensembl Protist 49, gca_000203815.Dfas_2.0	0		
+Masbal	Mastigamoeba balamuthi	1	0	0	Amoebozoa, Evosea, Archamoeba	Genome assembly available: https://www.ncbi.nlm.nih.gov/assembly/GCA_902651635.1	0		
+Acas	Acanthamoeba castellanii	1	1	1	Amoebozoa, Discosea, Centramoebida	https://doi.org/10.1101/gr.276375.121; FORMERLY: Ensembl Protist 49, strain Neff gca_000313135 (v1, better than so-called v2 GCA_000193105.1 in NCBI)	0		
+Plafun	Planoprotostelium fungivorum	1	1	0	Amoebozoa, Variosea, Cavosteliida	Ensembl Protist 49, gca_003024175	0		
+Rigram	Rigifila ramosa	1	0	0	CRuMs	CCAP 1967/1 https://www.ncbi.nlm.nih.gov/biosample/7586167 Brown et al 2018	0		
+Diprot	Diphylleia rotans	1	0	0	CRuMs	NIES-3764 https://www.ncbi.nlm.nih.gov/biosample/7586166 Brown et al 2018	0		
+Manpla	Mantamonas plastica	1	0	0	CRuMs	CCAP 1946/1 Bass1 https://www.ncbi.nlm.nih.gov/sra?LinkName=biosample_sra&from_uid=7586170 Brown et al 2018	0		
+Nutlon	Nutomonas longa	1	0	0	Ancyromonadida	CCAP 1958/5 https://figshare.com/articles/dataset/Transcriptome_-_Nutomonas_longa/4560862?file=7694365 Torruella et al 2015	0		
+Ancsig	Ancyromonas sigmoides	1	0	0	Ancyromonadida	CCAP 1958/3 a.k.a. B70 https://www.ncbi.nlm.nih.gov/biosample/7586168 Brown et al 2018	0		
+Fabtro	Fabomonas tropica	1	0	0	Ancyromonadida	NYK3C https://www.ncbi.nlm.nih.gov/biosample/7586169 Brown et al 2018	0		
+Plamic	Planomonas micra	1	0	0	Ancyromonadida	Franz Lang, DeepEuk, 2017-05-10 https://megasun.bch.umontreal.ca/jakmal-download/Planomonas/Planomonas_micra_proteins_20170510.faa	0		
+Malcal	Malawimonas californiana	1	0	0	Malawimonadidae	Franz Lang, DeepEuk, 2017-09-24 https://megasun.bch.umontreal.ca/jakmal-download/Malawimonas_californiana/Malawimonas_californiana_proteins_20170924.faa	0		
+Maljak	Malawimonas jakobiformis	1	0	0	Malawimonadidae	Franz Lang, DeepEuk, 2017-06-16 https://megasun.bch.umontreal.ca/jakmal-download/Malawimonas_jakobiformis/Malawimonas_jakobiformis_proteins_20170616.faa	0		
+Gefoke	Gefionella okellyi (strain 249)	1	0	0	Malawimonadidae	Franz Lang, DeepEuk, 2017-06-16 https://megasun.bch.umontreal.ca/jakmal-download/Gefionella/Gefionella_proteins_20170616.faa	0		
+Atha	Arabidopsis thaliana	1	1	1	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Tracheophyta, Angiospermae	Col-0 v10.1 https://www.science.org/doi/full/10.1126/science.abi7489 ; https://github.com/schatzlab/Col-CEN/;  FORMERLY Ensembl Plants 49, TAIR10	0		
+Erygut	Erythranthe guttata	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Tracheophyta, Angiospermae	JGI v2.0 https://phytozome.jgi.doe.gov/pz/portal.html#!info?alias=Org_Mguttatus	0		
+Acoe	Aquilegia coerulea	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Tracheophyta, Angiospermae	NCBI GCA_002738505.1_Aquilegia_coerulea_v1	0		
+Bdis	Brachypodium distachyon	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Tracheophyta, Angiospermae	Ensembl Plants 49, v3	0		
+Osat	Oryza sativa	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Tracheophyta, Angiospermae	Ensembl Plants 49, IRGSP-1.0, Japonica	0		
+Sbic	Sorghum bicolor	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Tracheophyta, Angiospermae	Ensembl Plants 49, NCBIv3	0		
+Atri	Amborella trichopoda	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Tracheophyta, Angiospermae	Ensembl Plants 49, AMTR1	0		
+Thupil	Thuja plicata	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Tracheophyta, Gymnospermae	v3.1 https://doi.org/10.1101/gr.276358.121	0		
+Taklep	Takakia lepidozioides	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Bryophyta, Bryophyta	v3.1 https://doi.org/10.1016/j.cell.2023.07.003	0		
+Salcuc	Salvinia cucullata	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Tracheophyta, Polypodiophyta	Fernbase 1.2 https://www.fernbase.org/	0		
+Azofil	Azolla filiculoides	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Tracheophyta, Polypodiophyta	Fernbase 1.1 https://www.fernbase.org/	0		
+Dipcom	Diphasiastrum complanatum	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Tracheophyta, Lycophyta	v3.1 https://doi.org/10.1073/pnas.2312607121	0		
+Smoe	Selaginella moellendorffii	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Tracheophyta, Lycophyta	Ensembl Plants 49, v1.0	0		
+Ppat	Physcomitrella patens	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Bryophyta, Bryophyta	CNCB GWHFIHF00000000.1; https://doi.org/10.1038/s41477-023-01614-7 ; FORMERLY: Ensembl Plants 49, v3 Phypa	0		
+Sphfal	Sphagnum fallax	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Bryophyta, Bryophyta	JGI Phytozome v1.1 https://genome.jgi.doe.gov/portal/pages/dynamicOrganismDownload.jsf?organism=Sfallax	0		
+Marpol	Marchantia polymorpha	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Bryophyta, Marchantiophyta	NCBI GCA_009936355.2_ASM993635v2	0		
+Antagr	Anthoceros agrestis	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Embryophyta, Bryophyta, Anthocerotophyta	https://doi.org/10.1111/nph.19311; https://hornwortbase.org/ftp/Anthoceros_agrestis_Oxford/v1.0/Anthoceros_agrestis_Oxford_genome.fasta	0		
+Chabra	Chara braunii	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Charophyta	Ensembl Plants 49, v1.0	0		
+Klenit	Klebsormidium nitens	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Charophyta	v1.1 NIES-2285 in http://www.plantmorphogenesis.bio.titech.ac.jp/~algae_genome_project/klebsormidium/kf_download.htm  || alternative: NCBI GCA_000708835.1_ASM70883v1 (seems older)	0		
+Mesvir	Mesostigma viride	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Charophyta	CCAC 1140; Culture Collection of Algae at the University of Cologne https://ftp.cngb.org/pub/CNSA/data1/CNP0000228/CNS0021438/CNA0002352/	0		
+Chlatm	Chlorokybus atmophyticus	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Charophyta	CCAC 0220; Culture Collection of Algae at the University of Cologne	0		
+Penmar	Penium margaritaceum	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Charophyta	Brébisson; Skidmore isolate #8 of the Skidmore College Culture Collection – Texas  http://bioinfo.bti.cornell.edu/cgi-bin/Penium/download.cgi	0		
+Spimus	Spirogloea muscicola	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Charophyta	CCAC 0214; Culture Collection of Algae at the University of Cologne  https://figshare.com/articles/dataset/Genomes_of_subaerial_Zygnematophyceae_provide_insights_into_land_plant_evolution/9911876/1?file=17819129	0		
+Mesend	Mesotaenium endlicherianum	1	1	0	Archaeplastida, Viridiplantae, Streptophyta, Charophyta	SAG 12.97; Sammlung von Algenkulturen Göttingen  https://figshare.com/articles/dataset/Genomes_of_subaerial_Zygnematophyceae_provide_insights_into_land_plant_evolution/9911876/1?file=17819129	0		
+Crei	Chlamydomonas reinhardtii	1	1	0	Archaeplastida, Viridiplantae, Chlorophyta, Chlorophyceae	Ensembl Plants 49, 5.5	0		
+Vcar	Volvox carteri	1	1	0	Archaeplastida, Viridiplantae, Chlorophyta, Chlorophyceae	NCBI GCF_000143455.1_v1.0	0		
+Cocsub	Coccomyxa subellipsoidea	1	1	0	Archaeplastida, Viridiplantae, Chlorophyta, Trebouxiophyceae	NCBI GCF_000258705.1_Coccomyxa_subellipsoidae_v2.0	0		
+Cvar	Chlorella variabilis	1	1	0	Archaeplastida, Viridiplantae, Chlorophyta, Trebouxiophyceae	NCBI GCF_000147415.1_v_1.0, NC64A	0		
+Ulvmut	Ulva mutabilis	1	0	0	Archaeplastida, Viridiplantae, Chlorophyta, Ulvophyceae	Assembly available, but no prediction: https://www.ncbi.nlm.nih.gov/assembly/GCA_900538255.1/	0		
+Caulen	Caulerpa lentillifera	1	1	0	Archaeplastida, Viridiplantae, Chlorophyta, Ulvophyceae	OIST v1.1 https://marinegenomics.oist.jp/umibudo/viewer/download?project_id=55	0		
+Ostque	Ostreobium quekettii	1	1	0	Archaeplastida, Viridiplantae, Chlorophyta, Ulvophyceae	NCBI GCA_905146915.1	0		
+Otau	Ostreococcus tauri	1	1	0	Archaeplastida, Viridiplantae, Chlorophyta, Mamiellophyceae	NCBI GCF_000214015.3_version_140606	0		
+Mpus	Micromonas pusilla	1	1	0	Archaeplastida, Viridiplantae, Chlorophyta, Mamiellophyceae	NCBI GCF_000151265.2_Micromonas_pusilla_CCMP1545_v2.0	0		
+Cmer	Cyanidioschyzon merolae	1	1	0	Archaeplastida, Rhodophyta, Cyanidiales	Ensembl Plants 49, ASM9120v1	0		
+Porumb	Porphyra umbilicalis	1	1	0	Archaeplastida, Rhodophyta, Bangiophyceae	NCBI GCA_002049455.2_P_umbilicalis_v1	0		
+Porpur	Porphyridium purpureum	1	1	0	Archaeplastida, Rhodophyta, Bangiophyceae	NCBI GCA_008690995.1_P_purpureum_CCMP1328_Hybrid_assembly	0		
+Gracho	Gracilariopsis chorda	1	1	0	Archaeplastida, Rhodophyta, Florideophyceae	NCBI GCA_003194525.1_GraCho1.0	0		
+Chocri	Chondrus crispus	1	1	0	Archaeplastida, Rhodophyta, Florideophyceae	Ensembl Plants 49, ASM35022v2	0		
+Cpar	Cyanophora paradoxa	1	0	0	Archaeplastida, Glaucophyta	Assembly Price et al. 2012, annotation in-home	0		
+Gthe	Guillardia theta	1	1	0	Cryptista, Cryptophyceae	Ensembl Protists 49, Guith1, CCMP2712	0		
+Crypsp	Cryptophyceae sp.	1	1	0	Cryptista, Cryptophyceae	JGI, CCMP2293 v1.0 https://mycocosm.jgi.doe.gov/Crypto2293_1/Crypto2293_1.home.html	0		
+	Chroomonas mesostigmatica	0	0	0	Cryptista, Cryptophyceae	https://www.ncbi.nlm.nih.gov/assembly/GCA_000286095.1/	0		
+	Cryptomonas paramecium	0	0	0	Cryptista, Cryptophyceae	https://www.ncbi.nlm.nih.gov/assembly/GCF_000194455.1/	0		
+	Hemiselmis andersenii	0	0	0	Cryptista, Cryptophyceae	https://www.ncbi.nlm.nih.gov/assembly/GCF_000018645.1/	0		
+Gonavo	Goniomonas avonlea	1	0	0	Cryptista, Cryptophyceae	https://www.ncbi.nlm.nih.gov/assembly/GCA_003573635.1/	0		
+Ehux	Emiliania huxleyi	1	1	0	Haptista, Haptophyta, Prymnesiophyceae	Ensembl Protists 49, CCMP1516	0		
+Chrtob	Chrysochromulina tobin	1	1	0	Haptista, Haptophyta, Prymnesiophyceae	NCBI GCA_001275005.1_Ctobinv2	0		
+Pavlsp	Pavlovales sp. CCMP2436	1	1	0	Haptista, Haptophyta, Prymnesiophyceae	JGI v1 CCMP2436	0		
+Dialut	Diacronema lutheri NIVA-4/92	1	1	0	NIVA-4/92	NCBI GCA_019448385.1_MSCA_Paluth	0		
+Esil	Ectocarpus siliculosus	1	1	0	Stramenopiles, Phaeophyceae	Ensembl Protists 49, gca_000310025.ASM31002v1, chromosomal assembly	0		
+Coka	Cladosiphon okamuranus	1	1	0	Stramenopiles, Phaeophyceae	OIST Mozuku assembly v0.4 https://marinegenomics.oist.jp/algae/viewer/download?project_id=53; annotation 2.0 https://marinegenomics.oist.jp/okinawa_mozuku_s_v2/viewer/download?project_id=67	0		
+Ngad	Nannochloropsis gaditana	1	1	0	Stramenopiles, Eustigmatophyceae	Ensembl Protists 49, gca_000569095.NagaB31	0		
+Aano	Aureococcus anophagefferens	1	1	0	Stramenopiles, Pelagophyceae	Ensembl Protists 49, gca_000186865.v_1.0	0		
+Phatri	Phaeodactylum tricornutum	1	1	0	Stramenopiles, Diatomeae	Ensembl Protists 49, ASM15095v2	0		
+Tpse	Thalassiosira pseudonana	1	1	0	Stramenopiles, Diatomeae	Ensembl Protists 40, ASM14940v2	0		
+Pinf	Phytophthora infestans	1	1	0	Stramenopiles, Oomycota	Ensembl Protists 49, ASM14294v1	0		
+Sappar	Saprolegnia parasitica	1	1	0	Stramenopiles, Oomycota	Ensembl Protists 49, cbs_223_65_gca_000151545	0		
+Alblai	Albugo laibachii	1	1	0	Stramenopiles, Oomycota	Ensembl Protists 49, ENA1	0		
+Honfer	Hondaea fermentalgiana	1	1	0	Stramenopiles, Labyrinthulea	Ensembl Protists 49, gca_002897355.Aurantiochytrium_FCC1311_v1	0		
+Aurlim	Aurantiochytrium limacinum	1	1	0	Stramenopiles, Labyrinthulea	Mycocosm, needs manual edition!	0		
+Schagg	Schizochytrium aggregatum	1	1	0	Stramenopiles, Labyrinthulea	Mycocosm, needs manual edition!	0		
+Aplker	Aplanochytrium kerguelense	1	1	0	Stramenopiles, Labyrinthulea	Mycocosm, needs manual edition!	0		
+Pfal	Plasmodium falciparum	1	1	0	Alveolata, Apicomplexa	Ensembl Protists 49 ASM276v2 3D7	0		
+Tgon	Toxoplasma gondii	1	1	0	Alveolata, Apicomplexa	Ensembl Protists 49 TGA4 ME49	0		
+Eimten	Eimeria tenella	0	1	0	Alveolata, Apicomplexa	Ensembl Protists 49 gca_000499545.ETH001	0		
+Vitbra	Vitrella brassicaformis	1	1	0	Alveolata, Chromerida	NCBI GCA_001179505.1	0		
+Cvel	Chromera velia	1	1	0	Alveolata, Chromerida	CryptoDB CCMP2878 https://cryptodb.org/common/downloads/Current_Release/CveliaCCMP2878 ||| Transcriptome Torruella 2020?	0		
+Perkma	Perkinsus marinus	1	1	0	Alveolata, Perkinsozoa	Ensembl Protists 49, atcc_50983_gca_000006405	0		
+Bremin	Breviolum minutum	1	1	0	Alveolata, Dinoflagellata, Dinophyceae, Suessiales, Symbiodiniaceae	OIST Marine Genomics v1.2, Clade B1, https://marinegenomics.oist.jp/symb/viewer/download?project_id=21	0		
+Fugkaw	Fugacium kawagutii	1	1	0	Alveolata, Dinoflagellata, Dinophyceae, Suessiales, Symbiodiniaceae	JGI Fugacium kawagutii CCMP2468, Fugka2468, 10.1126/science.aad0408	0		
+Clagor	Cladocopium goreaui	1	1	0	Alveolata, Dinoflagellata, Dinophyceae, Suessiales, Symbiodiniaceae	JGI Cladocopium goreaui SCF055-01, Clago1 20200812, 10.1038/s42003-018-0098-3	0		
+Symmic	Symbiodinium microadriaticum	1	1	0	Alveolata, Dinoflagellata, Dinophyceae, Suessiales, Symbiodiniaceae	Ensembl Protists 49, gca_001939145.ASM193914v1	0		
+Symnat	Symbiodinium natans	1	1	0	Alveolata, Dinoflagellata, Dinophyceae, Suessiales, Symbiodiniaceae	NCBI GCA_905221605.1, Snat_CCMP2548	0		
+Symnec	Symbiodinium necroappetens 	1	1	0	Alveolata, Dinoflagellata, Dinophyceae, Suessiales, Symbiodiniaceae	NCBI GCA_905231915.1, Snec_CCMP2469	0		
+Sympil	Symbiodinium pilosum 	1	1	0	Alveolata, Dinoflagellata, Dinophyceae, Suessiales, Symbiodiniaceae	NCBI GCA_905231905.1, Spil_CCMP2461	0		
+Symlin	Symbiodinium sp. CCMP2456 linuchae	1	1	0	Alveolata, Dinoflagellata, Dinophyceae, Suessiales, Symbiodiniaceae	NCBI GCA_905221635.1, Slin_CCMP2456	0		
+Symtri	Symbiodinium sp. CCMP2592 tridacnidorum	1	1	0	Alveolata, Dinoflagellata, Dinophyceae, Suessiales, Symbiodiniaceae	NCBI GCA_905221615.1, Stri_CCMP2592	0		
+Polgla	Polarella glacialis CCMP2088	1	1	0	Alveolata, Dinoflagellata, Dinophyceae, Suessiales, Suessiaceae	JGI Polgl1383, CCMP1383, 10.1186/s12915-020-00782-8	0		
+Amocer	Amoebophrya ceratii AT5.2	1	1	0	Alveolata, Dinoflagellata, Dinophyceae, Syndiniales, Amoebophryaceae	JGI Amoebophrya ceratii AT5.2: Amoce1 20200805, 10.1126/sciadv.aav1110	0		
+Ptet	Paramecium tetraurelia	1	1	0	Alveolata, Ciliata	Ensembl Protists 49, ASM16542v1; need to manually fix transcripts, ciliate code!	0		
+Oxytri	Oxytricha trifallax	1	1	0	Alveolata, Ciliata	Ensembl Protists 49, gca_000295675; need to manually fix transcripts, ciliate code!	0		
+Tthe	Tetrahymena thermophila	1	1	0	Alveolata, Ciliata	Strain SB210 v6 https://doi.org/10.1093/nar/gkae1177 ; FORMERLY Ensembl Protists 40, JCVI-TTA1-2.2; need to manually fix transcripts, ciliate code!	0		
+Tthemi	Tetrahymena thermophila, micronucleus	1	1	0	Alveolata, Ciliata (micronucleus only)		0		
+Retfil	Reticulomyxa filosa	1	1	0	Rhizaria, Foraminifera	Ensembl Protists 49 gca_000512085	0		
+Bnat	Bigelowiella natans	1	1	0	Rhizaria, Cercozoa	Ensembl Protists 49, Bigna1	0		
+Plabra	Plasmodiophora brassicae	1	1	0	Rhizaria, Cercozoa	Ensembl Protists 49, gca_001049375.pbe3.h15	0		
+Hemkuk	Hemimastix kukwesjijk	1	0	0	Hemimastigophora	https://datadryad.org/stash/dataset/doi:10.5061/dryad.n5g39d7 Lax et al 2018	0		
+Spimul	Spironema multiciliatum	1	0	0	Hemimastigophora	https://datadryad.org/stash/dataset/doi:10.5061/dryad.n5g39d7 Lax et al 2018	0		
+Meteor	Meteora sp.	1	0	0	Meteora	Luis Javier Galindo et al / assembly: https://www.ncbi.nlm.nih.gov/genome/12053?genome_assembly_id=53304	0		
+Ngru	Naegleria gruberi	1	1	0	Discoba, Heterolobosea, Tetramitia	Ensembl Protists 49, gca_000004985.V1.0	0		
+Phakir	Pharyngomonas kirbyi	1	0	0	Discoba, Heterolobosea, Pharyngomonada	Franz Lang DeepEuk, 2018-12-13 https://megasun.bch.umontreal.ca/jakmal-download/Pharyngomonas_kirbyi/Pharyngomonas_kirbyi_proteinsV20181203.faa	0		
+Amobb2	Amoeba sp. BB2	1	0	0	Discoba, Heterolobosea	Franz Lang DeepEuk, 2018-12-13 https://megasun.bch.umontreal.ca/jakmal-download/Amoeba_spBB2/Amoeba_spBB2_proteinsV20181213.faa	0		
+Bodsal	Bodo saltans	1	1	0	Discoba, Euglenozoa, Kinetoplastida	Ensembl Protists 39, v1	0		
+Tcru	Trypanosoma cruzi	1	1	0	Discoba, Euglenozoa, Kinetoplastida	Ensembl Protists 49, gca_000209065.ASM20906v1, str. CL Brener	0		
+Lmaj	Leishmania major	1	1	0	Discoba, Euglenozoa, Kinetoplastida	Ensembl Protists 49, ASM272v2	0		
+Lepsey	Leptomonas seymouri	1	1	0	Discoba, Euglenozoa, Kinetoplastida	Ensembl Protists 49, gca_001299535.ASM129953v1	0		
+Strcul	Strigomonas culicis	1	1	0	Discoba, Euglenozoa, Kinetoplastida	Ensembl Protists 49, gca_000442495	0		
+Styinc	Stygiella incarcerata	1	0	0	Discoba, Jakobida, Andalucina	Leger et al 2016; Manual	0		
+Andgod	Andalucia godoyi	1	0	0	Discoba, Jakobida, Andalucina	Franz Lang, V16 https://megasun.bch.umontreal.ca/papers/Jakobid-genomes/Andalucia_godoyi/Andalucia_godoyi_proteins_V16.faa	0		
+Recame	Reclinomonas americana	1	0	0	Discoba, Jakobida, Histionina	Franz Lang, 2017-05-01 https://megasun.bch.umontreal.ca/papers/Jakobid-genomes/Reclinomonas_americana/Reclinomonas_americana_proteins_20170501.faa	0		
+Secula	Seculamonas sp.	1	0	0	Discoba, Jakobida, Histionina	Franz Lang, 2017-11-03 https://megasun.bch.umontreal.ca/papers/Jakobid-genomes/Seculamonas/Seculamonas_proteins_20171103.faa	0		
+Jakbah	Jakoba bahamiensis	1	0	0	Discoba, Jakobida, Histionina	Franz Lang, 2017-05-09 https://megasun.bch.umontreal.ca/jakmal-download/Jakoba_bahamiensis/Jakoba_bahamiensis_proteins_20170509.faa	0		
+Jaklib	Jakoba libera	1	0	0	Discoba, Jakobida, Histionina	Franz Lang, 2017-10-10 https://megasun.bch.umontreal.ca/jakmal-download/Jakoba_libera/Jakoba_libera_proteins_20171010.faa	0		
+Monexi	Monocercomonoides exilis PA203	1	1	0	Metamonada, Preaxostyla, Oxymonadida	v2 https://doi.org/10.1016/j.cub.2016.03.053	0		
+Tvag	Trichomonas vaginalis	1	1	0	Metamonada, Parabasalia, Trichomonadida	NCBI GCF_000002825.2_ASM282v1, G3 strain	0		
+Glam	Giardia lamblia	1	1	0	Metamonada, Fornicata, Diplomonadida	Ensembl Protists 49, strain GL2	0		
+Carmem	Carpediemonas membranifera	1	0	0	Metamonada, Fornicata, Carpediemonas-like	Leger et al 2016; Manual	0		
+Kipbia	Kipferlia bialata	1	1	0	Metamonada, Fornicata, Carpediemonas-like	Ensembl Protists 49, gca_003568945	0		

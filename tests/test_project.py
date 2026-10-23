@@ -204,3 +204,27 @@ def test_cli_adopt_into_a_read_only_project_is_an_error_line(tmp_path):
         v3.chmod(0o755)
     assert r.exit_code == 2 and "ERROR" in r.output and "Traceback" not in r.output
     assert not (v3 / "druid.yaml").exists()
+
+
+def test_init_copies_taxonomy_and_base_trees(tmp_path):
+    dest = tmp_path / "proj"
+    project.init(dest, today="23/10/2026")
+    shipped = paths.DRUID_HOME / "druid/data"
+    assert (dest / "data/genome_sources.tsv").read_bytes() == (shipped / "genome_sources.tsv").read_bytes()
+    for src, name in (("species_tree.binary.newick", "base_tree.binary.newick"),
+                      ("species_tree.newick", "base_tree.newick")):
+        assert (dest / "data" / name).read_bytes() == (shipped / src).read_bytes()
+
+
+def test_template_new_keys(tmp_path):
+    dest = tmp_path / "proj"
+    project.init(dest, today="23/10/2026")
+    raw = yaml.safe_load((dest / "druid.yaml").read_text())
+    assert raw["taxonomy"] == "data/genome_sources.tsv"
+    assert raw["sources"] == []
+    assert raw["params"]["origins"] is True
+    core.config_from_raw(raw, root=dest.resolve())
+
+
+def test_shipped_taxonomy_md5():
+    assert _md5(paths.DRUID_HOME / "druid/data/genome_sources.tsv") == "4f010d40e071fc13a9e15cdadf423b3e"

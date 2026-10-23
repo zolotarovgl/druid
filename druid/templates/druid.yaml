@@ -9,6 +9,8 @@ prepare: auto            # locked: druid never rebuilds data/input.fasta (druid 
 proteomes_dir: /users/asebe/xgraubove/genomes/data   # read-only; files start with the species prefix
 proteome_glob: "{{sp}}_long.pep.fasta"
 species: []
+taxonomy: data/genome_sources.tsv   # species -> clade table of the default source (shipped; copied by druid init)
+sources: []                         # custom proteome sources (prepare), beside the default proteomes_dir
 # Parameters the step1 and step2 stages read. Values = v3 nextflow.config params + the `precise`
 # profile + the last successful step2 run (24/09/2026: -profile slurm,precise --run_generax).
 params:
@@ -26,7 +28,8 @@ params:
   gxsup: true
   resources_tsv: resources.tsv          # absent = stage defaults
   min_seqs: 5          # skip HGs with fewer seqs (= nextflow.config params.min_seqs; IQ-TREE needs >= 4 to bootstrap)
-  min_distinct: 4      # ... and HGs with fewer distinct seqs (= nextflow.config params.min_distinct)
+  origins: true        # compute orthogroup origins (Dollo MRCA on ORIGIN_TREE)
+  min_distinct: 4     # ... and HGs with fewer distinct seqs (= nextflow.config params.min_distinct)
   # step1 (search, cluster): = nextflow.config params + the 24/09/2026 step1 run
   genefam_info: data/families.csv       # the project's families (library: druid/data/families_library.csv); the job reads a copy taken at submit
   infasta: data/input.fasta             # built by prepare (sub-project 2)
