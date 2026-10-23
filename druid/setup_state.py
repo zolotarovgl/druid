@@ -137,6 +137,34 @@ def proteome_file(src: Source, sp: str):
     return next(iter(sorted(src.proteomes_dir.glob(src.glob.format(sp=sp)))), None)
 
 
+def base_tree_files(raw: dict, root: Path):
+    """(binary, origin) newick paths: raw["tree_source"] (one user tree for both) if set, else the
+    project's data/base_tree.binary.newick and data/base_tree.newick."""
+    ts = raw.get("tree_source")
+    if ts:
+        p = _resolve(ts, root)
+        return p, p
+    return Path(root) / "data" / "base_tree.binary.newick", Path(root) / "data" / "base_tree.newick"
+
+
+def _tree_blockers(raw: dict, root: Path, species: list, generax: bool) -> list:
+    from druid import sptree
+    binary_f, _origin_f = base_tree_files(raw, root)
+    try:
+        base = binary_f.read_text().strip()
+        pl = sptree.read_placements(Path(root) / "data" / sptree.PLACEMENTS)
+        miss = sptree.missing(base, species, pl)
+        built = sptree.build_trees(base, base, species, pl)[0]
+    except Exception as e:                      # unreadable / unparsable newick
+        return [f"species tree unreadable ({binary_f}): {e}"]
+    out = []
+    if miss:
+        out.append(f"{len(miss)} ticked species not on the tree: {', '.join(miss)}")
+    if generax and raw.get("tree_source") and sptree.has_polytomy(built):
+        out.append("tree_source has polytomies; GeneRax needs a binary tree")
+    return out
+
+
 def blockers(raw: dict, cfg: core.Config, root: Path) -> list:
     """Why prepare cannot run, human-readable, in this order."""
     out = []
@@ -159,7 +187,11 @@ def blockers(raw: dict, cfg: core.Config, root: Path) -> list:
     _cands, rowless = candidates(list(srcs.values()))
     for r in rowless:
         out.append(f"no taxonomy row for {r}")
-    # species tree / placement check (GeneRax or origins on): added with sptree in Task 4.
+    # species tree / placement check (GeneRax or origins on)
+    params = raw.get("params") or {}
+    gx = bool(params.get("run_generax"))
+    if sel and (gx or params.get("origins", True)):
+        out.extend(_tree_blockers(raw, root, list(dict.fromkeys(sp for sp, _ in sel)), gx))
     if not core.family_ids(cfg, strict=False):
         out.append("no families in params.genefam_info")
     return out

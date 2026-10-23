@@ -23,6 +23,8 @@ def proj(tmp_path):
         (prot / f"{sp}_long.pep.fasta").write_text(">x\nM\n")
     (root / "data" / "tax.tsv").write_text(TAX + "short\trow\n")
     (root / "data" / "families.csv").write_text(GENEFAM)
+    for f in ("base_tree.binary.newick", "base_tree.newick"):   # species tree for the tree blockers
+        (root / "data" / f).write_text("((Aaa:1,Bbb:1):1,Nope:1)R;")
     yamledit.update_config({("proteomes_dir",): str(prot), ("taxonomy",): "data/tax.tsv",
                             ("species",): ["Aaa"]})
     return root, prot
