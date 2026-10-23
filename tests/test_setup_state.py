@@ -148,6 +148,32 @@ def test_blockers_messages(proj, tmp_path):
     assert ss.blockers(raw, cfg, root) == ["no families in params.genefam_info"]
 
 
+def test_blockers_glob_without_sp_or_unusable(proj, tmp_path):
+    root, prot = proj
+    raw, cfg = _raw()
+    # no {sp}: every species would get the same (first) file -> one line for the source, no per-species ones
+    out = ss.blockers({**raw, "species": ["Aaa", "Bbb"], "proteome_glob": "*_long.pep.fasta"}, cfg, root)
+    assert out == ["source default: proteome_glob '*_long.pep.fasta' has no {sp}: "
+                   "every species would get the same file"]
+    for bad, err in (("{sp.x}", "AttributeError"), ("{sp}{x}", "KeyError"), ("{0}{sp}", "IndexError"),
+                     ("{sp", "ValueError"), ("/abs/{sp}", "NotImplementedError")):
+        out = ss.blockers({**raw, "proteome_glob": bad}, cfg, root)        # never raises
+        assert len(out) == 1 and out[0].startswith(f"source default: proteome_glob {bad!r} unusable ({err}"), out
+    d = _custom(tmp_path, ("Bbb.faa",))
+    out = ss.blockers({**raw, "species": ["Aaa", {"sp": "Bbb", "source": "mine"}], "sources": [
+        {"name": "mine", "proteomes_dir": str(d), "proteome_glob": "*.faa", "taxonomy": "data/tax.tsv"}]},
+        cfg, root)
+    assert out == ["source mine: proteome_glob '*.faa' has no {sp}: every species would get the same file"]
+
+
+def test_blockers_prefix_with_underscore(proj):
+    root, prot = proj
+    (prot / "Aa_b_long.pep.fasta").write_text(">x\nM\n")
+    raw, cfg = _raw()
+    out = ss.blockers({**raw, "species": ["Aaa", "Aa_b"]}, cfg, root)
+    assert "Aa_b: a species prefix cannot contain '_' (gene ids are split at the first '_')" in out
+
+
 def _locked_when_called(monkeypatch):
     seen = []
 
@@ -159,18 +185,29 @@ def _locked_when_called(monkeypatch):
     return seen
 
 
-def test_sbatch_all_locks_before_first_sbatch(proj, monkeypatch):
-    seen = _locked_when_called(monkeypatch)
-    raw, cfg = _raw()
+def _two_arrays():
     ids = paths.project_root() / "ids.txt"
     ids.write_text("a\n")
     sc = paths.project_root() / "a.sbatch"
     sc.write_text("#!/bin/sh\n")
     rd = paths.project_root() / "runs" / "r1"
     rd.mkdir(parents=True)
-    w = model.Written(rd, [(None, ["a"], ids, sc)])
-    assert model.sbatch_all(w) == (["777"], None)
-    assert seen == [True]
+    return model.Written(rd, [(None, ["a"], ids, sc), (None, ["a"], ids, sc)])
+
+
+def test_sbatch_all_locks_after_first_success(proj, monkeypatch):
+    seen = _locked_when_called(monkeypatch)
+    assert model.sbatch_all(_two_arrays()) == (["777", "777"], None)
+    assert seen == [None, True]                     # set after the 1st array is queued, before the 2nd
+    assert paths.read_raw()["species_locked"] is True
+
+
+def test_sbatch_all_failed_first_sbatch_does_not_lock(proj, monkeypatch):
+    import subprocess
+    monkeypatch.setattr(model, "_slurm", lambda cmd: subprocess.CompletedProcess(cmd, 1, "", "denied"))
+    submitted, err = model.sbatch_all(_two_arrays())
+    assert submitted == [] and "sbatch failed" in err
+    assert "species_locked" not in paths.read_raw()
 
 
 def test_dry_run_does_not_lock(cli, monkeypatch):

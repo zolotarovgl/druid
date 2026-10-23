@@ -102,21 +102,64 @@ def test_refuses_locked_and_species_locked(proj):
     assert _snap(root) == snap
 
 
-def test_trees_written_only_when_switch_on(proj):
-    yamledit.update_config({("params", "origins"): False, ("params", "run_generax"): False})
-    root = paths.project_root()
-    snap = _snap(root)
-    out, cfg, _ = _go()
-    assert cfg.params["SPECIES_TREE"] not in out and cfg.params["ORIGIN_TREE"] not in out
-    after = _snap(root)
-    assert all(after[k] == v for k, v in snap.items() if "tree" in os.path.basename(k)), \
-        [k for k, v in snap.items() if "tree" in os.path.basename(k) and after[k] != v]
-    assert cfg.params["infasta"] in out
+def test_trees_always_record_the_species_universe(proj):
+    root, _ = proj
     yamledit.update_config({("params", "origins"): True})
     out, cfg, _ = _go()
     t = cfg.params["SPECIES_TREE"].read_text()
     assert "Zzzz" not in t and "Abcd" in t and cfg.params["ORIGIN_TREE"].is_file()
     assert cfg.params["SPECIES_TREE"] in out and cfg.params["ORIGIN_TREE"] in out
+    # both switches off: the trees are still the pruned base, so the Results species panel
+    # (model.species_universe) counts against the ticked species, not the shipped 59-tip tree;
+    # a ticked species missing from the base is simply absent (no blocker: no tree is needed)
+    yamledit.update_config({("params", "origins"): False, ("params", "run_generax"): False})
+    for f in ("base_tree.binary.newick", "base_tree.newick"):
+        (root / "data" / f).write_text("((Abcd:1,Wxyz:1)n1:1,(Zzzz:1,Qqqq:1)n2:1)R;")
+    out, cfg, _ = _go()
+    assert cfg.params["SPECIES_TREE"] in out and cfg.params["ORIGIN_TREE"] in out
+    assert sorted(model.species_universe(cfg)) == ["Abcd", "Wxyz"]
+    assert "Hsap" not in cfg.params["ORIGIN_TREE"].read_text()
+
+
+def test_trees_off_unreadable_base_refuses(proj):
+    root, _ = proj
+    yamledit.update_config({("params", "origins"): False, ("params", "run_generax"): False})
+    (root / "data" / "base_tree.binary.newick").unlink()
+    snap = _snap(root)
+    with pytest.raises(prepare.PrepareError, match="species tree unreadable"):
+        _go()
+    assert _snap(root) == snap
+
+
+@pytest.mark.parametrize("glob", ["*.faa", "{sp.x}.faa"])
+def test_bad_glob_refuses_writes_nothing(proj, glob):
+    root, _ = proj
+    yamledit.update_config({("proteome_glob",): glob})
+    snap = _snap(root)
+    with pytest.raises(prepare.PrepareError, match="proteome_glob"):
+        _go()
+    assert _snap(root) == snap
+    r = CliRunner().invoke(cli.app, ["--project", str(root), "prepare"])
+    assert r.exit_code == 2 and "ERROR: cannot prepare" in r.output and "proteome_glob" in r.output
+    assert r.exception is None or isinstance(r.exception, SystemExit)
+    assert _snap(root) == snap
+
+
+def test_outputs_get_umask_permissions(proj):
+    old = os.umask(0o027)
+    try:
+        out, _cfg, _ = _go()
+    finally:
+        os.umask(old)
+    assert out and all(p.stat().st_mode & 0o777 == 0o640 for p in out), \
+        [(str(p), oct(p.stat().st_mode & 0o777)) for p in out]
+
+
+def test_utf8_in_and_out(proj):
+    root, prot = proj
+    (prot / "Abcd.faa").write_bytes(">XP_1 café α\nMKV\n".encode("utf-8"))
+    _out, cfg, _ = _go()
+    assert ">Abcd_XP_1 café α\nMKV\n".encode("utf-8") in cfg.params["infasta"].read_bytes()
 
 
 def test_species_info_clade_rules(proj):

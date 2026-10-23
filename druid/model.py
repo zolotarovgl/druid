@@ -595,8 +595,6 @@ def sbatch_all(w: Written, submitted: list[str] | None = None) -> tuple[list[str
     exception mid-way still knows which job ids exist."""
     submitted = [] if submitted is None else submitted
     from druid import setup_state
-    raw = paths.read_raw()                           # the species list is frozen at the first real submit
-    setup_state.lock_species(raw, core.config_from_raw(raw))
     for i, (res, ids_, ids_file, script) in enumerate(w.arrays):
         try:
             r = _slurm(["sbatch", "--parsable", str(script)])
@@ -614,7 +612,14 @@ def sbatch_all(w: Written, submitted: list[str] | None = None) -> tuple[list[str
                                + ("not submitted (or unknown): " if timed_out else "not submitted: ")
                                + " ".join(str(a[3]) for a in w.arrays[i:]))
         submitted.append(jid)                        # before the write: the array IS queued
-        paths.append_text(w.run_dir / "jobs.tsv", f"{jid}\t{ids_file}\n")
+        # the species list is frozen once the first array is queued (never when none is), before its
+        # jobs.tsv row: that row makes the lock inferred and lock_species would not write the flag
+        try:
+            if i == 0:
+                raw = paths.read_raw()
+                setup_state.lock_species(raw, core.config_from_raw(raw))
+        finally:                                     # a lock error never loses a queued job's row
+            paths.append_text(w.run_dir / "jobs.tsv", f"{jid}\t{ids_file}\n")
     return submitted, None
 
 

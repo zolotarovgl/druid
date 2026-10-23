@@ -20,7 +20,7 @@ class PrepareError(RuntimeError):
 def _shipped_clades() -> Dict[str, tuple]:
     """prefix -> (Latin name, clade) of the shipped species_info.tsv."""
     out = {}
-    for line in SHIPPED_INFO.read_text().splitlines():
+    for line in SHIPPED_INFO.read_text(encoding="utf-8").splitlines():
         f = line.split("\t")
         if len(f) >= 3 and f[0].strip():
             out[f[0].strip()] = (f[1].strip(), f[2].strip())
@@ -52,7 +52,7 @@ def _prefixed(src_file: Path, sp: str) -> str:
     prefixed `<sp>_` unless they already are."""
     prefix = sp + "_"
     out = []
-    with open(src_file, errors="replace") as fh:
+    with open(src_file, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.replace("\r", "").rstrip("\n")
             if not line.strip():
@@ -65,7 +65,8 @@ def _prefixed(src_file: Path, sp: str) -> str:
 
 
 def run(raw: dict, cfg: core.Config, root: Path, notes: Optional[list] = None) -> List[Path]:
-    """Write input.fasta, the species trees (GeneRax or origins on) and species_info.tsv.
+    """Write input.fasta, the species trees (pruned to the ticked species; placements added) and
+    species_info.tsv.
     Returns the paths written; the tree build's notes are appended to `notes` if given."""
     if raw.get("prepare") == "locked":
         raise PrepareError("this project is adopted (prepare: locked): its inputs are not rebuilt")
@@ -83,17 +84,17 @@ def run(raw: dict, cfg: core.Config, root: Path, notes: Optional[list] = None) -
                 fh.read(1)
         except OSError as e:
             raise PrepareError(f"cannot read {f}: {e}")
-    params = raw.get("params") or {}
-    trees = None
-    if params.get("run_generax") or params.get("origins", True):
-        from druid import sptree
-        bin_f, org_f = ss.base_tree_files(raw, root)
-        try:
-            trees = sptree.build_trees(bin_f.read_text().strip(), org_f.read_text().strip(),
-                                       list(dict.fromkeys(sp for sp, _ in sel)),
-                                       sptree.read_placements(Path(root) / "data" / sptree.PLACEMENTS))
-        except Exception as e:
-            raise PrepareError(f"species tree: {e}")
+    # the trees are written even with GeneRax and origins off: SPECIES_TREE is the project's species
+    # universe (model.species_universe, the Results species panel), never the shipped 59-tip tree
+    from druid import sptree
+    bin_f, org_f = ss.base_tree_files(raw, root)
+    try:
+        trees = sptree.build_trees(bin_f.read_text(encoding="utf-8").strip(),
+                                   org_f.read_text(encoding="utf-8").strip(),
+                                   list(dict.fromkeys(sp for sp, _ in sel)),
+                                   sptree.read_placements(Path(root) / "data" / sptree.PLACEMENTS))
+    except Exception as e:
+        raise PrepareError(f"species tree: {e}")
     info = _species_info_text(sel, srcs)
 
     written, tmps = [], []
@@ -102,25 +103,26 @@ def run(raw: dict, cfg: core.Config, root: Path, notes: Optional[list] = None) -
         tmps.append(fa)
         for (sp, _src), f in zip(sel, files):
             try:
-                paths.append_text(fa, _prefixed(f, sp))
+                paths.append_text(fa, _prefixed(f, sp), encoding="utf-8")
             except OSError as e:
                 raise PrepareError(f"cannot read {f}: {e}")
         jobs = [(fa, Path(cfg.params["infasta"]))]
-        if trees:
-            binary, origin, tree_notes = trees
-            if notes is not None:
-                notes.extend(tree_notes)
-            for text, dst in ((binary, cfg.params["SPECIES_TREE"]), (origin, cfg.params["ORIGIN_TREE"])):
-                t = paths.mkstemp("tree_", ".newick")
-                tmps.append(t)
-                paths.write_text(t, text + "\n")
-                jobs.append((t, Path(dst)))
+        binary, origin, tree_notes = trees
+        if notes is not None:
+            notes.extend(tree_notes)
+        for text, dst in ((binary, cfg.params["SPECIES_TREE"]), (origin, cfg.params["ORIGIN_TREE"])):
+            t = paths.mkstemp("tree_", ".newick")
+            tmps.append(t)
+            paths.write_text(t, text + "\n", encoding="utf-8")
+            jobs.append((t, Path(dst)))
         t = paths.mkstemp("species_info_", ".tsv")
         tmps.append(t)
-        paths.write_text(t, info)
+        paths.write_text(t, info, encoding="utf-8")
         jobs.append((t, model.species_info_path(cfg)))
+        mode = paths.default_file_mode()
         for tmp, dst in jobs:
             paths.mkdir(dst.parent, exist_ok=True)
+            paths.chmod(tmp, mode)                     # mkstemp's 0600 -> what open() would give
             paths.replace(tmp, dst)
             written.append(dst)
     finally:

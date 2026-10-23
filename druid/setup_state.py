@@ -57,7 +57,7 @@ def read_taxonomy(path) -> dict:
     col 2 Latin name, col 6 taxonomy). Rows with fewer than 6 columns are skipped."""
     out = {}
     try:
-        text = Path(path).read_text()
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return out
     for line in text.splitlines():
@@ -137,6 +137,23 @@ def proteome_file(src: Source, sp: str):
     return next(iter(sorted(src.proteomes_dir.glob(src.glob.format(sp=sp)))), None)
 
 
+GLOB_ERRORS = (KeyError, IndexError, ValueError, AttributeError, NotImplementedError)  # format / glob
+
+
+def glob_problem(src: Source):
+    """Why src.glob cannot pick one file per species (None: it can). Without {sp} every species
+    would get the same first file (one proteome under N prefixes); a malformed pattern ({sp.x},
+    {0}, an absolute path) raises in str.format or Path.glob."""
+    try:
+        if src.glob.format(sp="A") == src.glob.format(sp="B"):
+            return (f"source {src.name}: proteome_glob {src.glob!r} has no {{sp}}: "
+                    "every species would get the same file")
+        next(iter(src.proteomes_dir.glob(src.glob.format(sp="A"))), None)   # a missing dir: none
+    except GLOB_ERRORS as e:
+        return f"source {src.name}: proteome_glob {src.glob!r} unusable ({type(e).__name__}: {e})"
+    return None
+
+
 def base_tree_files(raw: dict, root: Path):
     """(binary, origin) newick paths: raw["tree_source"] (one user tree for both) if set, else the
     project's data/base_tree.binary.newick and data/base_tree.newick."""
@@ -147,16 +164,20 @@ def base_tree_files(raw: dict, root: Path):
     return Path(root) / "data" / "base_tree.binary.newick", Path(root) / "data" / "base_tree.newick"
 
 
-def _tree_blockers(raw: dict, root: Path, species: list, generax: bool) -> list:
+def _tree_blockers(raw: dict, root: Path, species: list, generax: bool, needed: bool) -> list:
+    """needed = GeneRax or origins on. Off, the base must still read: prepare writes it pruned (the
+    species universe of the Results panel), but a species missing from it is simply absent."""
     from druid import sptree
     binary_f, _origin_f = base_tree_files(raw, root)
     try:
-        base = binary_f.read_text().strip()
+        base = binary_f.read_text(encoding="utf-8").strip()
         pl = sptree.read_placements(Path(root) / "data" / sptree.PLACEMENTS)
         miss = sptree.missing(base, species, pl)
         built = sptree.build_trees(base, base, species, pl)[0]
     except Exception as e:                      # unreadable / unparsable newick
         return [f"species tree unreadable ({binary_f}): {e}"]
+    if not needed:
+        return []
     out = []
     if miss:
         out.append(f"{len(miss)} ticked species not on the tree: {', '.join(miss)}")
@@ -177,21 +198,31 @@ def blockers(raw: dict, cfg: core.Config, root: Path) -> list:
     for sp, srcs_ in by_sp.items():
         if len(set(srcs_)) > 1:
             out.append(f"{sp} is ticked from two sources: {', '.join(sorted(set(srcs_)))}")
+    for sp in by_sp:                            # model.species_of splits gene ids at the first '_'
+        if "_" in sp:
+            out.append(f"{sp}: a species prefix cannot contain '_' (gene ids are split at the first '_')")
     srcs = {s.name: s for s in sources(raw, root)}
+    bad_glob = {}                               # the sources a ticked species uses, one line each
+    for src in dict.fromkeys(src for _sp, src in sel):
+        why = glob_problem(srcs[src]) if src in srcs else None
+        if why:
+            bad_glob[src] = why
+            out.append(why)
     for sp, src in sel:
         s = srcs.get(src)
         if s is None:
             out.append(f"{sp}: unknown source {src!r}")
-        elif proteome_file(s, sp) is None:
+        elif src not in bad_glob and proteome_file(s, sp) is None:
             out.append(f"{sp}: no proteome file in {s.proteomes_dir} ({s.glob})")
     _cands, rowless = candidates(list(srcs.values()))
     for r in rowless:
         out.append(f"no taxonomy row for {r}")
-    # species tree / placement check (GeneRax or origins on)
+    # species tree / placement check (missing / polytomy only with GeneRax or origins on)
     params = raw.get("params") or {}
     gx = bool(params.get("run_generax"))
-    if sel and (gx or params.get("origins", True)):
-        out.extend(_tree_blockers(raw, root, list(dict.fromkeys(sp for sp, _ in sel)), gx))
+    if sel:
+        out.extend(_tree_blockers(raw, root, list(dict.fromkeys(sp for sp, _ in sel)), gx,
+                                  needed=gx or bool(params.get("origins", True))))
     if not core.family_ids(cfg, strict=False):
         out.append("no families in params.genefam_info")
     return out

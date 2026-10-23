@@ -132,17 +132,31 @@ def tmp_dir() -> Path:
     return d
 
 
-def write_text(p: PathLike, text: str, root: Optional[Path] = None) -> Path:
+def write_text(p: PathLike, text: str, root: Optional[Path] = None,
+               encoding: Optional[str] = None) -> Path:
     q = writable(p, root=root)
-    q.write_text(text)
+    q.write_text(text, encoding=encoding)
     return q
 
 
-def append_text(p: PathLike, text: str) -> Path:
+def append_text(p: PathLike, text: str, encoding: Optional[str] = None) -> Path:
     q = writable(p)
-    with open(q, "a") as fh:
+    with open(q, "a", encoding=encoding) as fh:
         fh.write(text)
     return q
+
+
+def chmod(p: PathLike, mode: int) -> Path:
+    q = writable(p)
+    os.chmod(q, mode)
+    return q
+
+
+def default_file_mode() -> int:
+    """The mode open() gives a new file: 0o666 less the umask (mkstemp's files are 0600)."""
+    um = os.umask(0)
+    os.umask(um)
+    return 0o666 & ~um
 
 
 def mkdir(p: PathLike, parents: bool = True, exist_ok: bool = False,
