@@ -996,14 +996,16 @@ def test_same_class_name_is_a_warning_not_a_blocker(proj):
             fam_ids = [setup_tui._fam_id(r) for r in families.read(root / "data" / "families.csv")]
             assert {"rbp.CSD", "tfs.CSD"} <= set(fam_ids) and len(fam_ids) == 7
             text = _text(scr, "#blockers")
-            assert "warning: family name CSD is listed under 2 prefixes (rbp, tfs)" in text
-            assert "no blockers: ready for prepare" in text
+            assert "warning: family name CSD is listed under 2 prefixes (rbp, tfs)" \
+                in _text(scr, "#warn-text")                               # w shows it
+            assert "no blockers: ready for prepare" in text and "1 warning (w: show)" in text
             assert not any("CSD" in b for b in scr._blockers)
             await pilot.press("P")
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert _text(scr, "#blockers").startswith("prepare wrote data/input.fasta")
-            assert "warning: family name CSD" in _text(scr, "#blockers")    # still shown after
+            assert "1 warning (w: show)" in _text(scr, "#blockers")         # still counted after
+            assert "warning: family name CSD" in _text(scr, "#warn-text")
     _run(go())
 
 
@@ -1140,4 +1142,126 @@ def test_setup_check_error_opens_on_jobs(proj, monkeypatch):
             await pilot.pause()
             assert not isinstance(app.screen, setup_tui.SetupScreen) and app.tab == "jobs"
             assert any("setup check failed" in n and "unreadable" in n for n in notes)
+    _run(go())
+
+
+def test_analyses_up_down_between_switches_space_enter_toggle(proj):
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Analyses")                        # enter: the first switch
+            gx, org = scr.query_one("#sw-generax"), scr.query_one("#sw-origins")
+            assert scr.focused is gx
+            assert any(setup_tui.OPTION_KEYS == str(s.render()) for s in scr.query("#sec-analyses .note"))
+            await pilot.press("down")
+            await pilot.pause()
+            assert scr.focused is org
+            await pilot.press("space")                                    # origins, not GeneRax
+            await pilot.pause()
+            assert _raw()["params"]["origins"] is False and _raw()["params"]["run_generax"] is True
+            await pilot.press("down")                                     # the last: stays
+            await pilot.pause()
+            assert scr.focused is org
+            await pilot.press("up", "enter")                              # GeneRax, same visit
+            await pilot.pause()
+            assert scr.focused is gx
+            assert _raw()["params"]["run_generax"] is False and _raw()["params"]["origins"] is False
+            assert gx.value is False and org.value is False
+            await pilot.press("down", "enter")                            # origins back on
+            await pilot.pause()
+            assert _raw()["params"]["origins"] is True and _raw()["params"]["run_generax"] is False
+    _run(go())
+
+
+def test_tree_and_search_radios_up_down_space_enter(proj):
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Tree")                            # nothing missing: the radios
+            assert scr.focused is scr.query_one("#tree-base")
+            await pilot.press("down", "space")                            # chromo
+            await pilot.pause()
+            assert _raw()["tree_source"] == setup_state.CHROMO_TREE
+            scr.query_one("#tree-base").focus()
+            await pilot.press("up", "enter")                              # back to v3
+            await pilot.pause()
+            assert not _raw().get("tree_source") and scr.query_one("#rb-tree-v3").value
+            await _section(pilot, scr, "Search")
+            assert scr.focused is scr.query_one("#se-type")
+            await pilot.press("down", "enter")                            # custom HMMs
+            await pilot.pause()
+            assert scr.query_one("#rb-hmm").value and scr.query_one("#se-hmmdir").display
+    _run(go())
+
+
+def test_warnings_counted_w_shows_and_hides(proj, monkeypatch):
+    warns = [f"warning: family name F{i} is listed under 2 prefixes (a, b)" for i in range(12)]
+    monkeypatch.setattr(core, "family_warnings", lambda cfg: list(warns))
+
+    async def go():
+        app = _app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            scr = await _setup(app, pilot)
+            box = scr.query_one("#warnings")
+            text = _text(scr, "#blockers")
+            assert "blockers: no species ticked" in text and "12 warnings (w: show)" in text
+            assert "F0" not in text and not box.display                   # off by default
+            await pilot.press("w")
+            await pilot.pause()
+            assert box.display and _text(scr, "#warn-text") == "\n".join(warns)
+            assert "blockers: no species ticked" in _text(scr, "#blockers")
+            assert "12 warnings (w: hide)" in _text(scr, "#blockers")
+            assert box.size.height <= 6 and box.max_scroll_y > 0          # limited, scrolls
+            assert scr.query_one("#setup-body").size.height > 10          # sections stay in view
+            await _section(pilot, scr, "Species")                         # w is text in an Input
+            await pilot.press("w")
+            await pilot.pause()
+            assert scr.query_one("#sp-filter").value == "w" and box.display
+            scr.query_one("#sections").focus()
+            await pilot.press("w")                                        # hidden again
+            await pilot.pause()
+            assert not box.display and "12 warnings (w: show)" in _text(scr, "#blockers")
+            assert "blockers: no species ticked" in _text(scr, "#blockers")
+    _run(go())
+
+
+def test_place_screen_rows_internal_nodes_between_tips(proj):
+    root, prot, mine = proj
+    (prot / "Ddd_long.pep.fasta").write_text(">x\nM\n")
+    (root / "data" / "tax.tsv").write_text(TAX + "Ddd\tDdd sp\t1\t1\t1\tMetazoa, XDdd\tsrc\t1\tMT\tNA\n")
+    _tree(root, "((Aaa:1,Bbb:1):1,Ccc:1)R;")
+    yamledit.update_config({**_mine(mine), ("species",): ["Aaa", "Bbb", {"sp": "Ccc", "source": "mine"},
+                                                          "Ddd"]})
+    pl_file = root / "data" / sptree.PLACEMENTS
+
+    async def go():
+        from treeview.widget import TreeView
+        app = _app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Tree")
+            assert str(scr.query_one("#tree-missing").get_row_at(0)[0]) == "Ddd"
+            await pilot.press("enter")                                    # place Ddd
+            await pilot.pause()
+            place = app.screen
+            assert isinstance(place, setup_tui.PlaceScreen)
+            tv = place.query_one(TreeView)
+            assert tv.gap == 0 and not tv.compact
+            m = tv.model
+            assert tv.cursor == 0 and not m.is_tip(0)                     # the root
+            # rows, top down: Aaa · (Aaa,Bbb) · Bbb · R · Ccc: each node on a row of its own
+            assert [i for _t, i in tv.rows if i is not None] == \
+                [m.tip("Aaa"), m.mrca([m.tip("Aaa"), m.tip("Bbb")]), m.tip("Bbb"), 0, m.tip("Ccc")]
+            await pilot.press("up")
+            await pilot.pause()
+            assert tv.cursor == m.tip("Bbb")
+            await pilot.press("up")                                       # the cursor stops on it
+            await pilot.pause()
+            node = tv.cursor                                              # the (Aaa,Bbb) node
+            assert not m.is_tip(node) and m.size[node] == 3
+            await pilot.press("p")
+            await pilot.pause()
+            assert app.screen is scr and pl_file.read_text() == "Ddd\tAaa,Bbb\n"
     _run(go())

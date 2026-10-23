@@ -43,6 +43,7 @@ TREE_OFF = "placement not needed: GeneRax and origins are off (prepare reads and
 TREE_BASES = {"rb-tree-v3": "v3", "rb-tree-chromo": "chromo", "rb-tree-custom": "custom"}
 TREE_LABELS = {"v3": "v3 curated, 59 tips", "chromo": "chromo, 94 tips", "custom": "tree_source"}
 LOCKED_ALL = "read-only: adopted project (prepare: locked); druid never changes its druid.yaml here"
+OPTION_KEYS = "↑↓ move · space/enter toggle"     # Analyses switches, Tree / Search radio sets
 
 
 def _run_editor(path: Path) -> int:
@@ -123,6 +124,12 @@ class PlaceScreen(DruidTreeScreen):
     becomes the sister of (a tip or an internal node); esc leaves without a placement."""
     BINDINGS = [Binding("p", "place", "place here")]
 
+    def on_mount(self) -> None:
+        """Tips on consecutive rows, each internal node on its own row between its children's
+        (TreeView gap 0, not the compact -1 the gene trees open in; Grygoriy, 23/10/2026)."""
+        self.tree.gap = 0
+        self.tree.rebuild()
+
     def action_place(self) -> None:
         m, i = self.model, self.tree.cursor
         self.dismiss(frozenset(m.name[j] for j in range(i, i + m.size[i]) if m.is_tip(j)))
@@ -152,8 +159,14 @@ class SetupScreen(Screen):
     SetupScreen #tree-base { height: auto; }
     SetupScreen .row { height: auto; }
     SetupScreen .row Label { padding: 1 1; }
+    SetupScreen .row:focus-within { background: $boost; }
+    SetupScreen .row:focus-within Label { text-style: bold; }
+    SetupScreen Switch:focus { border: tall orange; }
+    SetupScreen RadioSet:focus { border: tall orange; }
     SetupScreen .note { color: $text-muted; height: auto; }
     SetupScreen #blockers { height: auto; max-height: 8; color: $warning; }
+    SetupScreen #warnings { height: auto; max-height: 6; display: none; }
+    SetupScreen #warn-text { color: $text-muted; }
     """
     BINDINGS = [
         Binding("tab", "leave('jobs')", "Jobs", priority=True),
@@ -164,6 +177,10 @@ class SetupScreen(Screen):
         Binding("e", "edit_config", "edit druid.yaml"),
         Binding("e", "edit_family", "edit row"),     # Families; enter ticks (Grygoriy, 23/10/2026)
         Binding("P", "prepare", "prepare"),
+        Binding("w", "toggle_warnings", "warnings"),
+        # Analyses: ↑↓ between the switches (the radio sets move by themselves; Grygoriy 23/10/2026)
+        Binding("up", "switch_move(-1)", "previous", show=False),
+        Binding("down", "switch_move(1)", "next", show=False),
     ]
 
     def __init__(self):
@@ -171,6 +188,7 @@ class SetupScreen(Screen):
         self.current = self.SECTIONS[0]
         self._msg = ""                           # the last action's error / note, top of #blockers
         self._cmd = ""                           # a `:` command being typed, above it
+        self._show_warn = False                  # w: the warnings list (off: only their count)
         self._raw: dict = {}
         self._cfg = None                         # core.Config, None when druid.yaml does not load
         self._errors: list = []                  # ERROR: ... lines (config, sources, blockers)
@@ -221,6 +239,7 @@ class SetupScreen(Screen):
                     yield Static("", id="sp-count", markup=False)
                 with Vertical(id="sec-analyses"):
                     yield Static("", id="an-reason", classes="note", markup=False)
+                    yield Static(OPTION_KEYS, classes="note", markup=False)
                     with Horizontal(classes="row"):
                         yield Switch(id="sw-generax")
                         yield Label("GeneRax gene-tree reconciliation (params.run_generax)")
@@ -230,6 +249,7 @@ class SetupScreen(Screen):
                     yield Static("Both off: no species tree is needed.", classes="note")
                 with Vertical(id="sec-tree"):
                     yield Static("", id="tree-info", classes="note", markup=False)
+                    yield Static(OPTION_KEYS, classes="note", markup=False)
                     with RadioSet(id="tree-base"):
                         yield RadioButton("v3 curated (59)", id="rb-tree-v3", value=True)
                         yield RadioButton("chromo (94)", id="rb-tree-chromo")
@@ -241,6 +261,7 @@ class SetupScreen(Screen):
                     yield DataTable(id="tree-missing", cursor_type="row")
                 with Vertical(id="sec-search"):
                     yield Static("", id="se-reason", classes="note", markup=False)
+                    yield Static(OPTION_KEYS, classes="note", markup=False)
                     with RadioSet(id="se-type"):
                         yield RadioButton("gene family file (Pfam HMM names)", id="rb-file",
                                           value=True)
@@ -271,6 +292,8 @@ class SetupScreen(Screen):
                     yield Static("", id="cfg-help", classes="note", markup=False)
                     yield Static("", id="cfg-text", markup=False)
         yield Static("", id="blockers", markup=False)
+        with VerticalScroll(id="warnings"):          # w; height-limited, scrolls
+            yield Static("", id="warn-text", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -281,8 +304,8 @@ class SetupScreen(Screen):
         txt = Text()
         txt.append("Jobs │ Results │ ")
         txt.append("[Setup]", style="reverse bold")
-        txt.append("   tab: back to Jobs · enter: open a section · esc q: back · :q! quit",
-                   style="dim")
+        txt.append("   tab: back to Jobs · enter: open a section · esc q: back · w: warnings · "
+                   ":q! quit", style="dim")
         self.query_one("#setup-tabbar", Static).update(txt)
         self._reload()
         self._refresh()
@@ -437,13 +460,31 @@ class SetupScreen(Screen):
         self._fill_blockers()
 
     def _fill_blockers(self) -> None:
+        """The bottom line: the command, the last note, the ERROR lines and the blockers, always;
+        the warnings (never blocking) only as a count unless w shows them in their own scrolled
+        box (Grygoriy, 23/10/2026: they took most of the screen)."""
         lines = [x for x in (self._cmd, self._msg) if x] + self._errors
         if self._blockers:
             lines.append("blockers: " + " · ".join(self._blockers))
         elif self._cfg is not None:
             lines.append("no blockers: ready for prepare")
-        lines += self._warnings                  # last: the blockers line stays in view
+        n = len(self._warnings)
+        if n:                                    # last: the blockers line stays in view
+            lines.append(f"{n} warning{'s' if n != 1 else ''} "
+                         f"(w: {'hide' if self._show_warn else 'show'})")
         self.query_one("#blockers", Static).update("\n".join(lines))
+        self.query_one("#warn-text", Static).update("\n".join(self._warnings))
+        self.query_one("#warnings").display = self._show_warn and bool(n)
+
+    def action_toggle_warnings(self) -> None:
+        self._show_warn = not self._show_warn
+        self._fill_blockers()
+
+    def action_switch_move(self, d: int) -> None:
+        """↑↓ in Analyses: the focus to the previous / next switch (the focused one is lit)."""
+        sws = [s for s in self.query(Switch) if not s.disabled]
+        if self.focused in sws:
+            sws[min(max(sws.index(self.focused) + d, 0), len(sws) - 1)].focus()
 
     def _fill_source(self) -> None:
         n = {}
@@ -637,6 +678,8 @@ class SetupScreen(Screen):
             return self.current == "Config"
         if action == "edit_family":
             return self.current == "Families"
+        if action == "switch_move":              # else ↑↓ go on to the focused widget's parents
+            return isinstance(self.focused, Switch)
         return True
 
     def action_leave(self, to: str) -> None:
