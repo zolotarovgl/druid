@@ -2501,11 +2501,11 @@ def test_tab_switches_jobs_and_results_tabs(cli):
         async with app.run_test() as pilot:
             app.load_now()
             await pilot.pause()
-            assert app._tab_text == "[Jobs] │ Results" and app.focused is app.query_one("#overview")
+            assert app._tab_text == "[Jobs] │ Results │ Setup" and app.focused is app.query_one("#overview")
             await pilot.press("tab")
             await app.workers.wait_for_complete()
             await pilot.pause()
-            assert app.tab == "results" and app._tab_text == "Jobs │ [Results]"
+            assert app.tab == "results" and app._tab_text == "Jobs │ [Results] │ Setup"
             assert app.focused is app.query_one("#rtab") and not app.query_one("#overview").display
             assert [r.group for r in app.rt_shown] == [r.group for r in app.ov_rows]   # same groups
             assert _rt(app)[:2] == [("ALL", 3, 2, 3, 7, 1), ("tfs", 3, 2, 3, 7, 1)]
@@ -2546,7 +2546,7 @@ def test_results_tab_reads_once_and_window_reuses_it(cli, monkeypatch):
             await _key(pilot, "escape")
             assert app.view == "overview" and app.tab == "results" and app.focused is rt
             assert app._key_at_cursor(rt) == "tfs" and rt.cursor_column == 3
-            await _key(pilot, "tab", "o")                            # Jobs tab o: cache reused too
+            await _key(pilot, "shift+tab", "o")                      # Jobs tab o: cache reused too
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert app.view == "results" and calls == [(3, "possvm")]
@@ -2930,7 +2930,7 @@ def test_spinner_on_results_tab_and_for_history(cli, monkeypatch):
             await _key(pilot, "tab")
             spin = app.query_one("#status")
             assert spin.running and spin.text == "loading…"
-            await _key(pilot, "tab")                                   # Jobs tab: not its wait
+            await _key(pilot, "shift+tab")                             # Jobs tab: not its wait
             assert not spin.running
             await _key(pilot, "tab")
             assert spin.running

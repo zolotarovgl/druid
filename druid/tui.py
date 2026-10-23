@@ -19,7 +19,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 from textual.worker import get_current_worker
 
-from druid import core, history, model, paths
+from druid import core, history, model, paths, setup_state
 from druid.common import fmt_mem, fmt_time
 
 
@@ -28,6 +28,7 @@ def load_raw() -> dict:
     return paths.read_raw()
 
 FILTERS = ("actionable", "failed", "ready", "running", "blocked", "done")
+TABS = ("jobs", "results", "setup")   # first-screen tabs, in tab order (Setup: druid.setup_tui)
 ACTIONABLE = ("failed", "ready")      # the "actionable" filter shows failed + ready HGs
 PANE_TITLES = {"#overview": "Overview", "#rtab": "Results", "#stages": "1 Stages", "#hgs": "2 HGs",
                "#arrays": "3 Arrays", "#detail": "4 Detail",
@@ -458,7 +459,7 @@ class Spinner(Static):
 KEYS = {
     "overview": ("Overview · Jobs", [
         ("Move", [("↑ ↓ ← →", "move · ↑ on the first row: the header (←/→ column, enter/s sort)"),
-                  ("tab shift+tab", "Results tab")]),
+                  ("tab shift+tab", "Results / Setup tab")]),
         ("Open", [("enter", "open the group at that stage (HG view)"),
                   ("o", "results of the group")]),
         ("Group & sort", [("c", "group by category"), ("f", "group by family"),
@@ -468,7 +469,7 @@ KEYS = {
                    ("", "default view: failed+ready")])]),
     "overview_results": ("Overview · Results tab", [
         ("Move", [("↑ ↓ ← →", "move · ↑ on the first row: the header (←/→ column, enter/s sort)"),
-                  ("tab shift+tab", "Jobs tab")]),
+                  ("tab shift+tab", "Setup / Jobs tab")]),
         ("Open", [("enter o", "open the group's Results"),
                   ("t", "trees open from a group's Results (o, then t)")]),
         ("Source", [("p", "possvm ↔ possvm_prev")]),
@@ -600,7 +601,7 @@ class PhyloApp(App):
         self._array_rows: list = []
         self.ov_hide: "str | None" = None       # stage name; h
         self.ov_shown: list = []                # ov_rows as displayed (sorted / filtered)
-        self.tab = "jobs"                       # first-screen tab: "jobs" | "results"; tab
+        self.tab = "jobs"                       # first-screen tab: "jobs" | "results" | "setup"; tab
         self.rt_source: "str | None" = None     # Results tab source; None = default_source
         self.rt_hide: "str | None" = None       # Results tab: count column name; h
         self.rt_rows: list = []                 # [model.OGGroupRow], Jobs group order
@@ -658,6 +659,16 @@ class PhyloApp(App):
         self._show_view()
         self.load_bg()
         self.set_interval(self.refresh_s, self.load_bg)
+        if self.view == "overview" and self._fresh_project():
+            self._open_setup()                   # nothing to show yet: start on the Setup tab
+
+    def _fresh_project(self) -> bool:
+        """No species ticked and nothing locks them: a new project, which opens on Setup."""
+        try:
+            return (not setup_state.selected(self.raw) and self.raw.get("prepare") != "locked"
+                    and not setup_state.species_locked(self.raw, self.cfg))
+        except Exception:                        # a bad druid.yaml: open as before
+            return False
 
     # ---- data -------------------------------------------------------------------------------
     def _collect(self) -> dict:
@@ -867,8 +878,8 @@ class PhyloApp(App):
         self._update_help()                      # help follows view and tab
 
     def _set_tabbar(self) -> None:
-        """`[Jobs] │ Results`: the active tab bracketed and reversed."""
-        names = (("jobs", "Jobs"), ("results", "Results"))
+        """`[Jobs] │ Results │ Setup`: the active tab bracketed and reversed."""
+        names = (("jobs", "Jobs"), ("results", "Results"), ("setup", "Setup"))
         self._tab_text = " │ ".join(f"[{n}]" if k == self.tab else n for k, n in names)
         txt = Text()
         for i, (k, n) in enumerate(names):
@@ -877,18 +888,45 @@ class PhyloApp(App):
         txt.append("   tab: switch", style="dim")
         self.query_one("#tabbar", Static).update(txt)
 
-    def _switch_tab(self) -> None:
+    def _switch_tab(self, step: int = 1) -> None:
+        """tab: Jobs -> Results -> Setup -> Jobs (shift+tab: the other way)."""
         for wid in ("#overview", "#rtab"):       # the new tab starts in row mode, the old one too
             t = self.query_one(wid, SortTable)
             if t.header:
                 t.leave_header(to_row=False)
-        self.tab = "results" if self.tab == "jobs" else "jobs"
+        nxt = TABS[(TABS.index(self.tab) + step) % len(TABS)]
+        if nxt == "setup":
+            self._open_setup()
+            return
+        self.tab = nxt
         self._show_view()
         self.refresh_bindings()                  # p shows on the Results tab only
         self._maybe_load_rtab()
 
+    def _open_setup(self) -> None:
+        from druid.setup_tui import SetupScreen
+        self.tab = "setup"
+        self._set_tabbar()
+        self.push_screen(SetupScreen(), callback=self._setup_closed)
+
+    def _setup_closed(self, to: "str | None" = None) -> None:
+        """Back from Setup (tab / esc: Jobs, shift+tab: Results): druid.yaml is read again, so the
+        edits made there take effect (and the species trees are re-read on the next Results load)."""
+        try:
+            self.raw = load_raw()
+            self.cfg = core.load_config(paths.config_file())
+            self._universe = self._phyla = self._otree = None
+            self._otree_err = ""
+        except (core.ConfigError, paths.NoProject, paths.OutsideProject) as e:
+            self.notify(f"ERROR: {e} (the previous config is kept)", severity="error", markup=False)
+        self.tab = to if to in ("jobs", "results") else "jobs"
+        self._show_view()
+        self.refresh_bindings()
+        self._maybe_load_rtab()
+        self.load_bg()
+
     def action_focus_next(self) -> None:
-        """tab: on the first screen it switches Jobs / Results; elsewhere it moves focus."""
+        """tab: on the first screen it switches Jobs / Results / Setup; elsewhere it moves focus."""
         if self.view == "overview" and not isinstance(self.screen, ModalScreen):
             self._switch_tab()
             return
@@ -896,7 +934,7 @@ class PhyloApp(App):
 
     def action_focus_previous(self) -> None:
         if self.view == "overview" and not isinstance(self.screen, ModalScreen):
-            self._switch_tab()
+            self._switch_tab(-1)
             return
         super().action_focus_previous()
 
@@ -1143,8 +1181,9 @@ class PhyloApp(App):
 
     def check_action(self, action: str, parameters: tuple) -> "bool | None":
         """Footer shows only the keys of the current view."""
-        if action != "quit" and type(self.screen).__name__ in ("TreeScreen", "KeysScreen"):
-            return False                     # the tree / key list owns the keys; q still quits
+        if action != "quit" and type(self.screen).__name__ in ("TreeScreen", "KeysScreen",
+                                                                 "SetupScreen"):
+            return False                     # the tree / key list / Setup owns the keys; q quits
         f = self.focused
         if action in ("toggle", "select_all", "resubmit", "log", "open_results", "open_tree") \
                 and isinstance(f, SortTable) and f.header:
