@@ -83,6 +83,16 @@ def test_build_trees_drops_stale_placements():
     assert sp.missing(NW, ["A", "X", "Y"], pl[:1]) == ["Y"]
 
 
+def test_build_trees_placement_all_or_nothing():
+    # X is already on the origin base only: add_sister succeeds, carry_to_origin fails ->
+    # the binary tree must not get X either (no binary / origin divergence)
+    binary = "((A:1,B:1)ab:1,C:1)R;"
+    b, o, notes = sp.build_trees(binary, "((A:1,B:1)ab:1,C:1,X:1)R;", ["A", "B", "C", "X"],
+                                 [sp.Placement("X", frozenset({"A", "B"}))])
+    assert sp.tips(b) == {"A", "B", "C"} and b == sp.prune(binary, {"A", "B", "C"})
+    assert any("X" in n and "already on the tree" in n for n in notes)
+
+
 def test_blocker_tree_missing_and_polytomy(proj, tmp_path):  # noqa: F811
     root, prot = proj
     (prot / "Ccc_long.pep.fasta").write_text(">x\nM\n")

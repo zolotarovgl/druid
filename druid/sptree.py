@@ -136,11 +136,13 @@ def build_trees(base_binary: str, base_origin: str, species: List[str],
         if not x.tipset <= tips(binary) or not x.tipset <= tips(origin):
             notes.append(f"placement of {x.sp} skipped: sister tips {sorted(x.tipset)} not on the tree")
             continue
-        try:
-            binary = add_sister(binary, x.tipset, x.sp)
-            origin = carry_to_origin(origin, x.tipset, x.sp)
+        try:                                        # both or neither: the two trees never diverge
+            new_binary = add_sister(binary, x.tipset, x.sp)
+            new_origin = carry_to_origin(origin, x.tipset, x.sp)
         except ValueError as e:
             notes.append(f"placement of {x.sp} skipped: {e}")
+        else:
+            binary, origin = new_binary, new_origin
     return binary, origin, notes
 
 
