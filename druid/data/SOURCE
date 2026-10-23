@@ -1,6 +1,6 @@
-druid shipped data, copied read-only from Phylogenies_v3 on 14/10/2026.
+druid shipped data: 5 files copied read-only from Phylogenies_v3 on 14/10/2026, plus Xavi's
+taxonomy table and the 2026_chromo species tree (23/10/2026): 7 files in all, each approved by Grygoriy.
 V3 = ~/ant/gzolotarov/projects/2022_scRNAseq_Mlei/Phylogenies_v3/data
-(approved by Grygoriy: exactly these 5 files)
 
 file                        v3 path                                  md5                               date
 species_tree.binary.newick  $V3/species_tree.binary.newick           4ae364378f9b95f162e880b76d1afd4c  14/10/2026

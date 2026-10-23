@@ -861,9 +861,14 @@ _NEWICK_TIP = re.compile(r"[(,]\s*([^\s():,;\[\]]+)")    # a name right after '(
 def species_universe(cfg: core.Config) -> list[str]:
     """Tip names of params.SPECIES_TREE in newick order (names after ')' are clades: skipped).
     Only the names are read: no tree parsing, no ete3. GeneRax and origins off (Ruling K): prepare
-    writes no tree, so the universe is the project's ticked species, in species: order."""
+    writes no tree, so the universe of a prepared project with species ticked is those species, in
+    species: order; an adopted one (prepare: locked: its curated tree) or one with none ticked
+    still reads SPECIES_TREE (controller ruling, 23/10/2026)."""
     if not setup_state.trees_needed(cfg.params):
-        return list(dict.fromkeys(sp for sp, _src in setup_state.selected(paths.read_raw())))
+        raw = paths.read_raw()
+        ticked = list(dict.fromkeys(sp for sp, _src in setup_state.selected(raw)))
+        if ticked and raw.get("prepare") != "locked":
+            return ticked
     text = Path(cfg.params["SPECIES_TREE"]).read_text()
     return list(dict.fromkeys(_NEWICK_TIP.findall(text)))
 

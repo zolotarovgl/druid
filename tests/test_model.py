@@ -435,6 +435,19 @@ def test_species_universe_trees_off_is_the_ticked_species(cli):
     assert model.species_universe(cfg) == ["Nvec", "Qqqq", "Mlei"]
 
 
+@pytest.mark.parametrize("change", [{("prepare",): "locked"},       # adopted: its curated tree
+                                    {("species",): []}])             # nothing ticked
+def test_species_universe_trees_off_reads_the_tree(cli, change):
+    """Both switches off, but adopted (prepare: locked) or no species ticked: SPECIES_TREE is read."""
+    from druid import yamledit
+    yamledit.update_config({("params", "run_generax"): False, ("params", "origins"): False,
+                            ("species",): ["Nvec", "Qqqq"]})
+    yamledit.update_config(change)
+    cfg = _cfg()
+    write_results(cfg)
+    assert model.species_universe(cfg) == ["Mlei", "Bova", "Hsap", "Nvec"]
+
+
 def test_phyla_from_species_info(cli):
     cfg = _cfg()
     write_results(cfg)

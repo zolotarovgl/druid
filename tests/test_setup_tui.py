@@ -390,7 +390,7 @@ def _fams(root):
     return [r.fields() for r in families.read(root / "data" / "families.csv")]
 
 
-def test_tree_section_hidden_when_switches_off(proj):
+def test_tree_section_switches_off_base_usable(proj):
     root, _prot, _mine_ = proj
     _tree(root, "((Aaa:1,Xxx:1):1,Yyy:1)R;")
     yamledit.update_config({("species",): ["Aaa", "Bbb"]})
@@ -429,6 +429,40 @@ def test_tree_section_hidden_when_switches_off(proj):
             assert _text(scr, "#blockers").startswith(setup_tui.TREE_OFF)
             assert not (root / "data" / sptree.PLACEMENTS).exists()
     _run(go())
+
+
+def test_tree_base_refused_on_locked_project(cli):
+    """Ruling E: prepare: locked: the base choice and tree_source refuse every change, behind the UI
+    too; druid.yaml and the project's files stay byte-identical."""
+    f = paths.config_file()
+    raw = yaml.safe_load(f.read_text())
+    raw["prepare"] = "locked"
+    f.write_text(yaml.safe_dump(raw, sort_keys=False))
+    before = f.read_bytes()
+    files = {p: p.read_bytes() for p in paths.project_root().rglob("*")
+             if p.is_file() and ".druid" not in p.parts}
+
+    async def go():
+        app = tui.PhyloApp(core.load_config(f), refresh_s=3600)
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Tree")
+            assert scr.query_one("#tree-base").disabled and scr.query_one("#tree-source").disabled
+            assert scr.focused is not scr.query_one("#tree-base")
+            for rid in ("#rb-tree-chromo", "#rb-tree-custom"):        # behind the disabled radios
+                scr._msg = ""
+                scr.query_one(rid).value = True
+                await pilot.pause()
+                assert scr.query_one("#rb-tree-v3").value and "prepare: locked" in _text(scr, "#blockers")
+            for kind in ("chromo", "custom"):
+                scr._set_tree_base(kind)
+            scr._set_tree_source(setup_state.CHROMO_TREE)
+            await pilot.pause()
+            assert scr.query_one("#rb-tree-v3").value and not scr._tree_custom
+    _run(go())
+    assert f.read_bytes() == before
+    assert {p: p.read_bytes() for p in paths.project_root().rglob("*")
+            if p.is_file() and ".druid" not in p.parts} == files
 
 
 def test_tree_base_choice(proj):
