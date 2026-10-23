@@ -326,7 +326,7 @@ class SetupScreen(Screen):
         glob = v["glob"] or setup_state.DEFAULT_GLOB
         try:
             ok = "{sp}" in glob and bool(glob.format(sp="x"))
-        except (KeyError, IndexError, ValueError):
+        except Exception:                        # KeyError, AttributeError ({sp.fa}), ...: refused
             ok = False
         if not ok:
             return f"the glob {glob!r} needs {{sp}} (the species prefix) and no other {{...}}"

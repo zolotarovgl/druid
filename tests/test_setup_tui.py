@@ -103,6 +103,25 @@ def test_tab_cycles_to_setup_and_back(cli):
     _run(go())
 
 
+def test_leaving_setup_with_invalid_config_keeps_raw_and_cfg(cli):
+    async def go():
+        app = tui.PhyloApp(core.load_config(paths.config_file()), refresh_s=3600)
+        async with app.run_test() as pilot:
+            raw0, cfg0 = app.raw, app.cfg
+            await _setup(app, pilot)
+            f = paths.config_file()
+            bad = yaml.safe_load(f.read_text())
+            bad.pop("outdir")                                         # parses, fails validation
+            f.write_text(yaml.safe_dump(bad))
+            with pytest.raises(core.ConfigError):
+                core.config_from_raw(paths.read_raw())
+            await pilot.press("tab")
+            await pilot.pause()
+            assert not isinstance(app.screen, setup_tui.SetupScreen) and app.tab == "jobs"
+            assert app.raw is raw0 and app.cfg is cfg0 and "outdir" in app.raw   # neither half-updated
+    _run(go())
+
+
 def test_fresh_project_opens_on_setup(proj):
     async def go():
         app = _app()
@@ -220,6 +239,15 @@ def test_add_custom_source(proj, tmp_path):
             assert "ERROR: not a directory" in _text(scr, "#blockers")
             scr.query_one("#src-dir").value = str(mine)
             scr.query_one("#src-tax").value = "data/tax.tsv"
+            for bad in ("{sp}{sp.fa}", "{sp}_{x}.fa", "{sp}{", "{sp}{0}", "nosp.fa"):
+                # AttributeError, KeyError, ValueError, IndexError, no {sp}
+                scr.query_one("#src-glob").value = bad
+                scr.query_one("#src-tax").focus()
+                await pilot.press("enter")
+                await pilot.pause()
+                assert paths.config_file().read_bytes() == before, bad
+                assert "ERROR: the glob" in _text(scr, "#blockers"), bad
+            scr.query_one("#src-glob").value = ""
             scr.query_one("#src-tax").focus()
             await pilot.press("enter")
             await pilot.pause()
@@ -278,11 +306,19 @@ def test_blockers_line_updates(proj, monkeypatch):
     _run(go())
 
 
-def test_setup_on_locked_project_writes_nothing(cli, monkeypatch):
+def test_setup_on_locked_project_writes_nothing(cli, monkeypatch, tmp_path):
     f = paths.config_file()
+    prot = tmp_path / "locked_prot"                                   # candidates, so ticks are real attempts
+    prot.mkdir()
+    for sp in ("Aaa", "Bbb"):
+        (prot / f"{sp}_long.pep.fasta").write_text(">x\nM\n")
+    (tmp_path / "locked_tax.tsv").write_text(TAX)
     raw = yaml.safe_load(f.read_text())
     raw["prepare"] = "locked"
     raw["species"] = ["Aaa"]
+    raw["proteomes_dir"] = str(prot)
+    raw["proteome_glob"] = "{sp}_long.pep.fasta"      # the fixture loads the template unformatted ({{sp}})
+    raw["taxonomy"] = str(tmp_path / "locked_tax.tsv")
     f.write_text("# druid project adopted from phylocli/config.yaml (druid adopt).\n"
                  + yaml.safe_dump(raw, sort_keys=False))
     before = f.read_bytes()
@@ -301,6 +337,17 @@ def test_setup_on_locked_project_writes_nothing(cli, monkeypatch):
                 assert sw.disabled
                 sw.value = not sw.value
                 await pilot.pause()
+            await _section(pilot, scr, "Species")                     # table ticks: space, down, space, a
+            scr.query_one("#sp-filter").value = ""
+            t = scr.query_one("#sp-table")
+            t.focus()
+            await pilot.pause()
+            assert t.row_count == 2 and scr.focused is t
+            scr._msg = ""
+            await pilot.press("space", "down", "space", "a")
+            await pilot.pause()
+            assert "prepare: locked" in _text(scr, "#blockers")      # each attempt refused with the reason
+            assert all(str(t.get_row_at(i)[0]) == ("[x]" if i == 0 else "[ ]") for i in range(2))
             assert all(scr.query_one(f"#src-{k}").disabled for k in ("name", "dir", "glob", "tax"))
             assert "prepare: locked" in _text(scr, "#sp-reason")
             await pilot.press("tab")

@@ -912,13 +912,15 @@ class PhyloApp(App):
     def _setup_closed(self, to: "str | None" = None) -> None:
         """Back from Setup (tab / esc: Jobs, shift+tab: Results): druid.yaml is read again, so the
         edits made there take effect (and the species trees are re-read on the next Results load)."""
-        try:
-            self.raw = load_raw()
-            self.cfg = core.load_config(paths.config_file())
-            self._universe = self._phyla = self._otree = None
-            self._otree_err = ""
+        try:                                     # both or neither: raw is written into run dirs
+            raw = load_raw()
+            cfg = core.load_config(paths.config_file())
         except (core.ConfigError, paths.NoProject, paths.OutsideProject) as e:
             self.notify(f"ERROR: {e} (the previous config is kept)", severity="error", markup=False)
+        else:
+            self.raw, self.cfg = raw, cfg
+            self._universe = self._phyla = self._otree = None
+            self._otree_err = ""
         self.tab = to if to in ("jobs", "results") else "jobs"
         self._show_view()
         self.refresh_bindings()
