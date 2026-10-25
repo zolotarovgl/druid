@@ -1485,7 +1485,8 @@ def test_species_filter_prefix_list():
     assert f("Mlei, Xxxx Nvec") == (["Mlei", "Nvec"], ["Xxxx"])           # the rest reported
     assert f("Mlei Mlei") == (["Mlei"], [])
     assert f("Metazoa, Ctenophora") == (["Mlei", "Hsap", "Nvec", "Hcal"], [])   # a phrase: substring
-    assert f("Mlei sp") == (["Mlei"], [])
+    assert f("Mlei sp") == (["Mlei"], ["sp"])                             # a prefix in it: a list
+    assert f("Mnemiopsis leidyi") == ([], [])                             # no prefix: substring
     assert f("hca") == (["Hcal"], [])                                     # one word: substring
     assert f("") == (["Mlei", "Hsap", "Nvec", "Hcal"], [])
 
