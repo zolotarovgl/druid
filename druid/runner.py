@@ -79,6 +79,9 @@ def run_one(cfg: Config, stage: str, hg: str, work_root: Path) -> int:
         # the work dir is work_root/hg and is removed first: an id like '..' would remove the wrong tree
         raise BadHgId(f"invalid HG id {hg!r}: it must be a plain name (no '/', no leading '.', not empty)")
     work = Path(work_root) / hg
+    if stage == "cluster" and hg in core.family_done(cfg, [hg])["no_hits"]:
+        print(f"no hits: nothing to cluster for {hg}")
+        return 0
     if work.exists():
         paths.rmtree(work)
     paths.mkdir(work, parents=True)

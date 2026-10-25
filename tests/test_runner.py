@@ -165,3 +165,17 @@ def test_cli_run_with_a_bad_hg_id_is_an_error_line(results_tree):
     r = CliRunner().invoke(cli.app, ["_run", "align", "../keep", "--run-dir", str(rd)])
     assert r.exit_code == 2 and "ERROR:" in r.output and "HG id" in r.output
     assert (rd / "work" / "keep").is_dir()
+
+
+def test_cluster_no_hits_exits_0(results_tree, monkeypatch, tmp_path, capsys):
+    cfg, root = results_tree
+    (cfg.outdir/"search").mkdir()
+    (cfg.outdir/"search"/"a.F1.domains.fasta").write_text("")
+    stages = tmp_path/"stages"; stages.mkdir()
+    (stages/"cluster.sh").write_text("exit 9\n")          # must not run
+    monkeypatch.setattr(runner, "STAGES_DIR", stages)
+    before = set(os.listdir(cfg.outdir/"clusters"))
+    assert runner.run_one(cfg, "cluster", "a.F1", root/"work") == 0
+    assert "no hits: nothing to cluster for a.F1" in capsys.readouterr().out
+    assert not (root/"work"/"a.F1").exists()
+    assert set(os.listdir(cfg.outdir/"clusters")) == before
