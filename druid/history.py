@@ -13,7 +13,7 @@ import os
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from druid import core, paths
@@ -53,7 +53,8 @@ class Attempt:
 EXIT_REASON = {"137": "killed: out of memory?", "140": "time limit (SIGUSR2 warning)",
                "143": "terminated", "10": "GeneRax parse error",
                "65": "stage produced no output"}
-STATE_REASON = {"OUT_OF_MEMORY": "out of memory", "TIMEOUT": "time limit", "CANCELLED": "cancelled"}
+STATE_REASON = {"OUT_OF_MEMORY": "out of memory", "TIMEOUT": "time limit", "CANCELLED": "cancelled",
+                "SEARCH_FAILED": "cancelled: search failed"}
 
 
 def reason(status: str, exit_: str) -> str:
@@ -196,6 +197,20 @@ def _nextflow_attempts(cfg: core.Config, hg: str | None, expected: set, warn,
 # ---- phylocli submissions ---------------------------------------------------------------
 
 RUN_RE = re.compile(r"^(\d{4})(\d\d)(\d\d)-(\d\d)(\d\d)(\d\d)_(.+?)(?:-\d+)?$")
+
+
+def _depends(run: Path) -> dict:
+    """{cluster job id: search job id} from a linked cluster run dir's depends.tsv."""
+    try:
+        lines = (run / "depends.tsv").read_text().splitlines()
+    except OSError:
+        return {}
+    out = {}
+    for line in lines:
+        c = line.split("\t")
+        if len(c) >= 2 and c[0].strip() and c[1].strip():
+            out[c[0].strip()] = c[1].strip()
+    return out
 
 
 def _elapsed_s(s: str) -> int | None:
@@ -353,6 +368,8 @@ def _phylocli_attempts(hg: str | None, stages=None) -> list[Attempt]:
     states = _sacct(sorted({s[3] for s in subs if s[9] is None}))
     fresh = {}
     out = []
+    raw: dict = {}       # (job id, task index) -> state
+    cascade = []         # (index in out, search job id, task index) of linked cluster tasks
     for run, stage, sub, jid, hgs, k, key, stamp, line, entry in subs:
         if entry is not None:
             cpus, mem, time = entry["req"]
@@ -366,9 +383,8 @@ def _phylocli_attempts(hg: str | None, stages=None) -> list[Attempt]:
                                                    for r in recs):
                 fresh[key] = {"line": line, "ids": stamp, "hgs": hgs, "req": [cpus, mem, time],
                               "tasks": [[r[x] for x in _REC_KEYS] for r in recs]}
+        search_of = _depends(run).get(jid) if stage == "cluster" else None
         for i, h in enumerate(hgs):
-            if hg and h != hg:
-                continue
             if entry is None and states is None:
                 status, exit_, rss, el = "unknown", "-", "-", "-"
             else:
@@ -380,8 +396,17 @@ def _phylocli_attempts(hg: str | None, stages=None) -> list[Attempt]:
                     exit_ = _exit(rec["exit"]) if rec["exit"] else "-"
                     rss = _rss(rec["rss"]) if rec["rss"] else "-"
                     el = fmt_elapsed(rec["elapsed"]) if rec["elapsed"] else "-"
+            raw[(jid, i)] = status                    # raw sacct state, before any relabelling
+            if hg and h != hg:
+                continue
+            if search_of is not None:
+                cascade.append((len(out), search_of, i))
             out.append(Attempt(h, stage, "phylocli", run.name, sub, 1, status, exit_, cpus, mem,
                                time, rss, el, str(run / "logs" / f"{stage}_{jid}_{i}.err")))
+    for n, search_jid, i in cascade:                  # SLURM cancels a linked cluster task whose
+        a = out[n]                                    # search task failed: sacct gives no reason
+        if a.status == "CANCELLED" and raw.get((search_jid, i)) in FAILED_STATES:
+            out[n] = replace(a, status="SEARCH_FAILED")
     merged = {k: v for k, v in cache.items() if k.split("|", 1)[0] in live}
     merged.update(fresh)
     if fresh or merged.keys() != cache.keys():

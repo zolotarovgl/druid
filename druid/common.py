@@ -7,7 +7,7 @@ from druid import paths
 
 # SLURM job states.
 FAILED_STATES = {"FAILED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "CANCELLED", "PREEMPTED",
-                 "BOOT_FAIL", "DEADLINE"}
+                 "BOOT_FAIL", "DEADLINE", "SEARCH_FAILED"}   # SEARCH_FAILED: druid's own label
 RUNNING_STATES = {"RUNNING", "COMPLETING", "CONFIGURING", "STAGE_OUT", "SUSPENDED"}
 
 

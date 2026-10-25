@@ -388,3 +388,25 @@ def test_array_cache_write_outside_the_project_is_skipped_silently(hist, tmp_pat
     out = tmp_path / "outside" / "arrays.json"
     history._write_array_cache(out, {"k": 1})            # an optimisation: never fail over it
     assert not out.parent.exists()
+
+
+def test_cascade_cancel_is_search_failed(hist, monkeypatch):
+    _cli, cfg, _c, _t = hist
+    runs = _state["runs"]
+    _run(runs, "20261001-100000_search", "search", "101", ["F1", "F2", "F3"], _sbatch(2, "500M", 30))
+    _run(runs, "20261001-100001_cluster", "cluster", "102", ["F1", "F2", "F3"], _sbatch(2, "500M", 30))
+    (runs / "20261001-100001_cluster" / "depends.tsv").write_text("102\t101\n")
+    monkeypatch.setenv("FAKE_SACCT", SACCT + "101_0|COMPLETED||00:01:00|0:0\\n101_1|FAILED||00:00:10|1:0\\n"
+                       "101_2|COMPLETED||00:01:00|0:0\\n102_0|COMPLETED||00:01:00|0:0\\n"
+                       "102_1|CANCELLED by 0||00:00:00|0:0\\n102_2|CANCELLED by 0||00:00:00|0:0\\n")
+    fams = {"F1", "F2", "F3"}
+    for _round in range(2):                       # second round reads the array cache
+        atts = history.family_attempts(cfg, fams=fams)
+        cl = {a.hg: a for a in atts if a.stage == "cluster"}
+        assert cl["F1"].status == "COMPLETED"
+        assert cl["F2"].status == "SEARCH_FAILED"
+        assert cl["F3"].status == "CANCELLED"     # its search task completed: a real cancel
+        assert history.reason("SEARCH_FAILED", "0") == "cancelled: search failed"
+        assert history.colour("SEARCH_FAILED") == "red"
+    cached = (history.history_dir() / history.ARRAY_CACHE).read_text()
+    assert "SEARCH_FAILED" not in cached and "CANCELLED" in cached
