@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -118,6 +119,22 @@ def _ticked_note(sps: list, most: int = 5) -> str:
     return f"{note} ({', '.join(sps)})" if len(sps) <= most else note
 
 
+def _species_filter(cands: list, text: str) -> tuple:
+    """(shown, not_found) for the Species filter. Two or more words separated by commas or spaces,
+    at least one of them a candidate's prefix (case ignored): the list of prefixes, in the order
+    typed, and the words that are no prefix (Grygoriy, 25/10/2026). Otherwise (one word, or a
+    phrase such as "Metazoa, Ctenophora" or a Latin name): a substring of any column."""
+    words = [w for w in re.split(r"[,\s]+", text.strip()) if w]
+    prefixes = {c.sp.lower() for c in cands}
+    if len(words) > 1 and any(w.lower() in prefixes for w in words):
+        shown = [c for w in dict.fromkeys(w.lower() for w in words)
+                 for c in cands if c.sp.lower() == w]
+        return shown, [w for w in words if w.lower() not in prefixes]
+    q = text.strip().lower()
+    return [c for c in cands if not q or
+            any(q in str(v).lower() for v in (c.sp, c.name, c.taxonomy, c.source))], []
+
+
 def _tick(ticked: bool) -> Text:
     """The tick cell as plain text: a str "[x]" is Rich markup to a DataTable and shows nothing."""
     return Text("[x]" if ticked else "[ ]")
@@ -206,6 +223,7 @@ class SetupScreen(Screen):
         self._rowless: list = []
         self._sel: list = []                     # [(sp, source)], the species: order
         self._shown: list = []                   # candidates passing the filter, as in #sp-table
+        self._sp_unknown: list = []              # filter words that are no prefix (a list typed)
         self._blockers: list = []
         self._warnings: list = []                # core.family_warnings: shown, never blocking
         self._ro_all = False                     # prepare: locked
@@ -243,7 +261,8 @@ class SetupScreen(Screen):
                     yield Input(placeholder="taxonomy table (default: the shipped one)", id="src-tax")
                 with Vertical(id="sec-species"):
                     yield Static("", id="sp-reason", classes="note", markup=False)
-                    yield Input(placeholder="filter (any column) · enter: tick all shown",
+                    yield Input(placeholder="filter (any column, or prefixes: Mlei, Hsap Nvec) · "
+                                            "enter: tick all shown",
                                 id="sp-filter")
                     yield DataTable(id="sp-table", cursor_type="row")
                     yield Static("", id="sp-count", markup=False)
@@ -510,9 +529,8 @@ class SetupScreen(Screen):
             self.query_one(f"#src-{k}", Input).disabled = self._ro_all
 
     def _fill_species(self) -> None:
-        q = self.query_one("#sp-filter", Input).value.strip().lower()
-        self._shown = [c for c in self._cands if not q or
-                       any(q in str(v).lower() for v in (c.sp, c.name, c.taxonomy, c.source))]
+        q = self.query_one("#sp-filter", Input).value.strip()
+        self._shown, self._sp_unknown = _species_filter(self._cands, q)
         t = self.query_one("#sp-table", DataTable)
         row = t.cursor_row
         t.clear()
@@ -524,6 +542,8 @@ class SetupScreen(Screen):
         count = f"{len(self._sel)} ticked / {len(self._cands)}"
         if q:
             count += f" · {len(self._shown)} shown"
+        if self._sp_unknown:
+            count += " · not found: " + ", ".join(self._sp_unknown)
         self.query_one("#sp-count", Static).update(count)
         self.query_one("#sp-reason", Static).update(self._sp_reason)
 
@@ -839,11 +859,12 @@ class SetupScreen(Screen):
             return
         sel = list(self._sel)
         new = [(c.sp, c.source) for c in self._shown if (c.sp, c.source) not in sel]
+        unknown = " · not found: " + ", ".join(self._sp_unknown) if self._sp_unknown else ""
         if new:
             self._write({("species",): setup_state.species_value(sel + new)},
-                        done=_ticked_note([sp for sp, _src in new]))
+                        done=_ticked_note([sp for sp, _src in new]) + unknown)
         else:
-            self._msg = f"+0 ticked: all {len(self._shown)} shown already ticked"
+            self._msg = f"+0 ticked: all {len(self._shown)} shown already ticked" + unknown
         if not self._msg.startswith("ERROR"):
             f.value = ""
             self._fill_species()

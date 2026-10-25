@@ -1470,3 +1470,40 @@ def test_enter_on_a_species_row_refused_when_locked(proj, lock):
             await pilot.pause()
     _run(go())
     assert paths.config_file().read_bytes() == before
+
+
+def test_species_filter_prefix_list():
+    C = setup_state.Candidate
+    cands = [C(sp, f"{sp} sp", f"Metazoa, Ctenophora, X{sp}", "default", None)
+             for sp in ("Mlei", "Hsap", "Nvec", "Hcal")]
+
+    def f(text):
+        shown, unknown = setup_tui._species_filter(cands, text)
+        return [c.sp for c in shown], unknown
+    assert f("Nvec, Mlei") == (["Nvec", "Mlei"], [])                     # typed order
+    assert f("nvec mlei,,  hsap") == (["Nvec", "Mlei", "Hsap"], [])       # case, spaces, commas
+    assert f("Mlei, Xxxx Nvec") == (["Mlei", "Nvec"], ["Xxxx"])           # the rest reported
+    assert f("Mlei Mlei") == (["Mlei"], [])
+    assert f("Metazoa, Ctenophora") == (["Mlei", "Hsap", "Nvec", "Hcal"], [])   # a phrase: substring
+    assert f("Mlei sp") == (["Mlei"], [])
+    assert f("hca") == (["Hcal"], [])                                     # one word: substring
+    assert f("") == (["Mlei", "Hsap", "Nvec", "Hcal"], [])
+
+
+def test_filter_enter_ticks_a_prefix_list(proj):
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            t = scr.query_one("#sp-table")
+            await pilot.press(*"Bbb, Qqq Aaa")
+            await pilot.pause()
+            assert [str(t.get_row_at(i)[1]) for i in range(t.row_count)] == ["Bbb", "Aaa"]
+            assert "not found: Qqq" in _text(scr, "#sp-count")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert _raw()["species"] == ["Bbb", "Aaa"]
+            assert "+2 ticked (Bbb, Aaa) · not found: Qqq" in _text(scr, "#blockers")
+            assert scr.query_one("#sp-filter").value == ""
+    _run(go())
