@@ -62,9 +62,16 @@ def nf_job(name: str) -> tuple[str, str] | None:
     return None
 
 
+def run_stage(run_dir: Path) -> "str | None":
+    """The stage of a run dir (<yyyymmdd-hhmmss>_<stage>[-n]); None if the name does not parse."""
+    m = history.RUN_RE.match(run_dir.name)
+    return m.group(7) if m else None
+
+
 def live(expected: set) -> dict[str, set[str]] | None:
-    """stage -> ids pending or running in SLURM right now: tasks of phylocli arrays (`squeue -r`
-    lists each array task; task i = line i+1 of its ids file) and Nextflow jobs (named
+    """stage -> ids pending or running in SLURM right now: tasks of druid's arrays (found by job
+    id in runs/*/jobs.tsv, whatever their name; `squeue -r` lists each array task; task i = line
+    i+1 of its ids file) and Nextflow jobs (named
     nf-<PROCESS>_(<tag>)). None when squeue is not on PATH."""
     lines = squeue("%i|%.300j", array_tasks=True)
     if lines is None:
@@ -76,15 +83,16 @@ def live(expected: set) -> dict[str, set[str]] | None:
         if "|" not in line:
             continue
         jid, name = (x.strip() for x in line.split("|", 1))
-        if name.startswith("phylo-"):
-            master, _, idx = jid.partition("_")
-            f = jobs.get(master)
-            if f is None or not f.is_file():
+        master, _, idx = jid.partition("_")
+        f = jobs.get(master)
+        if f is not None:                  # druid's own array, recognised by job id (any name)
+            stage = run_stage(f.parent)
+            if stage is None or not f.is_file():
                 continue
             ids = cache.setdefault(f, core.read_ids(f))
             idxs = ([int(idx)] if idx.isdigit()
                     else expand_indices(idx.strip("[]")) if idx else range(len(ids)))
-            out[name[len("phylo-"):]].update(ids[i] for i in idxs if i < len(ids))
+            out[stage].update(ids[i] for i in idxs if i < len(ids))
         elif name.startswith("nf-"):
             nf = nf_job(name)
             if nf:

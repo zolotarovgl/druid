@@ -568,3 +568,19 @@ def test_submit_refuses_without_prefix(cli):
     paths.config_file().write_text(yaml.safe_dump(raw))
     r = cli(["submit", "search", "--missing", "--dry-run"])
     assert "job_prefix" not in r.output
+
+
+def test_live_matches_by_job_id(cli, monkeypatch):
+    runs = paths.project_root() / "runs"
+    for name, jid, ids in (("20261025-120000_search", "777", ["a.F1", "a.F2"]),
+                           ("20261025-120001_cluster", "888", ["a.F1"])):
+        d = runs / name
+        d.mkdir(parents=True)
+        (d / "ids_0.txt").write_text("\n".join(ids) + "\n")
+        (d / "jobs.tsv").write_text(f"{jid}\tids_0.txt\n")
+    monkeypatch.setenv("FAKE_SQUEUE", "777_1|chromo-search\n888_0|renamed-cluster\n999_0|phylo-search\n")
+    assert model.live(set()) == {"search": {"a.F2"}, "cluster": {"a.F1"}}
+    assert model.run_stage(runs / "20261025-120000_search") == "search"
+    assert model.run_stage(runs / "junk") is None
+    monkeypatch.setenv("FAKE_SQUEUE", "777_1|chromo-search\n5_0|nf-ALN_(tfs.A.HG1)\n")
+    assert model.live({"tfs.A.HG1"}) == {"search": {"a.F2"}, "align": {"tfs.A.HG1"}}
