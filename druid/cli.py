@@ -17,7 +17,7 @@ from druid.common import (FAILED_STATES, RUNNING_STATES, expand_indices as _expa
                              fmt_mem as _fmt_mem, fmt_time as _fmt_time, ids_path as _ids_path,
                              runs_dir as _runs_dir)
 from druid.runner import run_one  # noqa: E402,F401  (module-level name: tests patch it)
-from druid import model  # noqa: E402
+from druid import model, step1run  # noqa: E402
 
 
 def _guard(fn):
@@ -611,6 +611,94 @@ def submit(stage: str = typer.Argument(...),
     for jid, (res, ids_, _f, _s) in zip(jids, w.arrays):
         typer.echo(f"submitted {jid}: {len(ids_)} {core.unit(stage)} ({res.cpus} cpus, {res.mem_mb}M, "
                    f"{res.time_min} min)")
+    if err:
+        for line in err.splitlines():
+            typer.echo(line, err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def run(fam: str = typer.Option(None, "--fam", "-f", help=FAM_HELP),
+        dry_run: bool = typer.Option(False, "--dry-run", "-n",
+                                     help="show the arrays and write the scripts, do not submit"),
+        max_running: int = typer.Option(50, "--max-running"),
+        partition: str = typer.Option(None, "--partition"),
+        qos: str = typer.Option(None, "--qos"),
+        mem: str = typer.Option(None, "--mem", help="override memory for every HG, e.g. 16G, 800M"),
+        time: str = typer.Option(None, "--time", help="override time limit for every HG, e.g. 24h, 90m, 1d"),
+        cpus: int = typer.Option(None, "--cpus", min=1, help="override cpus for every HG")):
+    """Step 1 in one command: search the families not yet searched, each with a cluster array that
+    waits on its search task, plus cluster-only arrays for families already searched."""
+    try:
+        raw = paths.read_raw()
+        override = {"mem_mb": core.parse_mem_mb(mem) if mem else None,
+                    "time_min": core.parse_time_min(time) if time else None,
+                    "cpus": cpus}
+        cfg = core.config_from_raw(raw)
+    except (paths.NoProject, paths.OutsideProject, core.ConfigError, ValueError) as e:
+        _fail(f"ERROR: {e}", 2)
+    _check_history_dir()
+    msg = step1run.refusal(raw, cfg)
+    if msg:
+        _fail(msg, 2)
+    _warn_families(cfg, collisions=True)
+    for nf_run, _start, final in history.nf_runs(cfg.nextflow_dir, "step1.nf"):
+        if not final:
+            typer.echo(f"warning: a step1.nf Nextflow run appears to be active ({nf_run}); "
+                       f"running step1.nf and phylocli search/cluster at the same time can "
+                       f"mix two clusterings of one family", err=True)
+    try:
+        rp = step1run.plan_run(cfg, raw, fam=fam, dry_run=dry_run, override=override)
+    except model.ModelError as e:
+        _fail(str(e), e.code)
+    plans = [p for p in (rp.search, rp.linked, rp.only) if p is not None]
+    for note in rp.notes:
+        typer.echo(note)
+    if not plans:
+        typer.echo(step1run.counts_line(rp.counts))
+        typer.echo("nothing to submit")
+        raise typer.Exit(0)
+    errs = {}
+    for p in plans:
+        errs.update(p.errors)
+    if errs:
+        for k, v in errs.items():
+            typer.echo(f"{k} ({len(v)}): {_show(v)}", err=True)
+        typer.echo("nothing submitted", err=True)
+        raise typer.Exit(2)
+    if rp.search is not None:
+        _preflight("search", cfg)
+    if rp.linked is not None or rp.only is not None:
+        _preflight("cluster", cfg)
+    try:
+        rw = step1run.write(cfg, raw, rp, dry_run, max_running, partition, qos)
+    except model.ModelError as e:
+        _fail(str(e), e.code)
+    typer.echo(step1run.counts_line(rp.counts))
+    if dry_run:
+        for stage, p, w in (("search", rp.search, rw.search),
+                            ("cluster (after search)", rp.linked, rw.linked),
+                            ("cluster", rp.only, rw.only)):
+            if w is not None:
+                _print_dry_run(stage, w.run_dir, w.arrays, qos, p.notes)
+        return
+    for w in (rw.search, rw.linked, rw.only):
+        if w is not None:
+            typer.echo(f"run dir: {w.run_dir}")
+    # the arrays in the order submit() queues them, to name each one's resources
+    s_arr = rw.search.arrays if rw.search else []
+    l_arr = rw.linked.arrays if rw.linked else []
+    order = [a for k in range(len(s_arr)) for a in (s_arr[k], l_arr[k] if k < len(l_arr) else None)]
+    order += rw.only.arrays if rw.only else []
+    try:
+        done, err = step1run.submit(rw)
+    except model.ModelError as e:
+        _fail(str(e), e.code)
+    for (stage, jid, n, after), arr in zip(done, order):
+        res = arr[0] if arr else None
+        tail = f" ({res.cpus} cpus, {res.mem_mb}M, {res.time_min} min)" if res else ""
+        typer.echo(f"submitted {jid}: {stage} {n} families"
+                   + (f" (after {after})" if after else "") + tail)
     if err:
         for line in err.splitlines():
             typer.echo(line, err=True)

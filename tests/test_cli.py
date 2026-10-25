@@ -690,3 +690,65 @@ def test_init_on_a_tty_opens_tui_on_new_project(tmp_path, monkeypatch):
         assert Path(started[0].cfg.nextflow_dir).resolve() == (tmp_path / "p").resolve()  # project root
     finally:
         paths.use(None)
+
+
+# ---- druid run (step 1 in one command) -------------------------------------------------------
+from tests.test_step1run import _calls as _run_calls, _cfg_raw as _run_cfg_raw, _five as _run_five  # noqa: E402
+from tests.test_step1run import run  # noqa: E402,F401  (fixture: counting sbatch)
+
+
+def test_run_dry_run_prints_plan(run, cli, monkeypatch):
+    _run_five(run, monkeypatch)
+    r = cli(["run", "-n"])
+    assert r.exit_code == 0, r.output
+    assert "search+cluster 1 · cluster only 1 · no hits 1 · done 1 · queued 1" in r.output
+    assert r.output.count("dry run ·") == 3                      # search, linked cluster, cluster only
+    # runs/ holds only the fixture's queued search run (_five), nothing the dry run wrote
+    assert _run_calls() == [] and [d.name for d in (run / "runs").iterdir()] == ["20261001-000001_search"]
+    assert dry_dir().is_dir()
+
+
+def test_run_submits_and_reports(run, cli, monkeypatch):
+    _run_five(run, monkeypatch)
+    r = cli(["run"])
+    assert r.exit_code == 0, r.output
+    lines = [l for l in r.output.splitlines() if l.startswith("submitted")]
+    assert lines[0].startswith("submitted 101: search 1 families ")
+    assert lines[1].startswith("submitted 102: cluster 1 families (after 101) ")
+    assert lines[2].startswith("submitted 103: cluster 1 families ")
+    assert "after" not in lines[2]
+    assert "search+cluster 1 · cluster only 1" in r.output
+    assert len(_run_calls()) == 3 and "--dependency=aftercorr:101" in _run_calls()[1]
+
+
+def test_run_refuses_without_squeue(run, cli, monkeypatch):
+    _run_five(run, monkeypatch)
+    hide_tool(monkeypatch, "squeue")
+    r = cli(["run"])
+    assert r.exit_code == 1 and "squeue not on PATH" in r.output
+    assert _run_calls() == []
+
+
+def test_run_refusals_and_nothing_to_do(run, cli, monkeypatch):
+    cfg, raw = _run_cfg_raw()
+    (run / "input.fasta").unlink()
+    r = cli(["run"])
+    assert r.exit_code == 2 and "ERROR: run prepare first" in r.output
+    assert _run_calls() == []
+    (run / "input.fasta").write_text(">p\nM\n")
+    # every family done or queued: nothing to submit, exit 0
+    fams = ["x.F1"]
+    (run / "gene_families_searchinfo.csv").write_text("F1\tPF\t1.1\t3\tGA\tTF\tx\n")
+    (cfg.outdir / "search").mkdir(parents=True, exist_ok=True)
+    (cfg.outdir / f"search/{fams[0]}.domains.fasta").write_text("")      # no hits
+    r = cli(["run"])
+    assert r.exit_code == 0 and "nothing to submit" in r.output
+    assert _run_calls() == [] and not (run / "runs").exists()
+
+
+def test_run_submit_failure_reports_ids(run, cli, monkeypatch):
+    _run_five(run, monkeypatch)
+    monkeypatch.setenv("FAKE_SBATCH_FAIL", "2")
+    r = cli(["run"])
+    assert r.exit_code == 1 and "submitted 101: search" in r.output
+    assert "denied" in r.output
