@@ -1558,3 +1558,26 @@ def test_prefix_editable_after_species_lock(proj, lock):
                 await pilot.pause()
                 assert paths.read_raw()["job_prefix"] == "later"
     _run(go())
+
+
+def test_prepare_hint_names_S(proj):
+    root, _prot, _mine_ = proj
+    yamledit.update_config({("species",): ["Aaa", "Bbb"]})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await pilot.press("P")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            text = _text(scr, "#blockers")
+            assert text.startswith("prepare wrote data/input.fasta")
+            assert "S: run step 1 (search → cluster)" in text
+            await pilot.press("S")                                        # the hint's key works here
+            await pilot.pause()
+            assert isinstance(app.screen, tui.RunScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.screen is scr
+    _run(go())

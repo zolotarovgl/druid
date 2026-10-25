@@ -1,7 +1,8 @@
 """The TUI Setup tab (sub-project 2, 23/10/2026): proteome sources, the species picker, the analyses
 switches, the base species tree (v3 curated / chromo / custom) and the placement of ticked species
 missing from it, the search type, the families and druid.yaml, with the blockers `prepare` would
-report on the bottom line; `P` runs prepare. Config writes go through yamledit.update_config, the placements and families files through
+report on the bottom line; `P` runs prepare, `S` then step 1 (the Jobs tab's run box). Config
+writes go through yamledit.update_config, the placements and families files through
 sptree / families (paths). An adopted project (prepare: locked) is read-only throughout; a
 species-locked one in the Species and Tree sections (the families stay editable). Imported by
 druid.tui when the Setup tab opens."""
@@ -26,7 +27,7 @@ from textual.widgets import (ContentSwitcher, DataTable, Footer, Header, Input, 
 from ete3 import Tree
 
 from druid import core, families, paths, prepare, setup_state, sptree, yamledit
-from druid.tui import DruidTreeScreen           # the vendored TreeScreen, druid's key help
+from druid.tui import DruidTreeScreen, RunScreen   # vendored TreeScreen + druid's key help; S's box
 from treeview import model as tvm                # vendored: core puts druid/vendor on sys.path
 
 SWITCHES = {"sw-generax": "run_generax", "sw-origins": "origins"}   # switch id -> params key
@@ -44,6 +45,7 @@ TREE_OFF = "placement not needed: GeneRax and origins are off (prepare reads and
 TREE_BASES = {"rb-tree-v3": "v3", "rb-tree-chromo": "chromo", "rb-tree-custom": "custom"}
 TREE_LABELS = {"v3": "v3 curated, 59 tips", "chromo": "chromo, 94 tips", "custom": "tree_source"}
 LOCKED_ALL = "read-only: adopted project (prepare: locked); druid never changes its druid.yaml here"
+RUN_HINT = "S: run step 1 (search → cluster)"    # after a good prepare: the next step
 OPTION_KEYS = "↑↓ move · space/enter toggle"     # Analyses switches, Tree / Search radio sets
 
 
@@ -203,6 +205,7 @@ class SetupScreen(Screen):
         Binding("e", "edit_config", "edit druid.yaml"),
         Binding("e", "edit_family", "edit row"),     # Families; enter ticks (Grygoriy, 23/10/2026)
         Binding("P", "prepare", "prepare"),
+        Binding("S", "run_step1", "run step 1"),
         Binding("w", "toggle_warnings", "warnings"),
         # Analyses: ↑↓ between the switches (the radio sets move by themselves; Grygoriy 23/10/2026)
         Binding("up", "switch_move(-1)", "previous", show=False),
@@ -1249,7 +1252,8 @@ class SetupScreen(Screen):
                     return str(Path(p).relative_to(root))
                 except ValueError:
                     return str(p)
-            msg = "\n".join(["prepare wrote " + ", ".join(rel(p) for p in written)] + notes)
+            msg = "\n".join(["prepare wrote " + ", ".join(rel(p) for p in written)] + notes
+                            + [RUN_HINT])
         self.app.call_from_thread(self._prepared, msg)
 
     def _prepare_step(self, steps: list, most: int = 6) -> None:
@@ -1262,6 +1266,19 @@ class SetupScreen(Screen):
         self._msg = msg
         self._reload()
         self._refresh()
+
+    # ---- run step 1 -------------------------------------------------------------------------
+    def action_run_step1(self) -> None:
+        """S: the Jobs tab's run box (step1run refuses a missing job_prefix, an adopted project, no
+        prepare yet); druid.yaml is read again first, and again when the box closes (a submit
+        locks the species)."""
+        self._reload()
+        if self._cfg is None:
+            self._msg = "ERROR: run: druid.yaml does not load (see the errors below)"
+            self._refresh()
+            return
+        self.app.push_screen(RunScreen(self._cfg, self._raw),
+                             lambda _jids: (self._reload(), self._refresh()))
 
     # ---- Config -----------------------------------------------------------------------------
     def action_edit_config(self) -> None:

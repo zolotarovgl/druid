@@ -3751,3 +3751,112 @@ def test_ctrl_keys_pass_through_a_colon_command_and_ctrl_q_quits_a_tree(cli):
             await _press(pilot, "colon", "q", "ctrl+q")         # cancelled, then ctrl+q quits
             assert app._cmd is None and not app.is_running
     _run(go())
+
+
+# ---- S: step 1 from the Jobs tab (druid run, sub-project 3) --------------------------------------
+from tests.test_step1run import _calls as _sb_calls, _fams as _run_fams  # noqa: E402
+from tests.test_step1run import run  # noqa: E402,F401  (fixture: sbatch prints 101, 102, ...)
+
+
+def _step1_tools():
+    """Fake search / cluster tools, so the run box's preflight passes on any machine."""
+    import stat
+    for t in "hmmsearch hmmfetch bedtools samtools diamond mcl".split():
+        p = _state["bin"] / t
+        p.write_text("#!/bin/sh\nexit 0\n")
+        p.chmod(p.stat().st_mode | stat.S_IXUSR)
+
+
+async def _open_run(app, pilot):
+    await pilot.pause()
+    await pilot.press("S")
+    await pilot.pause()
+    assert isinstance(app.screen, tui.RunScreen)
+    return app.screen
+
+
+def test_S_opens_run_screen_and_submits(run, monkeypatch):
+    _step1_tools()
+    _run_fams(run, ["F1"])
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            assert app.tab == "jobs" and app.view == "overview"
+            scr = await _open_run(app, pilot)
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            assert "dry run" in scr._shown
+            assert "search+cluster 1 · cluster only 0 · no hits 0 · done 0 · queued 0" in scr._shown
+            assert "search array 0: 1 families" in scr._shown
+            assert "cluster after search array 0: 1 families" in scr._shown
+            assert _sb_calls() == []                                 # the dry run submits nothing
+            reloads = []
+            app.load_bg = lambda: reloads.append(1)
+            await pilot.press("y")
+            await _settle(app, pilot)
+            calls = _sb_calls()
+            assert len(calls) == 2 and "--dependency" not in calls[0]
+            assert "--dependency=aftercorr:101 --kill-on-invalid-dep=yes" in calls[1]
+            assert scr.submitted == ["101", "102"]
+            assert "submitted 101: search 1 families" in scr._shown
+            assert "submitted 102: cluster 1 families (after 101)" in scr._shown
+            assert isinstance(app.screen, tui.RunScreen)             # the result stays shown
+            await pilot.press("y")                                   # same box: nothing again
+            await _settle(app, pilot)
+            assert len(_sb_calls()) == 2 and "already submitted" in scr._shown
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, tui.RunScreen) and reloads == [1]
+    _run(go())
+
+
+def test_S_shows_refusal(run, monkeypatch):
+    _step1_tools()
+    _run_fams(run, ["F1"])
+    yml = paths.config_file()
+    yml.write_text("".join(l for l in yml.read_text().splitlines(True)
+                           if not l.startswith("job_prefix:")))
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            scr = await _open_run(app, pilot)
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            assert "ERROR: set job_prefix in Setup (druid.yaml job_prefix)" in scr._shown
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert _sb_calls() == [] and scr.submitted == []
+            assert "ERROR: set job_prefix in Setup" in scr._shown     # the refusal stays shown
+    _run(go())
+
+
+def test_S_preflight_and_nothing_to_submit(run, monkeypatch):
+    _step1_tools()
+    f1, = _run_fams(run, ["F1"])
+    from druid import model
+    real = model.preflight
+    monkeypatch.setattr(model, "preflight",
+                        lambda stage, cfg=None: "ERROR: not on PATH: hmmsearch" if stage == "search" else None)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            scr = await _open_run(app, pilot)
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            assert "ERROR: not on PATH: hmmsearch" in scr._shown
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert _sb_calls() == []
+            monkeypatch.setattr(model, "preflight", real)
+            (_cfg().outdir / "search").mkdir(parents=True, exist_ok=True)
+            (_cfg().outdir / f"search/{f1}.domains.fasta").write_text("")     # no hits: done
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            assert "no hits 1" in scr._shown and "nothing to submit" in scr._shown
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert _sb_calls() == [] and scr.submitted == []
+    _run(go())

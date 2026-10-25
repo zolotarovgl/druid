@@ -19,7 +19,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static, TextArea
 from textual.worker import get_current_worker
 
-from druid import core, history, model, paths, setup_state
+from druid import core, history, model, paths, setup_state, step1run
 from druid.common import fmt_mem, fmt_time
 from treeview import widget as tv_widget       # vendored: core puts druid/vendor on sys.path
 from treeview.keys import KeysScreen
@@ -466,6 +466,7 @@ KEYS = {
                   ("o", "results of the group")]),
         ("Group & sort", [("c", "group by category"), ("f", "group by family"),
                           ("s", "sort by the column"), ("h", "only actionable at the column")]),
+        ("Run", [("S", "run step 1: search → cluster (enter dry run · y submit)")]),
         ("Other", [("R", "refresh"), ("?", "this list"), (":q!", "quit druid")]),
         ("Notes", [("", "search/cluster count families, the other stages HGs"),
                    ("", "default view: failed+ready")])]),
@@ -559,6 +560,7 @@ class PhyloApp(App):
         Binding("space", "toggle", "select"),
         Binding("a", "select_all", "select all"),
         Binding("r", "resubmit", "resubmit"),
+        Binding("S", "run_step1", "run step 1"),
         Binding("l", "log", "log"),
         Binding("o", "open_results", "results"),
         Binding("t", "open_tree", "tree"),
@@ -1272,6 +1274,9 @@ class PhyloApp(App):
             return False                         # header mode: the hidden row-0 cursor is not a target
         if action == "open_tree":
             return self.view == "results" or (self.view == "overview" and self.tab == "results")
+        if action == "run_step1":                # Jobs tab only, never from inside a dialog
+            return (self.view == "overview" and self.tab == "jobs"
+                    and self.screen is self.screen_stack[0])
         if action in ("by_category", "sort", "hide"):
             return self.view == "overview"
         if action in ("toggle", "select_all", "resubmit", "log"):
@@ -1505,6 +1510,10 @@ class PhyloApp(App):
         groups = resource_groups(self.cfg, self.stage, rows, self.nseq)
         self.push_screen(ResubmitScreen(self.cfg, self.stage, groups, self.raw),
                          lambda _jids: (self.selected.clear(), self.load_bg()))
+
+    def action_run_step1(self) -> None:
+        """S: step 1 (search → cluster) in the run box; the Jobs tab reloads when it closes."""
+        self.push_screen(RunScreen(self.cfg, self.raw), lambda _jids: self.load_bg())
 
     def action_log(self) -> None:
         hg = self._cursor_hg()
@@ -2171,6 +2180,162 @@ class ResubmitScreen(ModalScreen):
         if err:
             lines.append(f"[red]{escape(err)}[/]")
         self._post(self._finish, "\n".join(lines), False, jids, None, bool(jids) and not err)
+
+    def action_cancel(self) -> None:
+        if self._busy:                             # dismissing now would drop the result
+            self.notify("still working — wait", severity="warning")
+            return
+        self.dismiss(self.submitted)
+
+
+class RunScreen(ModalScreen):
+    """S (Jobs tab, Setup): step 1 through step1run, in `druid run`'s order -- refusal, plan,
+    preflight per stage, write, submit: search for the families not yet searched, each with a
+    cluster array whose task i waits on search task i, plus cluster only for families already
+    searched. enter = dry run (plans; writes and submits nothing), y = submit (planned again: the
+    queue may have moved), esc = close. A submit's result stays shown (job ids, run dirs); the
+    same box never submits twice. No Inputs: the box keeps the focus, so y is always this
+    screen's key (ResubmitScreen's focused-Input caveat does not arise)."""
+    BINDINGS = [Binding("enter", "dry_run", "dry run"),
+                Binding("y", "submit", "submit", priority=True),
+                Binding("escape", "cancel", "cancel")]
+    CSS = """
+    RunScreen { align: center middle; }
+    RunScreen #box { width: 90%; height: auto; max-height: 90%; overflow-y: auto;
+                     border: round $warning; background: $surface; padding: 1; }
+    """
+    PLANS = (("search", "search"), ("linked", "cluster after search"), ("only", "cluster"))
+
+    def __init__(self, cfg: core.Config, raw: dict):
+        super().__init__()
+        self.cfg, self.raw = cfg, raw
+        self.submitted: list[str] = []
+        self._dry_ok = False
+        self._busy = False
+        self._shown = ""
+        self._result = ""
+
+    def compose(self) -> ComposeResult:
+        with _Box(id="box"):
+            yield Label("[b]run step 1 · search → cluster[/]  enter = dry run · y = submit · "
+                        "esc q = cancel")
+            yield Static("", id="out")
+
+    def on_mount(self) -> None:
+        self.query_one("#box").focus()
+
+    def _plan(self, dry_run: bool):
+        """(RunPlan, lines) when there is something to submit, else (None, lines): the refusal,
+        the error, or the counts and "nothing to submit". Runs squeue and the tool checks: call
+        from a worker thread only."""
+        msg = step1run.refusal(self.raw, self.cfg)
+        if msg:
+            return None, [f"[red]{escape(msg)}[/]"]
+        try:
+            rp = step1run.plan_run(self.cfg, self.raw, dry_run=dry_run)
+        except model.ModelError as e:
+            return None, [f"[red]{escape(str(e))}[/]"]
+        lines = [escape(step1run.counts_line(rp.counts))] + [escape(n) for n in rp.notes]
+        if not any(p is not None and p.groups for p in (rp.search, rp.linked, rp.only)):
+            return None, lines + ["[yellow]nothing to submit[/]"]
+        stages = (["search"] if rp.search is not None else []) + (
+            ["cluster"] if rp.linked is not None or rp.only is not None else [])
+        for stage in stages:                       # as the CLI: the message instead of a submit
+            msg = model.preflight(stage, self.cfg)
+            if msg:
+                return None, lines + [f"[red]{escape(msg)}[/]"]
+        return rp, lines
+
+    def _out(self, text: str) -> None:
+        self._shown = text
+        try:
+            self.query_one("#out", Static).update(text)
+        except Exception:                  # screen already dismissed
+            pass
+
+    def _post(self, fn, *args) -> None:
+        """Run fn(*args) on the UI thread from a worker; drop it if the app is gone."""
+        try:
+            self.app.call_from_thread(fn, *args)
+        except Exception:
+            pass
+
+    def _already_submitted(self) -> bool:
+        if not self.submitted:
+            return False
+        self._out(self._result + "\n[yellow]already submitted · esc to close[/]")
+        return True
+
+    def _start(self, work) -> None:
+        self._busy = True
+        self._out("[cyan]working…[/]")
+        work()
+
+    def _finish(self, text: str, dry_ok: bool = False, jids: "list | None" = None) -> None:
+        self._busy = False
+        self._dry_ok = dry_ok
+        if jids:                                   # some or all arrays queued: never again here
+            self.submitted = list(jids)
+            self._result = text
+        self._out(text)
+
+    def action_dry_run(self) -> None:
+        if self._busy or self._already_submitted():
+            return
+        self._dry_ok = False
+        self._start(self._dry_worker)
+
+    @work(thread=True, exclusive=True, group="run")
+    def _dry_worker(self) -> None:
+        try:
+            rp, lines = self._plan(True)
+            if rp is not None:
+                lines = ["[cyan]dry run[/] — nothing submitted yet; y to submit"] + lines
+                for attr, label in self.PLANS:
+                    p = getattr(rp, attr)
+                    if p is None or not p.groups:
+                        continue
+                    lines += [f"[dim]{label}: {escape(n)}[/]" for n in p.notes]
+                    unit = core.unit(p.stage)
+                    for k, (res, ids_) in enumerate(p.groups):
+                        lines.append(f"{label} array {k}: {len(ids_)} {unit} · {res.cpus} cpus · "
+                                     f"{fmt_mem(res.mem_mb)} · {fmt_time(res.time_min)} · {res.qos}")
+        except Exception as e:             # never let a worker kill the app
+            self._post(self._finish, f"[red]{escape(str(e))}[/]")
+            return
+        self._post(self._finish, "\n".join(lines), rp is not None)
+
+    def action_submit(self) -> None:
+        if self._busy or self._already_submitted():
+            return
+        if not self._dry_ok:
+            if not self._shown:                    # keep an error the dry run already shows
+                self._out("[yellow]run the dry run first (enter)[/]")
+            return
+        self._start(self._submit_worker)
+
+    @work(thread=True, exclusive=True, group="run")
+    def _submit_worker(self) -> None:
+        lines: list = []
+        jids: list = []
+        try:
+            rp, lines = self._plan(False)          # planned again: the queue may have moved
+            if rp is None:
+                self._post(self._finish, "\n".join(lines))
+                return
+            rw = step1run.write(self.cfg, self.raw, rp, dry_run=False)
+            lines += [f"run dir {w.run_dir}" for w in (rw.search, rw.linked, rw.only) if w is not None]
+            done, err = step1run.submit(rw)
+            for stage, jid, n, after, res in done:
+                jids.append(jid)
+                lines.append(f"[green]submitted {jid}: {stage} {n} {core.unit(stage)}"
+                             + (f" (after {after})" if after else "")
+                             + f"[/] ({res.cpus} cpus, {fmt_mem(res.mem_mb)}, {fmt_time(res.time_min)})")
+            if err:
+                lines += [f"[red]{escape(line)}[/]" for line in err.splitlines()]
+        except Exception as e:             # never let a worker kill the app
+            lines.append(f"[red]{escape(str(e))}[/]")
+        self._post(self._finish, "\n".join(lines), False, jids)
 
     def action_cancel(self) -> None:
         if self._busy:                             # dismissing now would drop the result
