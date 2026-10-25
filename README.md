@@ -7,8 +7,30 @@ scripts in `druid/stages/` are the step1.nf / step2.nf process bodies, and the h
 are vendored. One install serves many projects; a project is a directory with a `druid.yaml`, and
 druid never writes outside it (see Write boundary).
 
+## TL;DR: new project to step 1
+
+```bash
+conda activate phylo                       # on the cluster (login1)
+druid init /no_backup/$USER/myproject      # creates the project and opens the TUI on Setup
+```
+
+In **Setup** (`tab` moves between panes, `enter` selects, `esc` / `q` back, `:q!` quits):
+
+1. **Project**: type a `job_prefix` (e.g. `chromo`), `enter`. Jobs are named `chromo-search`, ….
+2. **Species**: type prefixes (`Mlei, Hsap Nvec`) or any filter, `enter` ticks all shown.
+3. **Analyses**: GeneRax / origins on or off (both off: no species tree needed).
+4. **Tree** (only if a switch is on): place ticked species missing from the tree.
+5. **Families**: filter, `a` ticks all shown (`space` / `enter` one at a time).
+6. `P` prepares (`data/input.fasta`, trees, `species_info.tsv`), then `S` launches step 1:
+   `enter` dry run, `y` submits search + linked cluster.
+
+Or from the shell, after Setup: `druid prepare`, `druid run -n` (dry run), `druid run`.
+Step 2 (align → possvm) is submitted by hand afterwards: `druid submit <stage> --missing`.
+Reopen the project with `druid --project /no_backup/$USER/myproject tui`.
+
 ## Contents
 
+- [TL;DR: new project to step 1](#tldr-new-project-to-step-1)
 - [Install](#install)
 - [Projects](#projects)
 - [Write boundary](#write-boundary)
