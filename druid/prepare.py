@@ -6,7 +6,7 @@ project and moved into place, so an interrupted run keeps the old files."""
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from druid import core, model, paths, setup_state as ss
 
@@ -65,10 +65,14 @@ def _prefixed(src_file: Path, sp: str) -> str:
     return "".join(out)
 
 
-def run(raw: dict, cfg: core.Config, root: Path, notes: Optional[list] = None) -> List[Path]:
+def run(raw: dict, cfg: core.Config, root: Path, notes: Optional[list] = None,
+        progress: Optional[Callable[[str], None]] = None) -> List[Path]:
     """Write input.fasta, the species trees (pruned to the ticked species; placements added; none
     with GeneRax and origins off) and species_info.tsv.
-    Returns the paths written; the tree build's notes are appended to `notes` if given."""
+    Returns the paths written; the tree build's notes are appended to `notes` if given; each step
+    is reported to `progress` as it starts (Grygoriy, 25/10/2026)."""
+    step = progress or (lambda _msg: None)
+    step("checking the project (lock, blockers)")
     if raw.get("prepare") == "locked":
         raise PrepareError("this project is adopted (prepare: locked): its inputs are not rebuilt")
     if ss.species_locked(raw, cfg):
@@ -79,6 +83,7 @@ def run(raw: dict, cfg: core.Config, root: Path, notes: Optional[list] = None) -
     sel = ss.selected(raw)
     srcs = {s.name: s for s in ss.sources(raw, root)}
     files = [ss.proteome_file(srcs[src], sp) for sp, src in sel]
+    step(f"checking {len(files)} proteomes are readable")
     for f in files:                                        # readable before anything is written
         try:
             with open(f, "rb") as fh:
@@ -91,6 +96,7 @@ def run(raw: dict, cfg: core.Config, root: Path, notes: Optional[list] = None) -
     if ss.trees_needed(raw.get("params") or {}):
         from druid import sptree
         bin_f, org_f = ss.base_tree_files(raw, root)
+        step(f"building the species trees from {bin_f.name} and {org_f.name}")
         try:
             trees = sptree.build_trees(bin_f.read_text(encoding="utf-8").strip(),
                                        org_f.read_text(encoding="utf-8").strip(),
@@ -98,19 +104,22 @@ def run(raw: dict, cfg: core.Config, root: Path, notes: Optional[list] = None) -
                                        sptree.read_placements(Path(root) / "data" / sptree.PLACEMENTS))
         except Exception as e:
             raise PrepareError(f"species tree: {e}")
+    step(f"species_info.tsv: {len(sel)} species")
     info = _species_info_text(sel, srcs)
 
     written, tmps = [], []
     try:
         fa = paths.mkstemp("input_", ".fasta")
         tmps.append(fa)
-        for (sp, _src), f in zip(sel, files):
+        for i, ((sp, _src), f) in enumerate(zip(sel, files), 1):
+            step(f"input.fasta: {i}/{len(files)} {sp} ({f})")
             try:
                 paths.append_text(fa, _prefixed(f, sp), encoding="utf-8")
             except OSError as e:
                 raise PrepareError(f"cannot read {f}: {e}")
         jobs = [(fa, Path(cfg.params["infasta"]))]
         if trees is not None:
+            step("writing the species trees")
             binary, origin, tree_notes = trees
             if notes is not None:
                 notes.extend(tree_notes)
@@ -125,6 +134,7 @@ def run(raw: dict, cfg: core.Config, root: Path, notes: Optional[list] = None) -
         paths.write_text(t, info, encoding="utf-8")
         jobs.append((t, model.species_info_path(cfg)))
         mode = paths.default_file_mode()
+        step(f"moving {len(jobs)} files into place")
         for tmp, dst in jobs:
             paths.mkdir(dst.parent, exist_ok=True)
             paths.chmod(tmp, mode)                     # mkstemp's 0600 -> what open() would give

@@ -380,7 +380,8 @@ def prepare():
     cfg = _cfg()
     notes = []
     try:
-        written = prep.run(paths.read_raw(), cfg, paths.project_root(), notes)
+        written = prep.run(paths.read_raw(), cfg, paths.project_root(), notes,
+                           progress=lambda m: typer.echo(f"prepare: {m}"))
     except (prep.PrepareError, OSError, paths.OutsideProject) as e:
         _fail(f"ERROR: {e}", 2)
     for p in written:

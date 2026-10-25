@@ -127,8 +127,9 @@ prepared and runnable stage by stage with the existing commands.
 
 ### Families section
 
-- The shipped library `druid/data/families_library.csv` (356 rows), **all ticked**; the user
-  unticks what to drop (Grygoriy: "I usually copy the whole family file and then filter it").
+- The shipped library `druid/data/families_library.csv` (356 rows), **none ticked** (Grygoriy,
+  25/10/2026: "start with no families selected"; replaces the 23/10 "all ticked, untick to drop");
+  space / enter ticks one, `a` ticks every family the filter shows.
   Filter box as in Species. The ticked rows are written to the project's `data/families.csv`
   (`params.genefam_info`), which stays hand-editable.
 - Families can be added after launch; only the new ones run (existing behaviour of the stages).

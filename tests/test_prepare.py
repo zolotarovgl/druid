@@ -194,3 +194,36 @@ def test_cli_prepare_ok(proj):
     r = CliRunner().invoke(cli.app, ["--project", str(root), "prepare"])
     assert r.exit_code == 0, r.output
     assert "input.fasta" in r.output and "species_info.tsv" in r.output
+
+
+def test_progress_reports_each_step_in_order(proj):
+    raw = paths.read_raw()
+    steps = []
+    prepare.run(raw, core.config_from_raw(raw), paths.project_root(), progress=steps.append)
+    assert steps[0] == "checking the project (lock, blockers)"
+    assert steps[1] == "checking 3 proteomes are readable"
+    assert steps[2].startswith("building the species trees from base_tree.binary.newick")
+    assert steps[3] == "species_info.tsv: 3 species"
+    assert [s.split(" (")[0] for s in steps[4:7]] == [
+        "input.fasta: 1/3 Wxyz", "input.fasta: 2/3 Abcd", "input.fasta: 3/3 Hsap"]
+    assert steps[7:] == ["writing the species trees", "moving 4 files into place"]
+
+
+def test_progress_stops_at_the_refusal(proj):
+    root, prot = proj
+    (prot / "Abcd.faa").unlink()
+    raw = paths.read_raw()
+    steps = []
+    with pytest.raises(prepare.PrepareError):
+        prepare.run(raw, core.config_from_raw(raw), root, progress=steps.append)
+    assert steps == ["checking the project (lock, blockers)"]
+
+
+def test_cli_prepare_prints_steps(proj):
+    root, _ = proj
+    r = CliRunner().invoke(cli.app, ["--project", str(root), "prepare"])
+    lines = r.output.splitlines()
+    assert lines[0] == "prepare: checking the project (lock, blockers)"
+    assert any(x.startswith("prepare: input.fasta: 3/3 Hsap") for x in lines)
+    assert lines.index("prepare: moving 4 files into place") < min(
+        i for i, x in enumerate(lines) if x.startswith("wrote "))

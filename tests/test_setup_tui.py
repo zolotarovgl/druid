@@ -262,8 +262,10 @@ def test_filter_enter_ticks_all_shown_and_clears(proj, monkeypatch):
             assert f.value == "" and scr.focused is f and t.row_count == 3
             assert _text(scr, "#sp-count") == "2 ticked / 3"
             assert "+2 ticked (Aaa, Bbb)" in _text(scr, "#blockers")
+            assert t.cursor_row == 0                                  # Aaa: the first new tick
             await pilot.press(*"ccc", "enter")                        # a second query adds to them
             await pilot.pause()
+            assert t.cursor_row == 2 and str(t.get_row_at(2)[0]) == "[x]"   # scrolled to Ccc
             assert len(calls) == 2 and f.value == "" and scr.focused is f
             assert _raw()["species"] == ["Aaa", "Bbb", {"sp": "Ccc", "source": "mine"}]
             assert _text(scr, "#sp-count") == "3 ticked / 3"
@@ -881,12 +883,14 @@ def test_own_families_file(proj, tmp_path):
             await pilot.press("enter")
             await pilot.pause()
             assert _raw()["families_source"] == str(own)
-            assert _fams(root) == [r.fields() for r in families.read(own)]
-            assert scr.query_one("#fam-table").row_count == 2
+            assert _fams(root) == []                                      # none ticked
+            t = scr.query_one("#fam-table")
+            assert t.row_count == 2 and str(t.get_row_at(0)[0]) == "[ ]"
+            assert "2 rows, 0 ticked" in _text(scr, "#blockers")
     _run(go())
 
 
-def test_families_all_ticked_untick_writes_csv(proj):
+def test_families_none_ticked_tick_writes_csv(proj):
     root, _prot, _mine_ = proj
     f = root / "data" / "families.csv"
     f.write_text("")
@@ -898,29 +902,42 @@ def test_families_all_ticked_untick_writes_csv(proj):
             scr = await _setup(app, pilot)
             assert "no families in params.genefam_info" in _text(scr, "#blockers")
             assert _text(scr, "#lbl-families").endswith("!")
-            await _section(pilot, scr, "Families")                        # first open: all written
-            assert _fams(root) == lib and len(lib) == 356
+            await _section(pilot, scr, "Families")                        # first open: none ticked
+            assert _fams(root) == [] and len(lib) == 356
             t = scr.query_one("#fam-table")
-            assert t.row_count == 356 and all(str(t.get_row_at(i)[0]) == "[x]" for i in range(356))
-            assert "no families" not in _text(scr, "#blockers")
-            assert _text(scr, "#lbl-families").endswith("356")
+            assert t.row_count == 356 and all(str(t.get_row_at(i)[0]) == "[ ]" for i in range(356))
+            assert "no families in params.genefam_info" in _text(scr, "#blockers")
+            assert _text(scr, "#lbl-families").endswith("!")
+            assert "0 ticked / 356" in _text(scr, "#fam-count")
             assert scr.focused is scr.query_one("#fam-filter")
             await pilot.press("enter")                                    # to the table
             assert scr.focused is t
-            await pilot.press("space")                                    # untick row 0
+            await pilot.press("space")                                    # tick row 0
             await pilot.pause()
-            assert _fams(root) == lib[1:] and str(t.get_row_at(0)[0]) == "[ ]"
-            assert "355 ticked / 356" in _text(scr, "#fam-count")
+            assert _fams(root) == lib[:1] and str(t.get_row_at(0)[0]) == "[x]"
+            assert "1 ticked / 356" in _text(scr, "#fam-count")
+            assert "no families" not in _text(scr, "#blockers")
+            await pilot.press("space")                                    # the last one: unticked
+            await pilot.pause()
+            assert _fams(root) == [] and str(t.get_row_at(0)[0]) == "[ ]"
             scr.query_one("#fam-filter").value = "slc"
             await pilot.pause()
-            assert 0 < t.row_count < 356 and "shown" in _text(scr, "#fam-count")
+            n = t.row_count
+            assert 0 < n < 356 and "shown" in _text(scr, "#fam-count")
+            await pilot.press("a")                                        # tick all shown
+            await pilot.pause()
+            assert len(_fams(root)) == n and all(str(t.get_row_at(i)[0]) == "[x]" for i in range(n))
+            assert f"+{n} families ticked" in _text(scr, "#blockers")
             scr.query_one("#fam-filter").value = ""
             await pilot.pause()
             t.focus()
             t.move_cursor(row=0)
-            await pilot.press("space")                                    # tick again: library order
+            before = _fams(root)
+            await pilot.press("space")                                    # row 0 flips; library order
             await pilot.pause()
-            assert _fams(root) == lib
+            after = _fams(root)
+            assert (lib[0] in after) != (lib[0] in before)
+            assert after == [r for r in lib if r in after]
     _run(go())
 
 
@@ -1012,9 +1029,16 @@ def test_prepare_key_runs_and_reports(proj):
             assert _text(scr, "#blockers").startswith("ERROR: cannot prepare")
             assert not (root / "data" / "input.fasta").exists()
             yamledit.update_config({("species",): ["Aaa", "Bbb"]})
+            shown = []
+            real = scr._prepare_step
+            scr._prepare_step = lambda steps: (real(steps), shown.append(scr._msg))
             await pilot.press("P")
             await app.workers.wait_for_complete()
             await pilot.pause()
+            assert shown[0] == "prepare: step 1\n  … checking the project (lock, blockers)"
+            assert any(m.startswith("prepare: step ") and "  … input.fasta: 2/2 Bbb" in m
+                       and "  ✓ input.fasta: 1/2 Aaa" in m for m in shown)
+            assert shown[-1].endswith("files into place")
             text = _text(scr, "#blockers")
             assert text.startswith("prepare wrote data/input.fasta, data/species_tree.binary.newick")
             assert (root / "data" / "input.fasta").read_text() == ">Aaa_x\nM\n>Bbb_x\nM\n"
@@ -1059,10 +1083,13 @@ def test_untick_and_edit_rows_sharing_a_class_name(proj):
         app = _app()
         async with app.run_test() as pilot:
             scr = await _setup(app, pilot)
-            await _section(pilot, scr, "Families")                        # all 356 written
+            await _section(pilot, scr, "Families")                        # none ticked
             t = scr.query_one("#fam-table")
             ids = [str(t.get_row_at(i)[1]) for i in range(t.row_count)]
             t.focus()
+            await pilot.press("a")                                        # all 356 ticked, written
+            await pilot.pause()
+            assert len(families.read(root / "data" / "families.csv")) == 356
             t.move_cursor(row=ids.index("rbp.CSD"))
             await pilot.press("space")                                    # untick rbp.CSD
             await pilot.pause()
@@ -1185,15 +1212,14 @@ def test_ticks_render_and_enter_ticks_like_space(proj):
             await pilot.press("enter")                                    # to the table
             ft = scr.query_one("#fam-table")
             assert scr.focused is ft
-            n = len(_fams(root))
-            assert _rendered_ticks(ft, 2) == ["[x]", "[x]"]
-            await pilot.press("enter")                                    # row 0 unticked, no form
+            assert _fams(root) == [] and _rendered_ticks(ft, 2) == ["[ ]", "[ ]"]   # none ticked
+            await pilot.press("enter")                                    # row 0 ticked, no form
             await pilot.pause()
-            assert len(_fams(root)) == n - 1 and not scr.query_one("#fam-edit").display
-            assert _rendered_ticks(ft, 2) == ["[ ]", "[x]"]
-            await pilot.press("space")                                    # ticked again
+            assert len(_fams(root)) == 1 and not scr.query_one("#fam-edit").display
+            assert _rendered_ticks(ft, 2) == ["[x]", "[ ]"]
+            await pilot.press("space")                                    # unticked again
             await pilot.pause()
-            assert len(_fams(root)) == n and _rendered_ticks(ft, 2) == ["[x]", "[x]"]
+            assert _fams(root) == [] and _rendered_ticks(ft, 2) == ["[ ]", "[ ]"]
             await pilot.press("e")                                        # e: the settings form
             await pilot.pause()
             assert scr.query_one("#fam-edit").display and scr.focused is scr.query_one("#fe-inflation")

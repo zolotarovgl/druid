@@ -70,9 +70,8 @@ def _merge(universe: list, file_rows: list) -> list:
     """[[Row, ticked]]: the universe in its order, each row replaced by its families-file row
     (ticked) — an identical row first, else the same family (id and hmms; settings edited), else
     the one row with that class_name and hmms (its prefix edited; never a guess between two, e.g.
-    rbp.CSD / tfs.CSD); file rows matching none are appended, ticked. Empty file: all ticked."""
-    if not file_rows:
-        return [[r, True] for r in universe]
+    rbp.CSD / tfs.CSD); file rows matching none are appended, ticked. Empty file: none ticked
+    (Grygoriy, 25/10/2026: start with no families selected)."""
     out = [[r, False] for r in universe]
 
     def match(rows, same, unique=False) -> list:
@@ -394,7 +393,7 @@ class SetupScreen(Screen):
 
     def _reload_families(self, raw: dict, params: dict, root: Path) -> None:
         """The families table: the library (or families_source) plus the hmm_dir rows, merged with
-        the project's families file (its rows are the ticked set; none: all ticked)."""
+        the project's families file (its rows are the ticked set; none: nothing ticked)."""
         hd = params.get("hmm_dir")
         self._hmm_dir = _resolve(str(hd), root) if hd else None
         if self._hmm_dir is not None:
@@ -638,11 +637,11 @@ class SetupScreen(Screen):
         if q:
             count += f" · {len(self._fam_shown)} shown"
         if not self._fam_nfile:
-            count += " · the families file has no rows yet"
+            count += " · none ticked yet"
         self.query_one("#fam-count", Static).update(count)
         reason = self._fam_reason()
         self.query_one("#fam-reason", Static).update(
-            reason or "space enter: tick / untick · e: edit the row's settings")
+            reason or "space enter: tick / untick · a: tick all shown · e: edit the row's settings")
 
     def _fill_config(self) -> None:
         f = paths.config_file()
@@ -664,8 +663,6 @@ class SetupScreen(Screen):
         self.query_one("#content", ContentSwitcher).current = f"sec-{name}"
         self.query_one("#content").border_title = self.current
         self.refresh_bindings()
-        if self.current == "Families":
-            self._seed_families()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """enter on a section: into its first control (none for a locked form)."""
@@ -684,7 +681,7 @@ class SetupScreen(Screen):
         if action == "toggle":
             return self.current in ("Species", "Families")
         if action == "tick_all":
-            return self.current == "Species"
+            return self.current in ("Species", "Families")
         if action == "edit_config":
             return self.current == "Config"
         if action == "edit_family":
@@ -817,6 +814,9 @@ class SetupScreen(Screen):
         self._write({("species",): setup_state.species_value(sel)})
 
     def action_tick_all(self) -> None:
+        if self.current == "Families":
+            self._tick_shown_families()
+            return
         if not self._shown or not self._species_editable():
             return
         sel = list(self._sel)
@@ -825,7 +825,8 @@ class SetupScreen(Screen):
 
     def _tick_filtered(self) -> None:
         """enter in the filter (Grygoriy, 23/10/2026): tick every species shown (adds only), one
-        write, then clear the filter for the next query; focus stays in it."""
+        write, then clear the filter for the next query; focus stays in it, and the full list
+        scrolls to the first species just ticked so its [x] is in view (25/10/2026)."""
         f = self.query_one("#sp-filter", Input)
         if not self._species_editable():
             return
@@ -846,6 +847,10 @@ class SetupScreen(Screen):
         if not self._msg.startswith("ERROR"):
             f.value = ""
             self._fill_species()
+            first = new[0] if new else None      # the full list again: show the new ticks
+            rows = [i for i, c in enumerate(self._shown) if (c.sp, c.source) == first]
+            if rows:
+                self.query_one("#sp-table", DataTable).move_cursor(row=rows[0])
         self._fill_blockers()
 
     # ---- Analyses ---------------------------------------------------------------------------
@@ -1064,7 +1069,8 @@ class SetupScreen(Screen):
                     fam_rows=rows + added)
 
     def _set_families_source(self, value: str) -> None:
-        """Your own families file (empty: the library) as the table's rows, all of them ticked."""
+        """Your own families file (empty: the library) as the table's rows, none of them ticked
+        (the hmm_dir rows stay ticked: the user added them)."""
         if not self._fam_editable():
             return
         if value == str(self._raw.get("families_source") or ""):
@@ -1093,20 +1099,26 @@ class SetupScreen(Screen):
             hmm = self._hmm_rows(self._hmm_dir)
             if hmm is None:
                 return
-            rows = rows + hmm
+        else:
+            hmm = []
         self._write({("families_source",): value or None},
-                    done=f"families from {value or 'the shipped library'}: all {len(rows)} ticked",
-                    fam_rows=rows)
+                    done=f"families from {value or 'the shipped library'}: {len(rows) + len(hmm)} "
+                         f"rows, {len(hmm)} ticked · space / a ticks",
+                    fam_rows=hmm)
 
     # ---- Families ---------------------------------------------------------------------------
-    def _seed_families(self) -> None:
-        """First open with an empty families file: write every row of the table (all ticked)."""
-        self._reload()
-        if self._fam_reason() or self._fam_nfile or not self._fam or self._fam_target is None:
+    def _tick_shown_families(self) -> None:
+        """a: tick every family shown by the filter (adds only), one write, in table order."""
+        if not self._fam_shown or not self._fam_editable():
             return
-        self._write({}, done=f"{self._fam_target.name} had no rows: all {len(self._fam)} families "
-                             "written (ticked) · space unticks",
-                    fam_rows=[r for r, _t in self._fam])
+        shown = set(self._fam_shown)
+        new = sum(1 for i in shown if i < len(self._fam) and not self._fam[i][1])
+        if not new:
+            self._msg = f"+0 ticked: all {len(shown)} shown already ticked"
+            self._fill_blockers()
+            return
+        self._write({}, done=f"+{new} families ticked",
+                    fam_rows=[r for i, (r, x) in enumerate(self._fam) if x or i in shown])
 
     def _toggle_family(self) -> None:
         t = self.query_one("#fam-table", DataTable)
@@ -1116,9 +1128,6 @@ class SetupScreen(Screen):
         if not self._fam_editable() or i >= len(self._fam):
             return
         r, ticked = self._fam[i]
-        if ticked and sum(1 for _r, x in self._fam if x) == 1:
-            self._refuse("at least one family stays ticked (an empty families file means all ticked)")
-            return
         self._fam[i] = [r, not ticked]
         self._write({}, fam_rows=[r for r, x in self._fam if x])
 
@@ -1173,8 +1182,13 @@ class SetupScreen(Screen):
     @work(thread=True, exclusive=True, group="prepare")
     def _run_prepare(self, raw: dict, cfg, root: Path) -> None:
         notes: list = []
+        steps: list = []
+
+        def progress(m: str) -> None:            # each step on the bottom line as it starts
+            steps.append(m)
+            self.app.call_from_thread(self._prepare_step, list(steps))
         try:
-            written = prepare.run(raw, cfg, root, notes)
+            written = prepare.run(raw, cfg, root, notes, progress=progress)
         except prepare.PrepareError as e:
             msg = f"ERROR: {e}"
         except Exception as e:                   # anything: reported, the screen stays up
@@ -1187,6 +1201,12 @@ class SetupScreen(Screen):
                     return str(p)
             msg = "\n".join(["prepare wrote " + ", ".join(rel(p) for p in written)] + notes)
         self.app.call_from_thread(self._prepared, msg)
+
+    def _prepare_step(self, steps: list, most: int = 6) -> None:
+        """prepare running: the steps so far (the last `most`), the current one last."""
+        done = [f"  ✓ {m}" for m in steps[-most:-1]]
+        self._msg = "\n".join([f"prepare: step {len(steps)}"] + done + [f"  … {steps[-1]}"])
+        self._fill_blockers()
 
     def _prepared(self, msg: str) -> None:
         self._msg = msg
