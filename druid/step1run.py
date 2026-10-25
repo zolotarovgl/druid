@@ -131,10 +131,10 @@ def write(cfg: core.Config, raw: dict, rp: RunPlan, dry_run: bool, max_running: 
     return RunWritten(one(rp.search), one(rp.linked), one(rp.only))
 
 
-def submit(rw: RunWritten) -> "tuple[list[tuple[str, str, int, str | None]], str | None]":
+def submit(rw: RunWritten) -> "tuple[list[tuple[str, str, int, str | None, core.Res]], str | None]":
     """Queue search array k, then its cluster array k (after search k), ..., then the cluster-only
     arrays; stop at the first failure. ([(stage, job id, n tasks, search job id it waits on or
-    None)], error or None)."""
+    None, the array's core.Res)], error or None)."""
     order = []                                   # (stage, one-array Written, linked pair index)
     s_arr = rw.search.arrays if rw.search else []
     l_arr = rw.linked.arrays if rw.linked else []
@@ -163,5 +163,5 @@ def submit(rw: RunWritten) -> "tuple[list[tuple[str, str, int, str | None]], str
         jid = jids[n0]
         if stage == "search":
             search_of[len(search_of)] = jid
-        done.append((stage, jid, len(w.arrays[0][1]), after))
+        done.append((stage, jid, len(w.arrays[0][1]), after, w.arrays[0][0]))
     return done, None

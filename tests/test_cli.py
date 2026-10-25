@@ -717,6 +717,7 @@ def test_run_submits_and_reports(run, cli, monkeypatch):
     assert lines[1].startswith("submitted 102: cluster 1 families (after 101) ")
     assert lines[2].startswith("submitted 103: cluster 1 families ")
     assert "after" not in lines[2]
+    assert all(l.endswith(" min)") and " cpus, " in l for l in lines)       # resources tail
     assert "search+cluster 1 · cluster only 1" in r.output
     assert len(_run_calls()) == 3 and "--dependency=aftercorr:101" in _run_calls()[1]
 
@@ -731,6 +732,14 @@ def test_run_refuses_without_squeue(run, cli, monkeypatch):
 
 def test_run_refusals_and_nothing_to_do(run, cli, monkeypatch):
     cfg, raw = _run_cfg_raw()
+    from druid import paths as _paths
+    yml = _paths.config_file()
+    text = yml.read_text()
+    yml.write_text("".join(l for l in text.splitlines(True) if not l.startswith("job_prefix:")))
+    r = cli(["run"])
+    assert r.exit_code == 2 and "ERROR: set job_prefix in Setup (druid.yaml job_prefix)" in r.output
+    assert _run_calls() == []
+    yml.write_text(text)
     (run / "input.fasta").unlink()
     r = cli(["run"])
     assert r.exit_code == 2 and "ERROR: run prepare first" in r.output
@@ -743,6 +752,7 @@ def test_run_refusals_and_nothing_to_do(run, cli, monkeypatch):
     (cfg.outdir / f"search/{fams[0]}.domains.fasta").write_text("")      # no hits
     r = cli(["run"])
     assert r.exit_code == 0 and "nothing to submit" in r.output
+    assert "search+cluster 0 · cluster only 0 · no hits 1 · done 0 · queued 0" in r.output
     assert _run_calls() == [] and not (run / "runs").exists()
 
 

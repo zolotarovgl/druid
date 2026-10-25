@@ -658,14 +658,7 @@ def run(fam: str = typer.Option(None, "--fam", "-f", help=FAM_HELP),
         typer.echo(step1run.counts_line(rp.counts))
         typer.echo("nothing to submit")
         raise typer.Exit(0)
-    errs = {}
-    for p in plans:
-        errs.update(p.errors)
-    if errs:
-        for k, v in errs.items():
-            typer.echo(f"{k} ({len(v)}): {_show(v)}", err=True)
-        typer.echo("nothing submitted", err=True)
-        raise typer.Exit(2)
+    # plan_run drops every failing family with a note, so its plans never carry errors
     if rp.search is not None:
         _preflight("search", cfg)
     if rp.linked is not None or rp.only is not None:
@@ -685,20 +678,13 @@ def run(fam: str = typer.Option(None, "--fam", "-f", help=FAM_HELP),
     for w in (rw.search, rw.linked, rw.only):
         if w is not None:
             typer.echo(f"run dir: {w.run_dir}")
-    # the arrays in the order submit() queues them, to name each one's resources
-    s_arr = rw.search.arrays if rw.search else []
-    l_arr = rw.linked.arrays if rw.linked else []
-    order = [a for k in range(len(s_arr)) for a in (s_arr[k], l_arr[k] if k < len(l_arr) else None)]
-    order += rw.only.arrays if rw.only else []
     try:
         done, err = step1run.submit(rw)
     except model.ModelError as e:
         _fail(str(e), e.code)
-    for (stage, jid, n, after), arr in zip(done, order):
-        res = arr[0] if arr else None
-        tail = f" ({res.cpus} cpus, {res.mem_mb}M, {res.time_min} min)" if res else ""
-        typer.echo(f"submitted {jid}: {stage} {n} families"
-                   + (f" (after {after})" if after else "") + tail)
+    for stage, jid, n, after, res in done:
+        typer.echo(f"submitted {jid}: {stage} {n} families" + (f" (after {after})" if after else "")
+                   + f" ({res.cpus} cpus, {res.mem_mb}M, {res.time_min} min)")
     if err:
         for line in err.splitlines():
             typer.echo(line, err=True)

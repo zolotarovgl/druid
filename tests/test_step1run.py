@@ -109,8 +109,9 @@ def test_submit_links_each_cluster_array(run, monkeypatch):
     rw = step1run.write(cfg, raw, step1run.plan_run(cfg, raw), dry_run=False)
     out, err = step1run.submit(rw)
     assert err is None
-    assert out == [("search", "101", 1, None), ("cluster", "102", 1, "101"),
-                   ("cluster", "103", 1, None)]
+    assert [o[:4] for o in out] == [("search", "101", 1, None), ("cluster", "102", 1, "101"),
+                                    ("cluster", "103", 1, None)]
+    assert [o[4] for o in out] == [w.arrays[0][0] for w in (rw.search, rw.linked, rw.only)]
     s_script, l_script, o_script = (w.arrays[0][3] for w in (rw.search, rw.linked, rw.only))
     assert _calls() == [f"--parsable {s_script}",
                         f"--parsable --dependency=aftercorr:101 --kill-on-invalid-dep=yes {l_script}",
@@ -137,9 +138,9 @@ def test_chunks_pair_exactly(run, monkeypatch):
         assert a.read_bytes() == b.read_bytes()
     out, err = step1run.submit(rw)
     assert err is None and rw.only is None
-    assert out == [("search", "101", 2, None), ("cluster", "102", 2, "101"),
-                   ("search", "103", 2, None), ("cluster", "104", 2, "103"),
-                   ("search", "105", 1, None), ("cluster", "106", 1, "105")]
+    assert [o[:4] for o in out] == [("search", "101", 2, None), ("cluster", "102", 2, "101"),
+                                    ("search", "103", 2, None), ("cluster", "104", 2, "103"),
+                                    ("search", "105", 1, None), ("cluster", "106", 1, "105")]
     calls = _calls()
     for k in range(3):
         assert calls[2 * k] == f"--parsable {rw.search.arrays[k][3]}"
@@ -166,7 +167,7 @@ def test_cluster_sbatch_fails_after_search(run, monkeypatch):
     rw = step1run.write(cfg, raw, step1run.plan_run(cfg, raw), dry_run=False)
     monkeypatch.setenv("FAKE_SBATCH_FAIL", "2")
     out, err = step1run.submit(rw)
-    assert out == [("search", "101", 1, None)]
+    assert [o[:4] for o in out] == [("search", "101", 1, None)]
     assert "101" in err and "the next druid run clusters them" in err
     assert "sbatch failed" in err and str(rw.only.arrays[0][3]) in err   # never submitted
     assert len(_calls()) == 2                                      # nothing after the failure
