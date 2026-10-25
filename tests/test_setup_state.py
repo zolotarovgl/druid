@@ -26,7 +26,7 @@ def proj(tmp_path):
     for f in ("base_tree.binary.newick", "base_tree.newick"):   # species tree for the tree blockers
         (root / "data" / f).write_text("((Aaa:1,Bbb:1):1,Nope:1)R;")
     yamledit.update_config({("proteomes_dir",): str(prot), ("taxonomy",): "data/tax.tsv",
-                            ("species",): ["Aaa"]})
+                            ("species",): ["Aaa"], ("job_prefix",): "t"})
     return root, prot
 
 
@@ -231,3 +231,14 @@ def test_dry_run_does_not_lock(cli, monkeypatch):
     r = cli(["submit", "align", "tfs.A.HG11", "--dry-run"])
     assert r.exit_code == 0 and "nothing submitted (dry run)" in r.output and calls == []
     assert cli(["submit", "align", "tfs.A.HG11"]).exit_code == 0 and calls == [1]
+
+
+def test_blockers_need_job_prefix(proj):
+    root, _prot = proj
+    raw, cfg = _raw()
+    no = {k: v for k, v in raw.items() if k != "job_prefix"}
+    cfg0 = core.config_from_raw(no)
+    assert ss.blockers(no, cfg0, root)[0] == "no job_prefix (Setup › Project)"
+    assert "no job_prefix (Setup › Project)" not in ss.blockers(raw, cfg, root)
+    adopted = {**no, "prepare": "locked"}
+    assert "no job_prefix (Setup › Project)" not in ss.blockers(adopted, cfg0, root)

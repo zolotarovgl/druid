@@ -36,7 +36,8 @@ def proj(tmp_path):
     (root / "data" / "families.csv").write_text(GENEFAM)
     for f in ("base_tree.binary.newick", "base_tree.newick"):
         (root / "data" / f).write_text("((Aaa:1,Bbb:1):1,Ccc:1)R;")
-    yamledit.update_config({("proteomes_dir",): str(prot), ("taxonomy",): "data/tax.tsv"})
+    yamledit.update_config({("proteomes_dir",): str(prot), ("taxonomy",): "data/tax.tsv",
+                            ("job_prefix",): "t"})
     return root, prot, mine
 
 
@@ -1507,4 +1508,53 @@ def test_filter_enter_ticks_a_prefix_list(proj):
             assert _raw()["species"] == ["Bbb", "Aaa"]
             assert "+2 ticked (Bbb, Aaa) · not found: Qqq" in _text(scr, "#blockers")
             assert scr.query_one("#sp-filter").value == ""
+    _run(go())
+
+
+def test_project_section_sets_prefix(proj):
+    yamledit.update_config({("job_prefix",): None})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            assert [i.id for i in scr.query_one("#sections").children][0] == "item-project"
+            assert scr.query_one("#sections").index == 0 and scr.current == "Project"
+            assert _text(scr, "#lbl-project").endswith("!")
+            assert "no job_prefix (Setup › Project)" in _text(scr, "#blockers")
+            await _section(pilot, scr, "Project")
+            assert scr.focused is scr.query_one("#job-prefix")
+            await pilot.press(*"chromo", "enter")
+            await pilot.pause()
+            assert paths.read_raw()["job_prefix"] == "chromo"
+            assert _text(scr, "#lbl-project").endswith("✓")
+            assert "no job_prefix" not in _text(scr, "#blockers")
+            before = paths.config_file().read_bytes()
+            scr.query_one("#job-prefix").value = "a-b"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert "ERROR: job_prefix" in _text(scr, "#blockers")
+            assert paths.config_file().read_bytes() == before
+    _run(go())
+
+
+@pytest.mark.parametrize("lock", ["species_locked", "adopted"])
+def test_prefix_editable_after_species_lock(proj, lock):
+    yamledit.update_config({("species",): ["Aaa"], **({("species_locked",): True}
+                                                        if lock == "species_locked"
+                                                        else {("prepare",): "locked"})})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Project")
+            inp = scr.query_one("#job-prefix")
+            assert inp.disabled == (lock == "adopted")
+            if lock == "species_locked":
+                inp.focus()
+                inp.value = "later"
+                await pilot.press("enter")
+                await pilot.pause()
+                assert paths.read_raw()["job_prefix"] == "later"
     _run(go())

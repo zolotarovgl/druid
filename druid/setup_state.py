@@ -207,6 +207,8 @@ def _tree_blockers(raw: dict, root: Path, species: list, generax: bool) -> list:
 def blockers(raw: dict, cfg: core.Config, root: Path) -> list:
     """Why prepare cannot run, human-readable, in this order."""
     out = []
+    if not cfg.job_prefix and raw.get("prepare") != "locked":
+        out.append("no job_prefix (Setup › Project)")
     sel = selected(raw)
     if not sel:
         out.append("no species ticked")

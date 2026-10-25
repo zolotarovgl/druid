@@ -160,7 +160,7 @@ class PlaceScreen(DruidTreeScreen):
 class SetupScreen(Screen):
     """Left: the sections, each with a mark (✓ fine, ! needs attention, a number = how many);
     right: the highlighted section; bottom: the last error and the blockers."""
-    SECTIONS = ("Source", "Species", "Analyses", "Tree", "Search", "Families", "Config")
+    SECTIONS = ("Project", "Source", "Species", "Analyses", "Tree", "Search", "Families", "Config")
     DEFAULT_CSS = """
     SetupScreen #setup-tabbar { height: 1; }
     SetupScreen #setup-body { height: 1fr; }
@@ -249,7 +249,14 @@ class SetupScreen(Screen):
         with Horizontal(id="setup-body"):
             yield ListView(*[ListItem(Label(s, id=f"lbl-{s.lower()}"), id=f"item-{s.lower()}")
                              for s in self.SECTIONS], id="sections")
-            with ContentSwitcher(id="content", initial="sec-source"):
+            with ContentSwitcher(id="content", initial="sec-project"):
+                with Vertical(id="sec-project"):
+                    yield Static("", id="pj-reason", classes="note", markup=False)
+                    yield Static("job_prefix: your SLURM job names are <job_prefix>-<stage> "
+                                 "(letters, digits, _; 1-20 characters, first a letter)",
+                                 classes="note", markup=False)
+                    yield Input(placeholder="job_prefix: your SLURM job names are <job_prefix>-<stage>",
+                                id="job-prefix")
                 with Vertical(id="sec-source"):
                     yield Static("", id="src-list", markup=False)
                     yield Static("add a custom source (enter: next field · enter on the last: add)",
@@ -463,7 +470,9 @@ class SetupScreen(Screen):
         nsrc_bad = any(e.startswith(("ERROR: sources", "ERROR: proteome")) for e in self._errors)
         nfam = sum(1 for _r, t in self._fam if t)
         hmm_bad = self._search == "hmm" and (self._hmm_dir is None or not self._hmm_dir.is_dir())
-        return {"Source": "!" if nsrc_bad or self._rowless else str(len(self._srcs)),
+        return {"Project": "✓" if self._cfg is not None and (
+                    self._cfg.job_prefix or self._ro_all) else "!",
+                "Source": "!" if nsrc_bad or self._rowless else str(len(self._srcs)),
                 "Species": str(len(self._sel)) if self._sel else "!",
                 "Analyses": "✓",
                 "Tree": "·" if not self._tree_on else "!" if self._tree_err or self._missing else "✓",
@@ -474,6 +483,7 @@ class SetupScreen(Screen):
     def _refresh(self) -> None:
         for name, mark in self._marks().items():
             self.query_one(f"#lbl-{name.lower()}", Label).update(f"{name:<9} {mark}")
+        self._fill_project()
         self._fill_source()
         self._fill_species()
         self._fill_analyses()
@@ -514,6 +524,23 @@ class SetupScreen(Screen):
         sws = [s for s in self.query(Switch) if not s.disabled]
         if self.focused in sws:
             sws[min(max(sws.index(self.focused) + d, 0), len(sws) - 1)].focus()
+
+    def _fill_project(self) -> None:
+        inp = self.query_one("#job-prefix", Input)
+        inp.disabled = self._ro_all
+        self.query_one("#pj-reason", Static).update(LOCKED_ALL if self._ro_all else "")
+        if not inp.has_focus:
+            inp.value = str(self._raw.get("job_prefix") or "")
+
+    def _set_job_prefix(self, value: str) -> None:
+        if self._ro_all:
+            self._refuse(LOCKED_ALL)
+            return
+        why = core.job_prefix_error(value)
+        if why:
+            self._refuse(f"ERROR: {why}")           # never written
+            return
+        self._write({("job_prefix",): value}, done=f"job_prefix = {value}")
 
     def _fill_source(self) -> None:
         n = {}
@@ -688,7 +715,7 @@ class SetupScreen(Screen):
         """enter on a section: into its first control (none for a locked form)."""
         if event.list_view.id != "sections":
             return
-        target = {"Source": "#src-name", "Species": "#sp-filter", "Analyses": "#sw-generax",
+        target = {"Project": "#job-prefix", "Source": "#src-name", "Species": "#sp-filter", "Analyses": "#sw-generax",
                   "Tree": "#tree-missing" if self._tree_on and self._missing else "#tree-base",
                   "Search": "#se-type", "Families": "#fam-filter",
                   "Config": "#sec-config"}.get(self.current)
@@ -732,7 +759,9 @@ class SetupScreen(Screen):
     # ---- Source -----------------------------------------------------------------------------
     def on_input_submitted(self, event: Input.Submitted) -> None:
         wid = event.input.id or ""
-        if wid == "sp-filter":
+        if wid == "job-prefix":
+            self._set_job_prefix(event.value.strip())
+        elif wid == "sp-filter":
             self._tick_filtered()
         elif wid == "fam-filter":
             self.query_one("#fam-table").focus()

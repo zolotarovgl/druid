@@ -34,7 +34,8 @@ def proj(tmp_path):
     for f in ("base_tree.binary.newick", "base_tree.newick"):
         (root / "data" / f).write_text(TREE)
     yamledit.update_config({("proteomes_dir",): str(prot), ("proteome_glob",): "{sp}.faa",
-                            ("taxonomy",): "data/tax.tsv", ("species",): ["Wxyz", "Abcd", "Hsap"]})
+                            ("taxonomy",): "data/tax.tsv", ("species",): ["Wxyz", "Abcd", "Hsap"],
+                            ("job_prefix",): "t"})
     return root, prot
 
 
@@ -227,3 +228,10 @@ def test_cli_prepare_prints_steps(proj):
     assert any(x.startswith("prepare: input.fasta: 3/3 Hsap") for x in lines)
     assert lines.index("prepare: moving 4 files into place") < min(
         i for i, x in enumerate(lines) if x.startswith("wrote "))
+
+
+def test_cli_prepare_refuses_without_job_prefix(proj):
+    root, _ = proj
+    yamledit.update_config({("job_prefix",): None})
+    r = CliRunner().invoke(cli.app, ["--project", str(root), "prepare"])
+    assert r.exit_code == 2 and "no job_prefix (Setup › Project)" in r.output
