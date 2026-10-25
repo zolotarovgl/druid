@@ -317,6 +317,22 @@ def hg_detail(cfg: core.Config, hg: str, atts: list | None = None) -> HGDetail:
     return HGDetail(hg, core.nseq(cfg, hg), states, history.latest_by_stage(atts))
 
 
+def search_cancelled(run: Path, stage: str, jid: str, states: dict) -> set[int]:
+    """Task indices of a linked cluster array that SLURM cancelled because the paired search task
+    failed (run's depends.tsv, same task index; the rule history.attempts applies)."""
+    search_jid = history._depends(run).get(jid) if stage == "cluster" else None
+    if search_jid is None:
+        return set()
+    theirs = states.get(search_jid, {})
+    return {i for i, s in states.get(jid, {}).items()
+            if history.cascade_cancelled(s, theirs.get(i))}
+
+
+def search_jobs(subs) -> set[str]:
+    """Search job ids the linked cluster submissions in `subs` depend on."""
+    return {history._depends(r).get(j) for r, st, j, _f in subs if st == "cluster"} - {None}
+
+
 @dataclass
 class ArrayRow:
     run: Path
@@ -329,13 +345,15 @@ class ArrayRow:
 def array_rows(stage: str | None = None, last: int = 10):
     """(rows, sacct_known): the table `phylo jobs` prints."""
     subs = submissions(stage, last)
-    states = task_states(sorted({jid for _r, _s, jid, _f in subs}))
+    states = task_states(sorted({jid for _r, _s, jid, _f in subs} | search_jobs(subs)))
     known = states is not None
     states = states or {}
     rows = []
     for run, st, jid, ids_file in subs:
         n = len(core.read_ids(ids_file)) if ids_file.is_file() else 0
-        c = collections.Counter(category(s) for s in states.get(jid, {}).values())
+        gone = search_cancelled(run, st, jid, states)       # not a cluster failure
+        c = collections.Counter("cancelled" if i in gone else category(s)
+                                for i, s in states.get(jid, {}).items())
         c["pending"] += max(n - sum(c.values()), 0)        # tasks sacct has not reported yet
         rows.append(ArrayRow(run, st, jid, n, c))
     return rows, known

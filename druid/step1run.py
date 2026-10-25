@@ -177,7 +177,11 @@ def submit(rw: RunWritten) -> "tuple[list[tuple[str, str, int, str | None, core.
         if err:
             rest = [str(a[3]) for _st, w2, _p in order[j + 1:] for a in w2.arrays]
             msg = err + ("" if not rest else " " + " ".join(rest))
-            if after:
+            if after and "timed out" in err:
+                msg += (f"\nsearch array {after} is queued; its cluster array may have been "
+                        "queued too (its id is in no jobs.tsv): check 'squeue --me' before "
+                        "running druid run again, or those families are clustered twice")
+            elif after:
                 msg += (f"\nsearch array {after} is queued without its cluster array: "
                         "the next druid run clusters them")
             return done, msg

@@ -199,6 +199,11 @@ def _nextflow_attempts(cfg: core.Config, hg: str | None, expected: set, warn,
 RUN_RE = re.compile(r"^(\d{4})(\d\d)(\d\d)-(\d\d)(\d\d)(\d\d)_(.+?)(?:-\d+)?$")
 
 
+def cascade_cancelled(state: str | None, search_state: str | None) -> bool:
+    """A linked cluster task SLURM cancelled because its paired search task failed."""
+    return state == "CANCELLED" and search_state in FAILED_STATES
+
+
 def _depends(run: Path) -> dict:
     """{cluster job id: search job id} from a linked cluster run dir's depends.tsv."""
     try:
@@ -405,7 +410,7 @@ def _phylocli_attempts(hg: str | None, stages=None) -> list[Attempt]:
                                time, rss, el, str(run / "logs" / f"{stage}_{jid}_{i}.err")))
     for n, search_jid, i in cascade:                  # SLURM cancels a linked cluster task whose
         a = out[n]                                    # search task failed: sacct gives no reason
-        if a.status == "CANCELLED" and raw.get((search_jid, i)) in FAILED_STATES:
+        if cascade_cancelled(a.status, raw.get((search_jid, i))):
             out[n] = replace(a, status="SEARCH_FAILED")
     merged = {k: v for k, v in cache.items() if k.split("|", 1)[0] in live}
     merged.update(fresh)

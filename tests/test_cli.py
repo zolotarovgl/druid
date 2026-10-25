@@ -762,3 +762,37 @@ def test_run_submit_failure_reports_ids(run, cli, monkeypatch):
     r = cli(["run"])
     assert r.exit_code == 1 and "submitted 101: search" in r.output
     assert "denied" in r.output
+
+
+def _linked_runs(cli):
+    from druid import paths as _p
+    runs = _p.runs_dir()
+    for name, jid in (("20261001-100000_search", "101"), ("20261001-100001_cluster", "102")):
+        d = runs / name
+        d.mkdir(parents=True)
+        (d / "ids_0.txt").write_text("F1\nF2\nF3\n")
+        (d / "jobs.tsv").write_text(f"{jid}\t{d / 'ids_0.txt'}\n")
+    (runs / "20261001-100001_cluster" / "depends.tsv").write_text("102\t101\n")
+
+
+LINKED = ("101_0|COMPLETED\\n101_1|FAILED\\n101_2|COMPLETED\\n"
+          "102_0|COMPLETED\\n102_1|CANCELLED by 0\\n102_2|CANCELLED by 0\\n")
+
+
+def test_jobs_cascade_cancel_is_not_a_cluster_failure(cli, monkeypatch):
+    _linked_runs(cli)
+    monkeypatch.setenv("FAKE_SACCT", LINKED)
+    r = cli(["jobs", "--last", "1", "--stage", "cluster"])
+    assert r.exit_code == 0, r.output
+    # HGs, pending, running, done, failed: only the real cancel (task 2) counts as failed
+    assert _row(r.output, "102")[-5:] == ["3", "0", "0", "1", "1"]
+    assert "1 cancelled: search failed" in r.output
+    r = cli(["jobs", "--failed", "--stage", "cluster"])
+    assert "F3" in r.output and "F2" not in r.output
+    r = cli(["jobs", "102"])
+    assert "cancelled: search failed" in r.output
+    r = cli(["jobs", "102", "--failed"])
+    assert "F3" in r.output and "F2" not in r.output
+    from druid import model
+    rows, _k = model.array_rows("cluster", 1)
+    assert rows[0].counts["failed"] == 1 and rows[0].counts["cancelled"] == 1

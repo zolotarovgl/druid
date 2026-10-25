@@ -731,7 +731,7 @@ def jobs(job_id: str = typer.Argument(None, help="array job id: list its tasks w
     if not subs:
         typer.echo("no submissions in " + str(_runs_dir()))
         return
-    states = _task_states(sorted({jid for _r, _s, jid, _f in subs}))
+    states = _task_states(sorted({jid for _r, _s, jid, _f in subs} | model.search_jobs(subs)))
     con = Console(highlight=False)
     known = states is not None
     if not known:
@@ -740,8 +740,9 @@ def jobs(job_id: str = typer.Argument(None, help="array job id: list its tasks w
     if failed:
         for run, st, jid, ids_file in subs:
             hgs = core.read_ids(ids_file) if ids_file.is_file() else []
-            for i, state in sorted(states.get(jid, {}).items()):
-                if _category(state) == "failed" and i < len(hgs):
+            gone = model.search_cancelled(run, st, jid, states)   # the search failure is the one
+            for i, state in sorted(states.get(jid, {}).items()):   # to fix, not these
+                if _category(state) == "failed" and i < len(hgs) and i not in gone:
                     log = run / "logs" / f"{st}_{jid}_{i}.err"
                     con.print(f"{hgs[i]}\t[red]{state}[/]\t{log}", soft_wrap=True)
         return
@@ -758,6 +759,10 @@ def jobs(job_id: str = typer.Argument(None, help="array job id: list its tasks w
         t.add_row(r.run.name.split("_")[0], r.stage, r.job, str(r.n), *cells,
                   _job_bar(r.counts) if known else "")
     con.print(t)
+    for r in rows:
+        if known and r.counts["cancelled"]:
+            con.print(f"[dim]{r.job}: {r.counts['cancelled']} cancelled: search failed "
+                      "(not counted as failed)[/]")
 
 
 @app.command()
@@ -796,7 +801,8 @@ def _job_tasks(job_id: str, failed: bool, running: bool):
         _fail(f"job {job_id} is not a phylocli submission in {_runs_dir()}", 1)
     run, st, jid, ids_file = sub
     hgs = core.read_ids(ids_file) if ids_file.is_file() else []
-    states = _task_states([jid])
+    states = _task_states([jid] + sorted(model.search_jobs([sub])))
+    gone = model.search_cancelled(run, st, jid, states) if states else set()
     con = Console(highlight=False)
     if states is None:
         con.print("[yellow]sacct not on PATH: task states unknown[/]")
@@ -805,6 +811,11 @@ def _job_tasks(job_id: str, failed: bool, running: bool):
         t.add_column(col)
     for i, hg in enumerate(hgs):
         state = (states or {}).get(jid, {}).get(i, "PENDING" if states is not None else "?")
+        if i in gone:
+            if failed or running:
+                continue
+            t.add_row(str(i), hg, "[dim]cancelled: search failed[/]", f"{st}_{jid}_{i}.err")
+            continue
         cat = _category(state) if states is not None else None
         if (failed and cat != "failed") or (running and cat != "running"):
             continue

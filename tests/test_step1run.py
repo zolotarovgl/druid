@@ -234,3 +234,21 @@ def test_refusal_blockers_only_before_the_lock(proj):  # noqa: F811
     msg = step1run.refusal(raw, cfg)
     assert msg.startswith("ERROR: Setup has blockers: ") and "Aaa: no proteome file" in msg
     assert step1run.refusal({**raw, "species_locked": True}, cfg) == ""
+
+
+def test_cluster_sbatch_timeout_says_it_may_be_queued(run, monkeypatch):
+    _fams(run, ["F1"])
+    cfg, raw = _cfg_raw()
+    rw = step1run.write(cfg, raw, step1run.plan_run(cfg, raw), dry_run=False)
+    b = _state["bin"]
+    sb = b / "sbatch"
+    sb.write_text("#!/bin/sh\n"
+                  f'n=$(cat {b}/count 2>/dev/null || echo 0); n=$((n + 1)); echo $n > {b}/count\n'
+                  '[ "$n" = 2 ] && sleep 5\n'
+                  'echo $((100 + n))\n')
+    monkeypatch.setattr(model, "SLURM_TIMEOUT", 1)
+    out, err = step1run.submit(rw)
+    assert [o[:4] for o in out] == [("search", "101", 1, None)]
+    assert "101" in err and "may have been queued" in err
+    assert "squeue --me" in err and "before running druid run again" in err
+    assert "the next druid run clusters them" not in err

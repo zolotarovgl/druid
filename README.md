@@ -113,6 +113,8 @@ druid missing [STAGE] [--ids PATH] [--fam/-f PREFIX] [--all] [--per-fam]
 druid submit STAGE [HGS]... [--missing] [--ids PATH] [--fam/-f PREFIX] [--all] [-n/--dry-run]
                    [--max-running INTEGER] [--partition TEXT] [--qos TEXT]
                    [--mem 16G] [--time 24h] [--cpus 8] [--set KEY=VALUE]...
+druid run [--fam/-f PREFIX] [-n/--dry-run] [--max-running INTEGER] [--partition TEXT] [--qos TEXT]
+          [--mem 16G] [--time 24h] [--cpus 8]
 druid jobs [--stage TEXT] [--last N] [--failed]
 druid tui [--refresh 30]
 ```
@@ -122,6 +124,17 @@ STAGE is one of `search cluster align tree possvm_prev generax gxsup possvm`. `s
 field, e.g. `slc.SLC25`), the others on HG ids. `submit` takes exactly one of: ids,
 `--ids FILE`, or `--missing`. `--fam` takes a category (`tfs`) or a family
 (`tfs.T-box`), matched on whole dot-separated id parts (`tfs.T-box` does not match `tfs.T-box2`).
+
+`druid run` is step 1 in one command (25/10/2026): it submits a `search` array for the families
+not yet searched, a `cluster` array for each of those that waits on its search task (task by task,
+`--dependency=aftercorr`; a cluster task whose search task fails is cancelled and shows as
+`cancelled: search failed`, not as a cluster failure), and cluster-only arrays for families
+already searched. Families already done, queued, without hits or failing a check are skipped
+with a note. `-n` writes the scripts and prints the arrays without submitting. Step 2 (align,
+tree, ...) stays manual: `druid submit` once the clusters exist.
+
+Every SLURM job is named `<job_prefix>-<stage>`; `job_prefix` is required (see `druid.yaml`), and
+`submit` / `run` refuse without it.
 
 ```
 druid status                                   # per stage: done / running / ready / blocked bars; "N/M HGs done"
@@ -238,7 +251,10 @@ named `config.yaml`; the project's own file is `druid.yaml`.)
 `domain_expand`, `s1_ncpu`, `s2_ncpu`, `max_n`, `s2_inflation`) and the step2 parameters the
 stages read (`MAFFT_OPT`, `TREE_METHOD`, `IQTREE2_MODEL`, `SUBS_MODEL`, `SPECIES_TREE`,
 `ORIGIN_TREE`, `MAX_SPR`, `NCPU_GENERAX`, `REFNAMES`, `REFSPECIES`, `run_generax`, `gxsup`,
-`resources_tsv`, `min_seqs`, `min_distinct`). Relative paths are relative to the project. Values
+`resources_tsv`, `min_seqs`, `min_distinct`). `job_prefix` is required (Setup › Project in the
+TUI, or `job_prefix:` in the file): 1-20 characters, letters, digits and `_`, starting with a
+letter; jobs are named `<job_prefix>-<stage>`, and `druid jobs` / the TUI show only the jobs of
+this project's own runs. An adopted project keeps its old `phylo-<stage>` names. Relative paths are relative to the project. Values
 mirror `nextflow.config` + the `precise` profile and the 24/09/2026 run
 (`-profile slurm,precise --run_generax`). `proteomes_dir`, `pfam_db` and `hmm_dir` are read-only
 inputs and may point anywhere; everything druid writes (`outdir`, `runs_dir`, `infasta`,
@@ -323,7 +339,8 @@ HG view panels: stages (top left) · HGs — or families, for search / cluster �
 
 Keys (HG view): `↑↓` move · `tab` panel · `esc` overview · `f` filter (failed → ready → running → blocked → done) ·
 `space` select · `a` select all shown · `r` resubmit selection · `l` last log · `o` results · `R` refresh ·
-`q` quit.
+`S` run step 1 (`druid run`: `enter` dry run, `y` submit; also in Setup, which refuses while prepare is
+running) · `q` quit.
 
 Resubmit: one row per resource group, pre-filled with the automatic bump (out of memory →
 memory ×2, time limit → time ×2, other failures unchanged); memory and time are editable.

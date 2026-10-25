@@ -1272,6 +1272,10 @@ class SetupScreen(Screen):
         """S: the Jobs tab's run box (step1run refuses a missing job_prefix, an adopted project, no
         prepare yet); druid.yaml is read again first, and again when the box closes (a submit
         locks the species)."""
+        if any(w.group == "prepare" and w.is_running for w in self.app.workers):
+            self._msg = "run: prepare is still running; wait for it to finish"
+            self._fill_blockers()
+            return
         self._reload()
         if self._cfg is None:
             self._msg = "ERROR: run: druid.yaml does not load (see the errors below)"

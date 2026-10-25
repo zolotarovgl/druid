@@ -1581,3 +1581,37 @@ def test_prepare_hint_names_S(proj):
             await pilot.pause()
             assert app.screen is scr
     _run(go())
+
+
+def test_S_refused_while_prepare_runs(proj, monkeypatch):
+    import threading
+    yamledit.update_config({("species",): ["Aaa", "Bbb"]})
+    gate, started = threading.Event(), threading.Event()
+    real = setup_tui.prepare.run
+
+    def slow(*a, **kw):
+        started.set()
+        gate.wait(10)
+        return real(*a, **kw)
+    monkeypatch.setattr(setup_tui.prepare, "run", slow)
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await pilot.press("P")
+            for _ in range(100):
+                if started.is_set():
+                    break
+                await pilot.pause(0.05)
+            await pilot.press("S")
+            await pilot.pause()
+            assert app.screen is scr and not isinstance(app.screen, tui.RunScreen)
+            assert "prepare is still running" in _text(scr, "#blockers")
+            gate.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.press("S")
+            await pilot.pause()
+            assert isinstance(app.screen, tui.RunScreen)
+    _run(go())
