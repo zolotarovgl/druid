@@ -588,8 +588,12 @@ def submit(stage: str = typer.Argument(...),
             typer.echo(note)
         typer.echo("nothing to submit")
         raise typer.Exit(0)
+    try:
+        model.require_prefix(raw, cfg)
+    except model.ModelError as e:
+        _fail(str(e), e.code)
     _preflight(stage, cfg)
-    over = [f"{k}={v}" for k, v in (("--mem", mem), ("--time", time), ("--cpus", cpus)) if v]
+    over =[f"{k}={v}" for k, v in (("--mem", mem), ("--time", time), ("--cpus", cpus)) if v]
     p = model.plan(cfg, stage, sel, override, over_flags=over)
     if p.errors:
         for k, v in p.errors.items():

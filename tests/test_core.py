@@ -134,3 +134,21 @@ def test_run_dir_config_resolves_against_project(tmp_path, monkeypatch):
     monkeypatch.setenv("DRUID_CONFIG", str(run / "config.yaml"))
     cfg = core.load_config()
     assert cfg.params["infasta"] == str(proj.resolve() / "data/input.fasta")   # not run/data/...
+
+
+def test_job_prefix_rules():
+    assert core.job_prefix_error("chromo") == "" and core.job_prefix_error("a_1") == ""
+    for bad in ("", "1abc", "a-b", "a b", "x" * 21, "é"):
+        assert core.job_prefix_error(bad)
+
+
+def test_config_reads_job_prefix(results_tree):
+    from druid import paths
+    raw = paths.read_raw()
+    raw["job_prefix"] = "chromo"
+    assert core.config_from_raw(raw).job_prefix == "chromo"
+    raw["job_prefix"] = "a-b"
+    with pytest.raises(core.ConfigError, match="job_prefix"):
+        core.config_from_raw(raw)
+    del raw["job_prefix"]
+    assert core.config_from_raw(raw).job_prefix is None

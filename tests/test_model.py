@@ -539,3 +539,32 @@ def test_hg_tree_files_from_the_og_csv_name(cli):
     assert tree == cfg.outdir / "possvm/tfs.A.HG1.generax.support.tree"
     assert model.hg_tree_files(cfg, "tfs.A.HG1", "possvm_prev")[0].name == "tfs.A.HG1.treefile"
     assert model.hg_tree_files(cfg, "tfs.C_x.HG1", "possvm") is None
+
+
+def _write_search(cfg):
+    sel = model.select(cfg, "search", ["tfs.A"])
+    p = model.plan(cfg, "search", sel)
+    assert not any(p.errors.values())
+    w = model.write_run(cfg, _raw(), p, dry_run=True)
+    return w.arrays[0][3].read_text()
+
+
+def test_sbatch_job_name_uses_prefix(cli):
+    cfg = dataclasses.replace(_cfg(), job_prefix="chromo")
+    assert "#SBATCH --job-name=chromo-search" in _write_search(cfg)
+    cfg = dataclasses.replace(_cfg(), job_prefix=None)      # adopted: the old name
+    assert "#SBATCH --job-name=phylo-search" in _write_search(cfg)
+
+
+def test_submit_refuses_without_prefix(cli):
+    import yaml
+    raw = _raw()
+    del raw["job_prefix"]
+    paths.config_file().write_text(yaml.safe_dump(raw))
+    r = cli(["submit", "search", "--missing"])
+    assert r.exit_code == 2
+    assert "ERROR: set job_prefix in Setup (druid.yaml job_prefix)" in r.output
+    raw["prepare"] = "locked"                                # adopted: exempt
+    paths.config_file().write_text(yaml.safe_dump(raw))
+    r = cli(["submit", "search", "--missing", "--dry-run"])
+    assert "job_prefix" not in r.output

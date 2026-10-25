@@ -386,7 +386,7 @@ TOOLS = {"search": ["hmmsearch", "hmmfetch", "bedtools", "samtools"], "cluster":
          "gxsup": ["iqtree2"], "possvm": [], "possvm_prev": []}
 MAX_ARRAY = 1000  # SLURM MaxArraySize default 1001 -> indices 0..1000
 SBATCH = """#!/usr/bin/env bash
-#SBATCH --job-name=phylo-{stage}
+#SBATCH --job-name={job_name}
 #SBATCH --partition={partition}
 #SBATCH --qos={qos}
 #SBATCH --cpus-per-task={cpus}
@@ -561,6 +561,17 @@ class Written:
     arrays: list
 
 
+def job_name(cfg: core.Config, stage: str) -> str:
+    return f"{cfg.job_prefix or 'phylo'}-{stage}"
+
+
+def require_prefix(raw: dict, cfg: core.Config) -> None:
+    """A druid project names its SLURM jobs <job_prefix>-<stage>; adopted projects
+    (prepare: locked) may stay on phylo-<stage>."""
+    if not cfg.job_prefix and raw.get("prepare") != "locked":
+        raise ModelError("ERROR: set job_prefix in Setup (druid.yaml job_prefix)", 2)
+
+
 def write_run(cfg: core.Config, raw: dict, p: Plan, dry_run: bool, max_running: int = 50,
               partition: str | None = None, qos: str | None = None) -> Written:
     import copy
@@ -580,7 +591,7 @@ def write_run(cfg: core.Config, raw: dict, p: Plan, dry_run: bool, max_running: 
         paths.write_text(ids_file, "\n".join(ids_) + "\n")
         script = run_dir / f"array_{k}.sbatch"
         paths.write_text(script, SBATCH.format(
-            stage=p.stage, partition=partition or cfg.partition, qos=qos or res.qos,
+            stage=p.stage, job_name=job_name(cfg, p.stage), partition=partition or cfg.partition, qos=qos or res.qos,
             cpus=res.cpus, mem_mb=res.mem_mb, time_min=res.time_min,
             n_minus_1=len(ids_) - 1, max_running=max_running, run_dir=run_dir,
             signal_line=f"#SBATCH --signal={res.signal}" if res.signal else "",

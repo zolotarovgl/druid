@@ -5,6 +5,7 @@ runs_dir: runs
 nextflow_dir: .
 partition: genoa64
 qos: normal
+job_prefix:            # required: your SLURM job names are <job_prefix>-<stage> (Setup › Project)
 prepare: auto            # locked: druid never rebuilds data/input.fasta (druid adopt sets it)
 proteomes_dir: /users/asebe/xgraubove/genomes/data   # read-only; files start with the species prefix
 proteome_glob: "{{sp}}_long.pep.fasta"

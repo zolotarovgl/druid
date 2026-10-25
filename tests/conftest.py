@@ -58,6 +58,7 @@ def results_tree(tmp_path, monkeypatch):
     base = yaml.safe_load((ROOT / "druid/templates/druid.yaml").read_text())
     base["outdir"] = str(out)
     base["runs_dir"] = "runs"
+    base["job_prefix"] = "t"
     # Never read the real project's .nextflow/ run history (slow, and not a fixture).
     base["nextflow_dir"] = str(root)
     base["params"].update(resources_tsv=str(root / "resources.tsv"),

@@ -107,7 +107,7 @@ def test_sbatch_script_content(cli, results_tree):
     assert r.exit_code == 0, r.output
     s = next(dry_dir().glob("*_tree")).joinpath("array_0.sbatch").read_text()
     assert "#SBATCH --signal=B:USR2@180" in s and "#SBATCH --mem=800M" in s and "#SBATCH --time=1140" in s  # resources.tsv row
-    assert "#SBATCH --job-name=phylo-tree" in s and "--array=0-0%50" in s
+    assert "#SBATCH --job-name=t-tree" in s and "--array=0-0%50" in s
     assert "kill -USR2 $PID" in s and "_run tree" in s
     run = next(dry_dir().glob("*_tree"))
     assert f"#SBATCH --chdir={run}\n" in s               # the job starts in its run dir, not in $HOME
@@ -450,7 +450,7 @@ def test_set_param_written_to_run_config(cli, results_tree):
     assert f'export DRUID_CONFIG="{run}/config.yaml"' in text
     assert f'export DRUID_PROJECT="{paths.project_root()}"' in text
     assert f'python3 "{paths.DRUID_HOME}/druid/cli.py" _run' in text
-    assert "#SBATCH --job-name=phylo-" in text
+    assert "#SBATCH --job-name=t-" in text
     assert "MAX_SPR=2" in r.output
     assert (root / "druid.yaml").read_text() == before        # global config untouched
 

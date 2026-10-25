@@ -2017,6 +2017,10 @@ class ResubmitScreen(ModalScreen):
 
     def _build(self, dry_run: bool, per: dict):
         """Runs squeue/sacct via model.*: call from a worker thread only."""
+        try:
+            model.require_prefix(self.raw, self.cfg)
+        except model.ModelError as e:
+            return None, str(e)
         hgs = [hg for _w, _r, g in self.groups for hg in g]
         sel = model.select(self.cfg, self.stage, hgs, dry_run=dry_run)
         if not sel.selected:

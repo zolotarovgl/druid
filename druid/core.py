@@ -42,6 +42,17 @@ class Config:
     partition: str
     qos: str
     nextflow_dir: Path = Path(".")   # where .nextflow/ (the run history) lives; set by config_from_raw (project root unless configured)
+    job_prefix: "str | None" = None  # SLURM job names are <job_prefix>-<stage>
+
+
+JOB_PREFIX_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,19}$")
+
+
+def job_prefix_error(v) -> str:
+    """Why `v` is not a valid job_prefix ('' = valid)."""
+    if isinstance(v, str) and JOB_PREFIX_RE.fullmatch(v):
+        return ""
+    return "job_prefix must be 1-20 characters: letters, digits and _, starting with a letter"
 
 
 def _abs(p, root: Path | None = None) -> str:
@@ -111,9 +122,15 @@ def config_from_raw(raw: dict, root: Path | None = None) -> Config:
     for k in PATH_PARAMS:
         if params.get(k):                       # hmm_dir may be null
             params[k] = _abs(params[k], root)
+    prefix = raw.get("job_prefix")
+    if prefix is None or prefix == "":
+        prefix = None
+    elif job_prefix_error(prefix):
+        raise ConfigError(f"{job_prefix_error(prefix)} (got {prefix!r})")
     cfg = Config(outdir=Path(_abs(raw["outdir"], root)), params=params,
                  partition=raw["partition"], qos=raw["qos"],
-                 nextflow_dir=Path(_abs(raw.get("nextflow_dir", "."), root)))
+                 nextflow_dir=Path(_abs(raw.get("nextflow_dir", "."), root)),
+                 job_prefix=prefix)
     runs = Path(_abs(raw.get("runs_dir") or "runs", root))
     if runs.resolve() == root:            # the history dir defaults to runs_dir().parent / "history"
         raise ConfigError(f"runs_dir must be a subdirectory of the project {root}: {runs}")
