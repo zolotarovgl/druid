@@ -421,7 +421,8 @@ exit $RC
 """
 
 
-def chunks(ids: list[str], n: int = MAX_ARRAY) -> list[list[str]]:
+def chunks(ids: list[str], n: "int | None" = None) -> list[list[str]]:
+    n = MAX_ARRAY if n is None else n          # read at call time (tests lower MAX_ARRAY)
     return [ids[i:i + n] for i in range(0, len(ids), n)]
 
 
@@ -609,14 +610,21 @@ def write_run(cfg: core.Config, raw: dict, p: Plan, dry_run: bool, max_running: 
     return Written(run_dir, arrays)
 
 
-def sbatch_all(w: Written, submitted: list[str] | None = None) -> tuple[list[str], str | None]:
+def sbatch_all(w: Written, submitted: list[str] | None = None,
+               depends: "list | None" = None) -> tuple[list[str], str | None]:
     """`submitted`, if given, is filled in place as arrays are queued, so a caller that sees an
-    exception mid-way still knows which job ids exist."""
+    exception mid-way still knows which job ids exist; a caller queueing several Written in a row
+    passes the same list, so the error lists every id and the species lock is tried only at the
+    first one. `depends[i]` (a job id or None): array i waits on that job task by task
+    (--dependency=aftercorr, cancelled if the dependency can never be met), recorded in
+    run_dir/depends.tsv as <job id>\\t<depends[i]>."""
     submitted = [] if submitted is None else submitted
     from druid import setup_state
     for i, (res, ids_, ids_file, script) in enumerate(w.arrays):
+        after = depends[i] if depends else None
+        dep = [f"--dependency=aftercorr:{after}", "--kill-on-invalid-dep=yes"] if after else []
         try:
-            r = _slurm(["sbatch", "--parsable", str(script)])
+            r = _slurm(["sbatch", "--parsable"] + dep + [str(script)])
             jid, rc, why = r.stdout.strip().split(";")[0], r.returncode, r.stderr.strip()
         except ModelError as e:                      # timed out
             jid, rc, why = "", 1, (f"{e} for {script}: the array may have been queued"
@@ -630,15 +638,18 @@ def sbatch_all(w: Written, submitted: list[str] | None = None) -> tuple[list[str
                                f"submitted job ids: {' '.join(submitted) or 'none'}\n"
                                + ("not submitted (or unknown): " if timed_out else "not submitted: ")
                                + " ".join(str(a[3]) for a in w.arrays[i:]))
+        first = not submitted
         submitted.append(jid)                        # before the write: the array IS queued
         # the species list is frozen once the first array is queued (never when none is), before its
         # jobs.tsv row: that row makes the lock inferred and lock_species would not write the flag
         try:
-            if i == 0:
+            if first:
                 raw = paths.read_raw()
                 setup_state.lock_species(raw, core.config_from_raw(raw))
         finally:                                     # a lock error never loses a queued job's row
             paths.append_text(w.run_dir / "jobs.tsv", f"{jid}\t{ids_file}\n")
+            if after:
+                paths.append_text(w.run_dir / "depends.tsv", f"{jid}\t{after}\n")
     return submitted, None
 
 
