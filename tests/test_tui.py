@@ -3754,8 +3754,8 @@ def test_ctrl_keys_pass_through_a_colon_command_and_ctrl_q_quits_a_tree(cli):
 
 
 # ---- S: step 1 from the Jobs tab (druid run, sub-project 3) --------------------------------------
-from tests.test_step1run import _calls as _sb_calls, _fams as _run_fams  # noqa: E402
-from tests.test_step1run import run  # noqa: E402,F401  (fixture: sbatch prints 101, 102, ...)
+from tests.step1run_helpers import _calls as _sb_calls, _fams as _run_fams  # noqa: E402
+from tests.step1run_helpers import run  # noqa: E402,F401  (fixture: sbatch prints 101, 102, ...)
 
 
 def _step1_tools():

@@ -693,8 +693,8 @@ def test_init_on_a_tty_opens_tui_on_new_project(tmp_path, monkeypatch):
 
 
 # ---- druid run (step 1 in one command) -------------------------------------------------------
-from tests.test_step1run import _calls as _run_calls, _cfg_raw as _run_cfg_raw, _five as _run_five  # noqa: E402
-from tests.test_step1run import run  # noqa: E402,F401  (fixture: counting sbatch)
+from tests.step1run_helpers import _calls as _run_calls, _cfg_raw as _run_cfg_raw, _five as _run_five  # noqa: E402
+from tests.step1run_helpers import run  # noqa: E402,F401  (fixture: counting sbatch)
 
 
 def test_run_dry_run_prints_plan(run, cli, monkeypatch):
