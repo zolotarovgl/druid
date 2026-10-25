@@ -2189,8 +2189,8 @@ class ResubmitScreen(ModalScreen):
 
 
 class RunScreen(ModalScreen):
-    """S (Jobs tab, Setup): step 1 through step1run, in `druid run`'s order -- refusal, plan,
-    preflight per stage, write, submit: search for the families not yet searched, each with a
+    """S (Jobs tab, Setup): step 1 through step1run, in `druid run`'s order -- checks (history
+    dir, refusal; its warnings shown in yellow), plan, preflight per stage, write, submit: search for the families not yet searched, each with a
     cluster array whose task i waits on search task i, plus cluster only for families already
     searched. enter = dry run (plans; writes and submits nothing), y = submit (planned again: the
     queue may have moved), esc = close. A submit's result stays shown (job ids, run dirs); the
@@ -2228,14 +2228,15 @@ class RunScreen(ModalScreen):
         """(RunPlan, lines) when there is something to submit, else (None, lines): the refusal,
         the error, or the counts and "nothing to submit". Runs squeue and the tool checks: call
         from a worker thread only."""
-        msg = step1run.refusal(self.raw, self.cfg)
+        msg, warns = step1run.checks(self.raw, self.cfg)   # as the CLI: history dir, refusal
         if msg:
             return None, [f"[red]{escape(msg)}[/]"]
+        warn = [f"[yellow]{escape(w)}[/]" for w in warns]
         try:
             rp = step1run.plan_run(self.cfg, self.raw, dry_run=dry_run)
         except model.ModelError as e:
-            return None, [f"[red]{escape(str(e))}[/]"]
-        lines = [escape(step1run.counts_line(rp.counts))] + [escape(n) for n in rp.notes]
+            return None, warn + [f"[red]{escape(str(e))}[/]"]
+        lines = warn + [escape(step1run.counts_line(rp.counts))] + [escape(n) for n in rp.notes]
         if not any(p is not None and p.groups for p in (rp.search, rp.linked, rp.only)):
             return None, lines + ["[yellow]nothing to submit[/]"]
         stages = (["search"] if rp.search is not None else []) + (

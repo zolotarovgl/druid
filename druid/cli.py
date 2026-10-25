@@ -637,16 +637,11 @@ def run(fam: str = typer.Option(None, "--fam", "-f", help=FAM_HELP),
         cfg = core.config_from_raw(raw)
     except (paths.NoProject, paths.OutsideProject, core.ConfigError, ValueError) as e:
         _fail(f"ERROR: {e}", 2)
-    _check_history_dir()
-    msg = step1run.refusal(raw, cfg)
+    msg, warns = step1run.checks(raw, cfg)       # history dir, refusal, then the warnings
     if msg:
         _fail(msg, 2)
-    _warn_families(cfg, collisions=True)
-    for nf_run, _start, final in history.nf_runs(cfg.nextflow_dir, "step1.nf"):
-        if not final:
-            typer.echo(f"warning: a step1.nf Nextflow run appears to be active ({nf_run}); "
-                       f"running step1.nf and phylocli search/cluster at the same time can "
-                       f"mix two clusterings of one family", err=True)
+    for w in warns:
+        typer.echo(w, err=True)
     try:
         rp = step1run.plan_run(cfg, raw, fam=fam, dry_run=dry_run, override=override)
     except model.ModelError as e:

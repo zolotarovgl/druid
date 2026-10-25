@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from druid import core, model, paths, setup_state
+from druid import core, history, model, paths, setup_state
 
 ADOPTED = ("ERROR: druid run is not available on an adopted project (prepare: locked); "
            "use druid submit")
@@ -47,6 +47,27 @@ def refusal(raw: dict, cfg: core.Config) -> str:
         if b:
             return f"ERROR: Setup has blockers: {'; '.join(b)}"
     return ""
+
+
+def checks(raw: dict, cfg: core.Config) -> "tuple[str, list[str]]":
+    """What `druid run` (CLI and TUI) checks before planning: ("ERROR: ... line" or "", warnings).
+    The error is the history dir outside the project, else refusal(); the warnings (never
+    blocking) are the genefam ones (duplicates, a name under several prefixes) and a step1.nf
+    Nextflow run that looks active (it could submit a family twice)."""
+    try:
+        paths.writable(history.history_dir())
+    except paths.OutsideProject as e:
+        return f"ERROR: {e}", []
+    msg = refusal(raw, cfg)
+    if msg:
+        return msg, []
+    warns = list(core.family_warnings(cfg, True))
+    for nf_run, _start, final in history.nf_runs(cfg.nextflow_dir, "step1.nf"):
+        if not final:
+            warns.append(f"warning: a step1.nf Nextflow run appears to be active ({nf_run}); "
+                         f"running step1.nf and phylocli search/cluster at the same time can "
+                         f"mix two clusterings of one family")
+    return "", warns
 
 
 def counts_line(counts: dict) -> str:

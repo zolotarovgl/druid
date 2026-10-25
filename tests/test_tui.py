@@ -3775,7 +3775,7 @@ async def _open_run(app, pilot):
     return app.screen
 
 
-def test_S_opens_run_screen_and_submits(run, monkeypatch):
+def test_S_opens_run_screen_and_submits(run):
     _step1_tools()
     _run_fams(run, ["F1"])
 
@@ -3811,7 +3811,61 @@ def test_S_opens_run_screen_and_submits(run, monkeypatch):
     _run(go())
 
 
-def test_S_shows_refusal(run, monkeypatch):
+def test_S_second_box_counts_the_submitted_as_queued(run, monkeypatch):
+    _step1_tools()
+    _run_fams(run, ["F1", "F2"])
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            scr = await _open_run(app, pilot)
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert scr.submitted == ["101", "102"]
+            await pilot.press("escape")
+            await pilot.pause()
+            # squeue now lists the ids the submit wrote to jobs.tsv (search, then its cluster)
+            jids = [line.split("\t")[0] for f in sorted((run / "runs").glob("*/jobs.tsv"))
+                    for line in f.read_text().splitlines()]
+            assert sorted(jids) == ["101", "102"]
+            monkeypatch.setenv("FAKE_SQUEUE", "".join(f"{j}|t-whatever\n" for j in jids))
+            scr2 = await _open_run(app, pilot)
+            assert scr2 is not scr
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            assert "search+cluster 0 · cluster only 0 · no hits 0 · done 0 · queued 2" in scr2._shown
+            assert "nothing to submit" in scr2._shown
+            await pilot.press("y")
+            await _settle(app, pilot)
+            assert len(_sb_calls()) == 2 and scr2.submitted == []
+    _run(go())
+
+
+def test_S_shows_the_run_warnings(run):
+    _step1_tools()
+    (run / "gene_families_searchinfo.csv").write_text(
+        "F1\tPF_F1\t1.1\t3\tGA\tTF\tx\n" * 2)                        # a duplicate id
+    nf = _cfg().nextflow_dir / ".nextflow"
+    nf.mkdir(parents=True, exist_ok=True)
+    (nf / "history").write_text(
+        "2026-10-25 09:00:00\t-\tlive_run\t-\th3\tu1\tnextflow run step1.nf\n")   # still running
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            scr = await _open_run(app, pilot)
+            await pilot.press("enter")
+            await _settle(app, pilot)
+            assert "[yellow]warning: duplicate family ids in" in scr._shown
+            assert ("[yellow]warning: a step1.nf Nextflow run appears to be active (live_run)"
+                    in scr._shown)
+            assert "dry run" in scr._shown                           # warnings never block
+    _run(go())
+
+
+def test_S_shows_refusal(run):
     _step1_tools()
     _run_fams(run, ["F1"])
     yml = paths.config_file()
