@@ -143,6 +143,17 @@ def test_fresh_project_opens_on_setup(proj):
     _run(go())
 
 
+def test_header_shows_project_dir(proj):
+    """The header title carries the project directory, on Jobs and on Setup (Grygoriy, 27/10/2026)."""
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.title == f"druid · {paths.project_root()}"
+            assert str(paths.project_root()) in str(app.screen.query_one("HeaderTitle").render())
+    _run(go())
+
+
 def test_tab_moves_between_setup_panes(proj):
     """tab: the list -> the section's controls in screen order -> the warnings when shown -> the
     list; shift+tab the other way; Setup never closes on it (Grygoriy, 23/10/2026)."""

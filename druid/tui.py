@@ -577,6 +577,10 @@ class PhyloApp(App):
     def __init__(self, cfg: core.Config, refresh_s: int = 30, raw: "dict | None" = None,
                  start: str = "overview"):
         super().__init__()
+        try:                                     # the header names the project directory
+            self.title = f"druid · {paths.project_root()}"
+        except paths.NoProject:
+            self.title = "druid"
         self.cfg = cfg
         self.raw = raw if raw is not None else load_raw()
         self.refresh_s = refresh_s
