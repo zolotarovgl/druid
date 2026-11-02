@@ -21,7 +21,6 @@ dependencies:
   - generax>=2.0.4
   - openmpi>=4.1
   # python (druid, the vendored treeview, phylogeny/main.py, possvm)
-  - ete3>=3.1.3
   - biopython>=1.84
   - pyyaml>=6
   - numpy
@@ -32,6 +31,9 @@ dependencies:
   - pytest              # the test suite (druid/README.md, Tests)
   - pip
   - pip:
+      # ete3 from pip: the conda-forge package requires pyqt, which pulls Qt and two LLVMs
+      # (~1.5 GB; env test 02/11/2026); only possvm's optional PDF print uses it
+      - ete3>=3.1.3
       - textual>=8.2,<9
       - rich>=14,<16
       - typer>=0.23
