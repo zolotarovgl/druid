@@ -483,7 +483,7 @@ KEYS = {
     "hgs": ("HG view", [
         ("Move", [("tab shift+tab", "next / previous pane"), ("↑ ↓", "move"),
                   ("enter", "on stages: pick the stage")]),
-        ("Select & act", [("space", "select the HG"), ("a", "select all"),
+        ("Select & act", [("space", "select the HG"), ("a", "select all"), ("A", "unselect all"),
                           ("r", "resubmit the selected"), ("l", "log of the HG")]),
         ("Filter", [("f", "cycle the filter (" + ", ".join(FILTERS) + ")")]),
         ("Other", [("o", "results of the HG's group"), ("esc q", "back to the overview"),
@@ -559,6 +559,7 @@ class PhyloApp(App):
         Binding("h", "hide", "only actionable"),
         Binding("space", "toggle", "select"),
         Binding("a", "select_all", "select all"),
+        Binding("A", "unselect_all", "unselect all"),
         Binding("r", "resubmit", "resubmit"),
         Binding("S", "run_step1", "run step 1"),
         Binding("l", "log", "log"),
@@ -1284,7 +1285,7 @@ class PhyloApp(App):
                     and self.screen is self.screen_stack[0])
         if action in ("by_category", "sort", "hide"):
             return self.view == "overview"
-        if action in ("toggle", "select_all", "resubmit", "log"):
+        if action in ("toggle", "select_all", "unselect_all", "resubmit", "log"):
             return self.view == "hgs"
         if action == "back":
             return self.view in ("hgs", "results")
@@ -1493,6 +1494,12 @@ class PhyloApp(App):
         if not self._in_hgs_pane():
             return
         self.selected = {r.hg for r in self.visible()}
+        self._fill_hgs()
+
+    def action_unselect_all(self) -> None:
+        if not self._in_hgs_pane():
+            return
+        self.selected -= {r.hg for r in self.visible()}
         self._fill_hgs()
 
     def action_refresh(self) -> None:

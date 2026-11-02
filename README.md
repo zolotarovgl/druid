@@ -11,13 +11,16 @@ druid never writes outside it (see Write boundary).
 
 ```bash
 conda activate phylo                       # on the cluster (login1)
-druid init /no_backup/$USER/myproject      # creates the project and opens the TUI on Setup
+druid init /no_backup/<lab>/$USER/myproject   # e.g. /no_backup/asebe/$USER/myproject; opens Setup
 ```
+
+`/no_backup` is split by lab, then user: use your own lab directory (`ls /no_backup`).
 
 In **Setup** (`tab` moves between panes, `enter` selects, `esc` / `q` back, `:q!` quits):
 
 1. **Project**: type a `job_prefix` (e.g. `chromo`), `enter`. Jobs are named `chromo-search`, ….
 2. **Species**: type prefixes (`Mlei, Hsap Nvec`) or any filter, `enter` ticks all shown.
+   In the list: `space` one, `a` ticks all shown, `A` unticks all shown (same in Families).
 3. **Analyses**: GeneRax / origins on or off (both off: no species tree needed).
 4. **Tree** (only if a switch is on): place ticked species missing from the tree.
 5. **Families**: filter, `a` ticks all shown (`space` / `enter` one at a time).
@@ -26,7 +29,7 @@ In **Setup** (`tab` moves between panes, `enter` selects, `esc` / `q` back, `:q!
 
 Or from the shell, after Setup: `druid prepare`, `druid run -n` (dry run), `druid run`.
 Step 2 (align → possvm) is submitted by hand afterwards: `druid submit <stage> --missing`.
-Reopen the project with `druid --project /no_backup/$USER/myproject tui`.
+Reopen the project with `druid --project /no_backup/<lab>/$USER/myproject tui`.
 
 ## Contents
 
@@ -360,7 +363,7 @@ HG view panels: stages (top left) · HGs — or families, for search / cluster �
 (bottom left) · details of the highlighted HG (bottom right). Refreshes in the background.
 
 Keys (HG view): `↑↓` move · `tab` panel · `esc` overview · `f` filter (failed → ready → running → blocked → done) ·
-`space` select · `a` select all shown · `r` resubmit selection · `l` last log · `o` results · `R` refresh ·
+`space` select · `a` select all shown · `A` unselect all shown · `r` resubmit selection · `l` last log · `o` results · `R` refresh ·
 `S` run step 1 (`druid run`: `enter` dry run, `y` submit; also in Setup, which refuses while prepare is
 running) · `q` quit.
 

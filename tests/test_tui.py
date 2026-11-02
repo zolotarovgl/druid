@@ -649,6 +649,29 @@ def test_stage_change_repicks_an_empty_filter(cli, monkeypatch):
     _run(go())
 
 
+def test_shift_a_unselects_shown_hgs(cli, monkeypatch):
+    """Pane 2: a selects all shown, A unselects all shown (02/11/2026)."""
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.open_group("ALL", "align")
+            await pilot.pause()
+            app.load_now()
+            await pilot.pause()
+            app.query_one("#hgs").focus()
+            await pilot.press("a")
+            shown = {r.hg for r in app.visible()}
+            assert shown and app.selected == shown
+            await pilot.press("A")
+            assert app.selected == set()
+    _run(go())
+
+
 def test_enter_on_stage_cell_opens_that_stage_with_failed_filter(cli, monkeypatch):
     assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
     monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)

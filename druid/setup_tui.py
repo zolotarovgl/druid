@@ -202,6 +202,7 @@ class SetupScreen(Screen):
         Binding("escape", "back", "back"),
         Binding("space", "toggle", "tick"),
         Binding("a", "tick_all", "tick shown"),
+        Binding("A", "untick_all", "untick shown"),
         Binding("e", "edit_config", "edit druid.yaml"),
         Binding("e", "edit_family", "edit row"),     # Families; enter ticks (Grygoriy, 23/10/2026)
         Binding("P", "prepare", "prepare"),
@@ -242,6 +243,8 @@ class SetupScreen(Screen):
         self._hmm_dir = None                     # params.hmm_dir resolved, None when unset
         self._fam_target = None                  # params.genefam_info (data/families.csv)
         self._fam: list = []                     # [[families.Row, ticked]] in table order
+        self._fam_extra: list = []               # file-only rows seen this session (kept unticked)
+        self._fam_extra_src = None               # the families source they were seen under
         self._fam_nfile = 0                      # rows in the families file
         self._fam_shown: list = []               # indices into _fam passing the filter
         self._fam_edit = None                    # the _fam index in the edit form
@@ -442,7 +445,17 @@ class SetupScreen(Screen):
             file_rows = self._try(f"families file {self._fam_target}",
                                   lambda: families.read(self._fam_target), [])
         self._fam_nfile = len(file_rows)
-        self._fam = _merge(universe, file_rows)
+        fam = _merge(universe, file_rows)
+        # rows only the families file had stay listed (unticked) once unticked, for this Setup
+        # session and this families source, so they can be ticked again (Grygoriy, 02/11/2026)
+        src = (raw.get("families_source"), str(self._hmm_dir))
+        if src != self._fam_extra_src:
+            self._fam_extra, self._fam_extra_src = [], src
+        for r, _t in fam[len(universe):]:
+            if all(r.fields() != x.fields() for x in self._fam_extra):
+                self._fam_extra.append(r)
+        listed = {tuple(r.fields()) for r, _t in fam}
+        self._fam = fam + [[r, False] for r in self._fam_extra if tuple(r.fields()) not in listed]
 
     def _fam_universe(self, raw: dict, root: Path) -> list:
         src = raw.get("families_source")
@@ -730,7 +743,7 @@ class SetupScreen(Screen):
     def check_action(self, action: str, parameters: tuple) -> "bool | None":
         if action == "toggle":
             return self.current in ("Species", "Families")
-        if action == "tick_all":
+        if action in ("tick_all", "untick_all"):
             return self.current in ("Species", "Families")
         if action == "edit_config":
             return self.current == "Config"
@@ -874,6 +887,22 @@ class SetupScreen(Screen):
         sel = list(self._sel)
         sel += [(c.sp, c.source) for c in self._shown if (c.sp, c.source) not in sel]
         self._write({("species",): setup_state.species_value(sel)})
+
+    def action_untick_all(self) -> None:
+        """A: untick every row shown by the filter, one write (Grygoriy, 02/11/2026)."""
+        if self.current == "Families":
+            self._untick_shown_families()
+            return
+        if not self._shown or not self._species_editable():
+            return
+        shown = {(c.sp, c.source) for c in self._shown}
+        sel = [s for s in self._sel if s not in shown]
+        n = len(self._sel) - len(sel)
+        if not n:
+            self._msg = f"-0 unticked: none of the {len(shown)} shown is ticked"
+            self._fill_blockers()
+            return
+        self._write({("species",): setup_state.species_value(sel)}, done=f"-{n} unticked")
 
     def _tick_filtered(self) -> None:
         """enter in the filter (Grygoriy, 23/10/2026): tick every species shown (adds only), one
@@ -1172,6 +1201,19 @@ class SetupScreen(Screen):
             return
         self._write({}, done=f"+{new} families ticked",
                     fam_rows=[r for i, (r, x) in enumerate(self._fam) if x or i in shown])
+
+    def _untick_shown_families(self) -> None:
+        """A: untick every family shown by the filter, one write."""
+        if not self._fam_shown or not self._fam_editable():
+            return
+        shown = set(self._fam_shown)
+        n = sum(1 for i in shown if i < len(self._fam) and self._fam[i][1])
+        if not n:
+            self._msg = f"-0 unticked: none of the {len(shown)} shown is ticked"
+            self._fill_blockers()
+            return
+        self._write({}, done=f"-{n} families unticked",
+                    fam_rows=[r for i, (r, x) in enumerate(self._fam) if x and i not in shown])
 
     def _toggle_family(self) -> None:
         t = self.query_one("#fam-table", DataTable)

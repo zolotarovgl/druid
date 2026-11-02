@@ -16,7 +16,7 @@ dependencies:
   # step 2: align, tree, generax, gxsup, possvm
   - mafft>=7.526
   - clipkit>=2.3
-  - iqtree>=2.3.6
+  - iqtree>=2.3.6,<3    # 3.x ships iqtree3, not the iqtree2 the stages call (env test 02/11/2026)
   - fasttree>=2.1.11
   - generax>=2.0.4
   - openmpi>=4.1

@@ -2,6 +2,9 @@
 
 Open work, newest first. Dates dd/mm/yyyy.
 
+- **Per-user install** (Grygoriy, 02/11/2026: a shared lab install "is not an option"). First env
+  build failed: the cluster miniconda (conda 23.7, no zstandard, `use_only_tar_bz2`) skips `.conda`
+  packages, so a user's own conda cannot be relied on — use a standalone micromamba.
 - **Installation test** (Grygoriy, 02/11/2026): how easy is it for a new user to install druid?
   Fresh account / clean env on the cluster, follow only the README (clone with submodules, env,
   `~/bin/druid`, `druid doctor`, `druid init`), and record every step that needed outside help.

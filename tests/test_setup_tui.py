@@ -244,6 +244,51 @@ def test_species_filter_tick_writes_species(proj):
     _run(go())
 
 
+def test_shift_a_unticks_shown_species_and_families(proj):
+    """A: untick every row the filter shows, one write; rows not shown keep their tick
+    (Grygoriy, 02/11/2026: tick / untick all as in the job view)."""
+    root, _prot, _mine_ = proj
+    yamledit.update_config({("species",): ["Aaa", "Bbb"]})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            scr.query_one("#sp-filter").value = "Aaa"
+            await pilot.pause()
+            t = scr.query_one("#sp-table")
+            t.focus()
+            await pilot.press("A")
+            await pilot.pause()
+            assert _raw()["species"] == ["Bbb"]
+            assert "-1 unticked" in _text(scr, "#blockers")
+            await pilot.press("A")                                    # nothing left to untick
+            await pilot.pause()
+            assert _raw()["species"] == ["Bbb"] and "-0 unticked" in _text(scr, "#blockers")
+
+            await _section(pilot, scr, "Families")
+            scr.query_one("#fam-filter").value = "slc"
+            await pilot.pause()
+            ft = scr.query_one("#fam-table")
+            n = ft.row_count
+            ft.focus()
+            await pilot.press("a")                                    # tick all shown
+            await pilot.pause()
+            before = len(_fams(root))
+            assert before >= n
+            await pilot.press("A")                                    # untick all shown
+            await pilot.pause()
+            assert len(_fams(root)) == before - n
+            assert ft.row_count == n                                  # file-only rows stay listed
+            assert all(str(ft.get_row_at(i)[0]) == "[ ]" for i in range(n))
+            assert f"-{n} families unticked" in _text(scr, "#blockers")
+            await pilot.press("a")                                    # and can be ticked again
+            await pilot.pause()
+            assert len(_fams(root)) == before
+    _run(go())
+
+
 def test_filter_enter_ticks_all_shown_and_clears(proj, monkeypatch):
     _root, _prot, mine = proj
     yamledit.update_config({("sources",): [{"name": "mine", "proteomes_dir": str(mine),
