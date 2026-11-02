@@ -2116,7 +2116,7 @@ def test_warning_is_notified_once_per_session(cli, monkeypatch):
 
 # ---- header sorting ---------------------------------------------------------------------------
 def _heads(app, wid):
-    """Header labels of a table as shown (the overview's are two-row: 'step2 ·\\nalign')."""
+    """Header labels of a table as shown (one row; the step names are #ovsteps, above it)."""
     return [c.label.plain for c in app.query_one(wid).ordered_columns]
 
 
@@ -2170,17 +2170,17 @@ def test_header_enter_and_s_sort_with_arrow_and_same_state_as_cell_s(cli):
             await _key(pilot, "up", "enter")                         # header: sort, never open
             assert app.view == "overview" and ov.header
             assert app.ov_sort == ("tree", False) and _pair(app) == ["tfs.C_x", "tfs.A"]
-            assert _heads(app, "#overview")[tui.ov_column("tree")] == "HGs\ntree ▼"
+            assert _heads(app, "#overview")[tui.ov_column("tree")] == "tree ▼"
             await _key(pilot, "s")                                   # s in the header: reverse
             assert app.ov_sort == ("tree", True) and _pair(app) == ["tfs.A", "tfs.C_x"]
-            assert _heads(app, "#overview")[tui.ov_column("tree")] == "HGs\ntree ▲"
+            assert _heads(app, "#overview")[tui.ov_column("tree")] == "tree ▲"
             await _key(pilot, "down", "s")                           # s on a cell: the same sort
             assert app.ov_sort == ("tree", False) and ov.cursor_row == 0
             assert app.query_one("#overview").border_title == "Overview · sort: tree ▼"
             _to_col(app, "group")
             await _key(pilot, "up", "enter")                         # text: ascending first
-            assert app.ov_sort == ("group", False) and _heads(app, "#overview")[0] == "\ngroup ▲"
-            assert _heads(app, "#overview")[tui.ov_column("tree")] == "HGs\ntree"   # one arrow
+            assert app.ov_sort == ("group", False) and _heads(app, "#overview")[0] == "group ▲"
+            assert _heads(app, "#overview")[tui.ov_column("tree")] == "tree"   # one arrow
             assert _shown(app)[0] == "ALL"                           # ALL stays pinned
     _run(go())
 

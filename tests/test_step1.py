@@ -745,8 +745,8 @@ def test_tui_overview_family_cells_and_open(cli, results_tree, monkeypatch):
             app.load_now()
             await pilot.pause()
             ov = app.query_one("#overview")
-            assert [str(c.label) for c in ov.columns.values()][:5] == ["\ngroup", "\nHGs", "step1 ·\nsearch",
-                                                                    "families\ncluster", "│\n│"]
+            assert [str(c.label) for c in ov.columns.values()][:5] == ["group", "HGs", "search",
+                                                                    "cluster", "│"]
             rows = {r.group: r for r in app.ov_rows}
             assert list(rows) == ["ALL", "tfs", "cal", "slc"]
             s = {x.stage: x for x in model.stage_rows(_cfg(), core.expected(_cfg()), FAMS)[0]}
@@ -796,8 +796,15 @@ def test_tui_overview_step1_step2_separator(cli, monkeypatch):
             await pilot.pause()
             ov = app.query_one("#overview")
             labels = [str(c.label) for c in ov.columns.values()]
-            assert ov.header_height == 2
-            assert labels[2:7] == ["step1 ·\nsearch", "families\ncluster", "│\n│", "step2 ·\nalign", "HGs\ntree"]
+            assert ov.header_height == 1
+            assert labels[2:7] == ["search", "cluster", "│", "align", "tree"]
+            # the step labels: one line above the table, each over its block of columns
+            # (Grygoriy, 02/11/2026: "above the column names not baked into them")
+            steps = app._ovsteps_text
+            x = 1 + sum(c.get_render_width(ov) for c in ov.ordered_columns[:tui.ov_column("search")])
+            assert steps[x:].startswith("step 1 ─")
+            xs = 1 + sum(c.get_render_width(ov) for c in ov.ordered_columns[:tui.ov_column("align")])
+            assert steps[xs:].startswith("step 2 ─") and "┐" in steps[x:xs]
             sep = tui.ov_column("cluster") + 1
             assert tui.stage_at_column(sep) is None and tui.ov_column("align") == sep + 1
             assert all(str(ov.get_cell_at((i, sep))) == "│" for i in range(ov.row_count))

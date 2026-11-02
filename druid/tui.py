@@ -42,9 +42,8 @@ TUI_STAGES = core.STAGES
 OV_SEP = "│"
 # Overview stage columns: step1 (families) | step2 (HGs); None = the one-character separator column.
 OV_COLUMNS = [*core.FAMILY_STAGES, None, *core.HG_STAGES]
-# Top header row (Grygoriy, 09/10/2026): block names over the first two columns of each block.
-OV_TOP = {core.FAMILY_STAGES[0]: "step1 ·", core.FAMILY_STAGES[1]: "families",
-          core.HG_STAGES[0]: "step2 ·", core.HG_STAGES[1]: "HGs"}
+# The block names (step 1 / step 2) are a line above the table, #ovsteps, not part of the column
+# labels (Grygoriy, 02/11/2026; was a second header row since 09/10/2026).
 
 
 def ov_column(stage: str) -> int:
@@ -187,9 +186,8 @@ def sort_rows(rows: list, sort: "tuple | None", keys: dict) -> list:
     return sorted(rows, key=key, reverse=numeric != sort[1])
 
 
-OV_COLS = [SortCol("group", "\ngroup"), SortCol("HGs", "\nHGs", True),
-           *(SortCol(None, f"{OV_SEP}\n{OV_SEP}") if st is None
-             else SortCol(st, f"{OV_TOP.get(st, '')}\n{st}", True) for st in OV_COLUMNS)]
+OV_COLS = [SortCol("group", "group"), SortCol("HGs", "HGs", True),
+           *(SortCol(None, OV_SEP) if st is None else SortCol(st, st, True) for st in OV_COLUMNS)]
 
 
 def hg_cols(unit: str) -> list:
@@ -531,6 +529,7 @@ class PhyloApp(App):
     #ov { height: 1fr; }
     #overview { height: 1fr; border: round $primary; }
     #ovfoot { height: auto; }
+    #ovsteps { height: 1; color: $text-muted; }
     #tabbar { height: 1; }
     #rtab { height: 1fr; border: round $primary; }
     #rtab:focus { border: round orange; }
@@ -638,6 +637,7 @@ class PhyloApp(App):
         self._rt_note = ""
         self._rt_foot = ""
         self._tab_text = ""
+        self._ovsteps_text = ""                 # the step 1 / step 2 line above the overview
         self._res_want: "str | None" = None     # source asked for by the opener (Results tab)
         self._cmd: "str | None" = None          # the `:` command typed so far; None = not in one
 
@@ -649,7 +649,8 @@ class PhyloApp(App):
                 yield Spinner(id="status")          # Part F: spinner + status text
         with Vertical(id="ov"):
             yield Static("", id="tabbar")
-            yield SortTable(id="overview", cursor_type="cell", header_height=2)   # step1/step2 header
+            yield Static("", id="ovsteps")      # step 1 / step 2 over their columns
+            yield SortTable(id="overview", cursor_type="cell")
             yield SortTable(id="rtab", cursor_type="cell")
             yield Static("", id="ovfoot")
         with Grid(id="hgview"):
@@ -955,6 +956,7 @@ class PhyloApp(App):
         self.query_one("#resv").display = self.view == "results"
         jobs = self.tab == "jobs"
         self.query_one("#overview").display = jobs
+        self.query_one("#ovsteps").display = jobs
         self.query_one("#rtab").display = not jobs
         self._set_tabbar()
         first = "#overview" if jobs else "#rtab"
@@ -1171,9 +1173,29 @@ class PhyloApp(App):
         t.move_cursor(row=keys.index(keep) if keep in keys else max(0, min(keep_row, len(keys) - 1)),
                       column=col)
         t.border_title = self._ov_title()
+        self.call_after_refresh(self._fill_ovsteps)   # column widths settle on the next refresh
         self._overview_footer()
         if self._og_cache is not None:          # same groups (c / f, refresh) on the Results tab
             self._fill_rtab()
+
+    def _fill_ovsteps(self) -> None:
+        """The line above the overview: "step 1 ──┐" over search..cluster (the ┐ on the │
+        separator), "step 2 ──" over align..possvm; widths from the rendered columns."""
+        t = self.query_one("#overview", SortTable)
+        w = [c.get_render_width(t) for c in t.ordered_columns]
+        a, sep, b = ov_column(core.FAMILY_STAGES[0]), ov_column(core.FAMILY_STAGES[-1]) + 1, \
+            ov_column(core.HG_STAGES[0])
+        if len(w) < b + 1:
+            return
+        w1, ws, w2 = sum(w[a:sep]), w[sep], sum(w[b:])
+        pad = t.cell_padding
+        line = (" " * (1 + sum(w[:a]))                               # 1: the table's border
+                + ("step 1 " + "─" * w1)[:w1]
+                + "─" * pad + "┐" + " " * max(ws - pad - 1, 0)
+                + ("step 2 " + "─" * w2)[:w2])
+        sx = int(t.scroll_x)                                         # follow a horizontal scroll
+        self._ovsteps_text = line[:1] + line[1 + sx:]
+        self.query_one("#ovsteps", Static).update(Text(self._ovsteps_text, no_wrap=True))  # keeps the indent
 
     def _ov_title(self) -> str:
         parts = ["Overview"]
