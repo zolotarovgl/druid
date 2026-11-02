@@ -1058,6 +1058,26 @@ def test_prepare_key_runs_and_reports(proj):
     _run(go())
 
 
+def test_prepare_key_after_species_lock_is_a_note(proj):
+    """P once the species are locked: no ERROR, inputs untouched, points at S (Grygoriy, 02/11/2026:
+    adding families after a run threw 'the species list is locked')."""
+    root, _prot, _mine_ = proj
+    yamledit.update_config({("species",): ["Aaa"], ("species_locked",): True})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await pilot.press("P")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            text = _text(scr, "#blockers")
+            assert text.startswith("prepare: species locked, inputs kept") and "ERROR" not in text
+            assert setup_tui.RUN_HINT in text
+            assert not (root / "data" / "input.fasta").exists()
+    _run(go())
+
+
 def _ids_ticks(scr, ids):
     t = scr.query_one("#fam-table")
     rows = [[str(c) for c in t.get_row_at(i)] for i in range(t.row_count)]

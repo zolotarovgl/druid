@@ -621,6 +621,34 @@ def test_open_group_restricts_hgs_and_esc_returns(cli, monkeypatch):
     _run(go())
 
 
+def test_stage_change_repicks_an_empty_filter(cli, monkeypatch):
+    """Pane 1 to another stage picks the filter again, actionable first (tfs opened on tree = done,
+    then possvm showed nothing although Forkhead was ready there; 02/11/2026)."""
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.open_group("ALL", "align")
+            await pilot.pause()
+            app.load_now()
+            await pilot.pause()
+            assert app.filter == "actionable" and app.visible()
+            app.filter = "failed"                                          # failed at align only
+            st = app.query_one("#stages")
+            st.move_cursor(row=tui.TUI_STAGES.index("tree"))
+            await pilot.pause()
+            assert app.stage == "tree" and app.filter != "failed" and app.visible()
+            app.filter = "done"                                            # nothing done at align
+            st.move_cursor(row=tui.TUI_STAGES.index("align"))
+            await pilot.pause()
+            assert app.stage == "align" and app.filter == "actionable"     # picked again
+    _run(go())
+
+
 def test_enter_on_stage_cell_opens_that_stage_with_failed_filter(cli, monkeypatch):
     assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
     monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
@@ -638,7 +666,8 @@ def test_enter_on_stage_cell_opens_that_stage_with_failed_filter(cli, monkeypatc
             app.load_now()
             await pilot.pause()
             assert app.view == "hgs" and app.stage == "align" and app.filter == "actionable"
-            assert app.focused is app.query_one("#hgs")
+            assert app.focused is app.query_one("#stages")                 # opening: pane 1
+            app.query_one("#hgs").focus()
             await pilot.press("f")                                         # actionable -> failed
             assert app.filter == "failed"
             assert [r.hg for r in app.visible()] == ["tfs.C_x.HG1"]

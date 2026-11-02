@@ -768,6 +768,8 @@ def test_tui_overview_family_cells_and_open(cli, results_tree, monkeypatch):
             assert str(st.get_cell_at((core.STAGES.index("align"), 5))) == "0"     # cal's HGs
             text = app._detail_text("cal.Trail")
             assert "cal.Trail" in text and "0 HGs" in text and "search" in text and "align" not in text
+            assert app.focused is st                               # opening: pane 1
+            app.query_one("#hgs").focus()
             await pilot.press("a", "r")
             await pilot.pause()
             scr = app.screen

@@ -1261,6 +1261,7 @@ class PhyloApp(App):
         self._auto_pick_filter()
         self._hist_loading = not self.by_stage
         self._show_view()
+        self.query_one("#stages").focus()        # opening: pane 1 is active (Grygoriy, 02/11/2026)
         self.query_one("#hgview").set_class(not self.by_stage, "loading")   # grey until data
         self._fill_stages()
         self._fill_hgs(keep="")
@@ -1452,6 +1453,8 @@ class PhyloApp(App):
                 self.stage = event.row_key.value
                 self.selected.clear()
                 self.rows = self.by_stage.get(self.stage, [])
+                self._auto_filter = True         # a new stage picks its filter again, actionable
+                self._auto_pick_filter()         # first (Grygoriy, 02/11/2026)
                 self._fill_hgs(keep="")
         elif t.id == "hgs":
             self._show_detail()

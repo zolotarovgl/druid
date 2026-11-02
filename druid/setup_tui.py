@@ -1227,6 +1227,10 @@ class SetupScreen(Screen):
         self._reload()
         if self._cfg is None:
             self._msg = "ERROR: prepare: druid.yaml does not load (see the errors below)"
+        elif self._raw.get("prepare") != "locked" and \
+                self._try("species lock", lambda: setup_state.species_locked(self._raw, self._cfg), False):
+            # after the first run there is nothing to rebuild: ticked families are already saved
+            self._msg = "prepare: species locked, inputs kept; families are already saved. " + RUN_HINT
         else:
             self._msg = "prepare: running…"
             self._run_prepare(self._raw, self._cfg, paths.project_root())

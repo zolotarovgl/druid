@@ -2,6 +2,15 @@
 
 Open work, newest first. Dates dd/mm/yyyy.
 
+- **Installation test** (Grygoriy, 02/11/2026): how easy is it for a new user to install druid?
+  Fresh account / clean env on the cluster, follow only the README (clone with submodules, env,
+  `~/bin/druid`, `druid doctor`, `druid init`), and record every step that needed outside help.
+- **Rename possvm stages for display** (Grygoriy, 02/11/2026, "for later"): show possvm_prev as
+  `possvm` and possvm as `possvm_postGR` (GeneRax on); GeneRax off: one `possvm`, no n/a row. Labels
+  only — result dirs, job names and run records keep the internal names; the CLI accepts both.
+  Also: `druid status` footer says "done = possvm_prev" when possvm_prev is n/a.
+  GeneRax off (Grygoriy, 02/11/2026): `druid status`, the TUI overview columns and pane 1 omit
+  possvm_prev, generax and gxsup altogether instead of showing n/a rows.
 - **Species tree viewer in Setup** (Grygoriy, 02/11/2026): show the project's species tree
   (Tree section's `SPECIES_TREE` / `ORIGIN_TREE`) during setup, e.g. with the vendored treeview
   widget, so the picked species and tree can be checked before `P`.
