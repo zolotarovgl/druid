@@ -363,7 +363,7 @@ HG view panels: stages (top left) · HGs — or families, for search / cluster �
 (bottom left) · details of the highlighted HG (bottom right). Refreshes in the background.
 
 Keys (HG view): `↑↓` move · `tab` panel · `esc` overview · `f` filter (failed → ready → running → blocked → done) ·
-`space` select · `a` select all shown · `A` unselect all shown · `r` resubmit selection · `l` last log · `o` results · `R` refresh ·
+`space` select · `a` select all shown · `A` unselect all shown · `r` resubmit selection · `x` submit every ready / failed HG of the stage · `l` last log · `o` results · `R` refresh ·
 `S` run step 1 (`druid run`: `enter` dry run, `y` submit; also in Setup, which refuses while prepare is
 running) · `q` quit.
 

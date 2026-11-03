@@ -2,6 +2,22 @@
 
 Open work, newest first. Dates dd/mm/yyyy.
 
+- **Watcher job that resubmits automatically** (Grygoriy, 02/11/2026): most TUI use is resubmitting
+  jobs; find out whether one watcher job can do it on an interval. Overlaps with sub-project 5's
+  `druid chain` driver (polls sacct, retries with more resources, advances stages) — decide whether
+  the watcher is that driver or a lighter "resubmit failed/missing every N min" job.
+  With it (Grygoriy, 02/11/2026): the job view gets one key that submits every ready (and failed)
+  HG of the current stage, without selecting first (today: `a` then `r`, per filter).
+- **Gene tree viewer layout** (Grygoriy, 02/11/2026): internal nodes on their own row between their
+  children's tips (as PlaceScreen does with gap 0), not the current compact layout (gap -1).
+- **Gene tree viewer: orthogroup collapse looks wrong** (Grygoriy, 02/11/2026): check that
+  collapsing an OG hides exactly that OG's members (compare with `ortholog_groups.csv`).
+  Grygoriy: named OGs (no `like:`) show no Mmus tips. Checked 02/11/2026 on all 2,258 v3 HGs
+  (`g` collapse in the vendored model): 2,252 of 2,846 named OGs have all their Mmus tips in the
+  collapsed clade(s); 585 whole-HG OGs are not collapsed (root, by design); 9 are not one clade
+  (e.g. `adh.immunoglobin.HG7.13`, 20/21 Mmus inside). Not reproduced — need his HG / OG / source.
+- **Gene tree viewer: narrower, adjustable width** (Grygoriy, 02/11/2026): the tree takes too much
+  width; make the tree/labels split adjustable with keys (and remember it per session).
 - **Per-user install** (Grygoriy, 02/11/2026: a shared lab install "is not an option"). First env
   build failed: the cluster miniconda (conda 23.7, no zstandard, `use_only_tar_bz2`) skips `.conda`
   packages, so a user's own conda cannot be relied on — use a standalone micromamba.

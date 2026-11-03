@@ -482,7 +482,9 @@ KEYS = {
         ("Move", [("tab shift+tab", "next / previous pane"), ("↑ ↓", "move"),
                   ("enter", "on stages: pick the stage")]),
         ("Select & act", [("space", "select the HG"), ("a", "select all"), ("A", "unselect all"),
-                          ("r", "resubmit the selected"), ("l", "log of the HG")]),
+                          ("r", "resubmit the selected"),
+                          ("x", "submit every ready / failed HG of the stage"),
+                          ("l", "log of the HG")]),
         ("Filter", [("f", "cycle the filter (" + ", ".join(FILTERS) + ")")]),
         ("Other", [("o", "results of the HG's group"), ("esc q", "back to the overview"),
                    ("R", "refresh"), ("?", "this list"), (":q!", "quit druid")]),
@@ -560,6 +562,7 @@ class PhyloApp(App):
         Binding("a", "select_all", "select all"),
         Binding("A", "unselect_all", "unselect all"),
         Binding("r", "resubmit", "resubmit"),
+        Binding("x", "submit_ready", "submit all ready"),
         Binding("S", "run_step1", "run step 1"),
         Binding("l", "log", "log"),
         Binding("o", "open_results", "results"),
@@ -1142,7 +1145,9 @@ class PhyloApp(App):
                 line += f" · {bad} HG{'' if bad == 1 else 's'} unreadable"
             lines.append(line)
         self._rt_foot = "\n".join(lines)         # status only: the keys are in the strip's help
-        self.query_one("#ovfoot", Static).update(escape(self._rt_foot))
+        foot = self.query_one("#ovfoot", Static)
+        foot.update(escape(self._rt_foot))
+        foot.display = self.tab != "jobs"        # hidden on the Jobs tab (_overview_footer)
 
     def _fill_overview(self, rows: list) -> None:
         self.ov_rows = rows                      # as computed; ov_shown is what the table shows
@@ -1216,16 +1221,9 @@ class PhyloApp(App):
         return ("group", "HGs")[col] if col < 2 else stage_at_column(col)
 
     def _overview_footer(self) -> None:
-        if self.tab != "jobs":                   # #ovfoot belongs to the Results tab then
-            return
-        key = self._key_at_cursor(self.query_one("#overview", DataTable))
-        r = next((x for x in self.ov_rows if x.group == key), None)
-        if r is None:
-            return
-        parts = [f"{st} {c[0]}/{c[1]}/{c[2]}/{c[3]}" for st, c in r.per_stage.items() if c]
-        self.query_one("#ovfoot", Static).update(
-            f"[b]{escape(r.group)}[/] {r.total} HGs · {r.n_fams} families · "
-            "done/running/ready/blocked: " + " · ".join(parts))
+        """#ovfoot is the Results tab's status line; on the Jobs tab it is hidden (the per-row
+        stage counts it showed repeat the table; Grygoriy, 02/11/2026: "not needed")."""
+        self.query_one("#ovfoot", Static).display = self.tab != "jobs"
 
     def _regroup(self) -> None:
         exp, states, fams, fstates = self._ov_inputs
@@ -1307,7 +1305,7 @@ class PhyloApp(App):
                     and self.screen is self.screen_stack[0])
         if action in ("by_category", "sort", "hide"):
             return self.view == "overview"
-        if action in ("toggle", "select_all", "unselect_all", "resubmit", "log"):
+        if action in ("toggle", "select_all", "unselect_all", "resubmit", "submit_ready", "log"):
             return self.view == "hgs"
         if action == "back":
             return self.view in ("hgs", "results")
@@ -1546,6 +1544,19 @@ class PhyloApp(App):
         groups = resource_groups(self.cfg, self.stage, rows, self.nseq)
         self.push_screen(ResubmitScreen(self.cfg, self.stage, groups, self.raw),
                          lambda _jids: (self.selected.clear(), self.load_bg()))
+
+    def action_submit_ready(self) -> None:
+        """x: the resubmit box for every ready / failed HG of this stage and group, whatever the
+        filter and the selection (Grygoriy, 02/11/2026); enter dry-runs it, y submits."""
+        key = model.fam_group_key if self.stage in core.FAMILY_STAGES else model.group_key
+        rows = [r for r in self.rows if r.state in ACTIONABLE
+                and (self.group is None or key(r.hg, self.by) == self.group)]
+        if not rows:
+            self.notify(f"nothing ready or failed at {self.stage}", severity="warning")
+            return
+        groups = resource_groups(self.cfg, self.stage, rows, self.nseq)
+        self.push_screen(ResubmitScreen(self.cfg, self.stage, groups, self.raw),
+                         lambda _jids: self.load_bg())
 
     def action_run_step1(self) -> None:
         """S: step 1 (search → cluster) in the run box; the Jobs tab reloads when it closes."""

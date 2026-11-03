@@ -672,6 +672,33 @@ def test_shift_a_unselects_shown_hgs(cli, monkeypatch):
     _run(go())
 
 
+def test_x_submits_every_ready_and_failed_hg_of_the_stage(cli, monkeypatch):
+    """x in the job view: the resubmit box for every ready / failed HG of the stage and group,
+    whatever the filter and the selection (Grygoriy, 02/11/2026)."""
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            app.open_group("ALL", "align")
+            await pilot.pause()
+            app.load_now()
+            await pilot.pause()
+            want = {r.hg for r in app.rows if r.state in tui.ACTIONABLE}
+            assert want
+            app.filter = "done"                                    # filter and selection ignored
+            await pilot.press("x")
+            await pilot.pause()
+            scr = app.screen
+            assert isinstance(scr, tui.ResubmitScreen) and scr.stage == "align"
+            assert {h for g in scr.groups for h in g[2]} == want
+            assert app.selected == set()
+    _run(go())
+
+
 def test_enter_on_stage_cell_opens_that_stage_with_failed_filter(cli, monkeypatch):
     assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
     monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
@@ -2093,6 +2120,21 @@ def test_strip_with_help_and_no_logo_is_in_every_view(cli):
             assert "█ done" in plain["overview"]                     # the glyph legend stays
             assert plain["hgs"].startswith("HG view") and plain["results"].startswith("Results")
             assert "enter: open" not in app.query_one("#ovfoot").render().plain
+    _run(go())
+
+
+def test_jobs_tab_has_no_status_footer(cli):
+    """The per-row stage counts under the Jobs overview are gone; the Results tab keeps its line
+    (Grygoriy, 02/11/2026)."""
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            assert app.tab == "jobs" and not app.query_one("#ovfoot").display
+            app._switch_tab()
+            await pilot.pause()
+            assert app.tab == "results" and app.query_one("#ovfoot").display
     _run(go())
 
 
