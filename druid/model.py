@@ -795,6 +795,10 @@ class HGOgs:
     hg: str
     ogs: list                  # [OG]; [] when error is set
     error: str = ""
+    source: str = ""           # "possvm" | "possvm_prev" | "cluster" (set by group_ogs)
+
+
+CLUSTER_OG_NAME = "(not split: no possvm yet)"
 
 
 @dataclass
@@ -822,6 +826,31 @@ def hg_tree_files(cfg: core.Config, hg: str, source: str) -> "tuple[Path, Path] 
     if len(files) != 1:
         return None
     return d / files[0][:-len(OG_SUFFIX)], d / files[0]
+
+
+def og_sort_id(og: OG) -> int:
+    """The number after the last '.' of the OG id; -1 when it is not digits (a cluster pseudo-OG)."""
+    last = og.id.rsplit(".", 1)[-1]
+    return int(last) if last.isdigit() else -1
+
+
+def clustered_hgs(cfg: core.Config) -> set[str]:
+    """Stems of the non-empty <outdir>/clusters/*.fasta (one directory listing)."""
+    suf = ".fasta"
+    return {n[:-len(suf)] for n in core.report_status.nonempty_files(str(cfg.outdir / "clusters"))
+            if n.endswith(suf)}
+
+
+def read_cluster_members(cfg: core.Config, hg: str) -> list[Member]:
+    """The genes of <outdir>/clusters/<hg>.fasta: the first token after each '>' (file order)."""
+    out: list[Member] = []
+    with open(cfg.outdir / "clusters" / f"{hg}.fasta", errors="replace") as fh:
+        for line in fh:
+            if line.startswith(">"):
+                tok = line[1:].split()
+                if tok:
+                    out.append(Member(tok[0], species_of(tok[0]), "", ""))
+    return out
 
 
 def read_ogs(cfg: core.Config, hg: str, source: str, names: set[str] | None = None):
@@ -861,7 +890,7 @@ def read_ogs(cfg: core.Config, hg: str, source: str, names: set[str] | None = No
             if og is None:
                 og = by[og_id] = OG(og_id, name, [], sup, f[3], f[4])
             og.genes.append(Member(f[0], species_of(f[0]), f[3], f[4]))
-    return sorted(by.values(), key=lambda o: (-len(o.genes), int(o.id.rsplit(".", 1)[1])))
+    return sorted(by.values(), key=lambda o: (-len(o.genes), og_sort_id(o)))
 
 
 def hg_sort_key(hg: str) -> tuple:
@@ -875,9 +904,14 @@ def group_ogs(cfg: core.Config, hgs, source: str, progress=None,
               cancelled=None) -> tuple[list[HGOgs], int]:
     """(one HGOgs per HG with output, sorted by HG id; number of HGs without output).
     Lists <outdir>/<source>/ once (NFS); an unreadable file becomes that HG's error.
+    source "auto": per HG the possvm csv, else possvm_prev, else the cluster FASTA as one
+    pseudo-OG (HGOgs.source says which); a csv that fails to parse is the HG's error (no fall-back).
     Optional `progress(k, n)` is called before each HG; `cancelled()` true stops early
     (the partial result is returned; the caller discards it)."""
-    names = core.report_status.nonempty_files(str(cfg.outdir / source))
+    auto = source == "auto"
+    chain = ["possvm", "possvm_prev"] if auto else [source]
+    listing = {s: core.report_status.nonempty_files(str(cfg.outdir / s)) for s in chain}
+    clustered = clustered_hgs(cfg) if auto else set()
     rows: list[HGOgs] = []
     missing = 0
     todo = sorted(hgs, key=hg_sort_key)
@@ -886,15 +920,27 @@ def group_ogs(cfg: core.Config, hgs, source: str, progress=None,
             break
         if progress is not None:
             progress(k, len(todo))
-        try:
-            ogs = read_ogs(cfg, hg, source, names)
-        except ModelError as e:
-            rows.append(HGOgs(hg, [], str(e)))
+        found = False
+        for src in chain:
+            try:
+                ogs = read_ogs(cfg, hg, src, listing[src])
+            except ModelError as e:
+                rows.append(HGOgs(hg, [], str(e), src))
+                found = True
+                break
+            if ogs is not None:
+                rows.append(HGOgs(hg, ogs, source=src))
+                found = True
+                break
+        if found:
             continue
-        if ogs is None:
-            missing += 1
-        else:
-            rows.append(HGOgs(hg, ogs))
+        if hg in clustered:
+            members = read_cluster_members(cfg, hg)
+            if members:
+                rows.append(HGOgs(hg, [OG(f"{hg}.all", CLUSTER_OG_NAME, members, None, "", "")],
+                                  source="cluster"))
+                continue
+        missing += 1
     return rows, missing
 
 
@@ -971,7 +1017,8 @@ def og_outside(og: OG, universe) -> list[tuple[str, int]]:
 class OGGroupRow:
     group: str
     hgs: int                   # expected HGs of the group
-    with_output: int           # HGs with a non-empty ortholog_groups.csv (unreadable included)
+    with_ogs: int              # HGs with a non-empty ortholog_groups.csv (unreadable included)
+    cluster_only: int          # HGs with only a cluster FASTA (HGOgs.source == "cluster")
     ogs: int
     genes: int
     zero: int                  # OGs with orthogroup_support exactly 0
@@ -991,8 +1038,9 @@ def og_group_rows(groups, exp, by: str, rows) -> list[OGGroupRow]:
         hgs = list(exp) if g == "ALL" else members.get(g, [])
         rs = [by_hg[h] for h in hgs if h in by_hg]
         ok = [r for r in rs if not r.error]
-        ogs = [o for r in ok for o in r.ogs]
-        out.append(OGGroupRow(g, len(hgs), len(rs), len(ogs), sum(len(o.genes) for o in ogs),
+        ogs = [o for r in ok if r.source != "cluster" for o in r.ogs]
+        n_cl = sum(1 for r in rs if r.source == "cluster")
+        out.append(OGGroupRow(g, len(hgs), len(rs) - n_cl, n_cl, len(ogs), sum(len(o.genes) for o in ogs),
                               sum(1 for o in ogs if o.support == 0), len(rs) - len(ok)))
     return out
 
@@ -1012,6 +1060,6 @@ def origin_tree(cfg: core.Config) -> "og_origin.OriginTree":
 
 def og_origins(rows, tree) -> dict:
     """{OG id: Origin(label, depth) or None} for every OG of `rows` ([HGOgs]; rows with an
-    error are skipped).  Species not on the tree are ignored (og_outside lists them)."""
+    error, or only a cluster FASTA, are skipped).  Species not on the tree are ignored (og_outside lists them)."""
     return {og.id: tree.origin(m.species for m in og.genes)
-            for r in rows if not r.error for og in r.ogs}
+            for r in rows if not r.error and r.source != "cluster" for og in r.ogs}

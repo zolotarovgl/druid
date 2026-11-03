@@ -2586,7 +2586,7 @@ async def _results_tab(app, pilot):
 
 
 def _rt(app):
-    return [(r.group, r.hgs, r.with_output, r.ogs, r.genes, r.zero) for r in app.rt_shown]
+    return [(r.group, r.hgs, r.with_ogs, r.ogs, r.genes, r.zero) for r in app.rt_shown]
 
 
 def test_tab_switches_jobs_and_results_tabs(cli):
@@ -2636,7 +2636,7 @@ def test_results_tab_reads_once_and_window_reuses_it(cli, monkeypatch):
             assert [r.hg for r in app.res_rows] == ["tfs.A.HG1", "tfs.A.HG11"]
             win = [_cells(app, "#res", i) for i in range(app.query_one("#res").row_count)]
             tab = next(r for r in app.rt_rows if r.group == "tfs")
-            assert (tab.with_output, tab.hgs) == (len(app.res_rows), len(app.res_rows) + app.res_missing)
+            assert (tab.with_ogs, tab.hgs) == (len(app.res_rows), len(app.res_rows) + app.res_missing)
             assert (tab.ogs, tab.genes, tab.zero) == tuple(sum(int(c[i]) for c in win) for i in (1, 2, 3))
             assert calls == [(3, "possvm")]                          # no second read
             await _key(pilot, "escape")

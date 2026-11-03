@@ -231,7 +231,7 @@ RES_KEYS = {"hg": (lambda r: model.hg_sort_key(r.hg), False),     # an unreadabl
 OG_COLS = [SortCol("og", "OG"), SortCol("genes", "genes", True), SortCol("spp", "spp", True),
            SortCol("support", "support", True), SortCol("name", "name"),
            SortCol("origin", "origin")]
-OG_KEYS = {"og": (lambda o: int(o.id.rsplit(".", 1)[1]), False),
+OG_KEYS = {"og": (model.og_sort_id, False),
            "genes": (lambda o: len(o.genes), True),
            "spp": (lambda o: len({m.species for m in o.genes}), True),
            "support": (lambda o: _finite(o.support), True),
@@ -252,7 +252,7 @@ MEM_KEYS = {"gene": (lambda p: p[1].gene, False), "sp": (lambda p: p[1].species,
 
 # Results tab (first screen): one row per Jobs group; names = model.OGGroupRow fields.
 RT_COLS = [SortCol("group", "group"), SortCol("hgs", "HGs", True),
-           SortCol("with_output", "with output", True), SortCol("ogs", "OGs", True),
+           SortCol("with_ogs", "with output", True), SortCol("ogs", "OGs", True),
            SortCol("genes", "genes", True), SortCol("zero", "⚠ sup 0", True)]
 RT_KEYS = {c.name: ((lambda r, n=c.name: getattr(r, n)), c.numeric) for c in RT_COLS}
 
@@ -1120,7 +1120,7 @@ class PhyloApp(App):
         keep, keep_row, col = self._key_at_cursor(t), t.cursor_row, t.cursor_column
         t.clear()
         for r in self.rt_shown:
-            t.add_row(escape(r.group), str(r.hgs), str(r.with_output), str(r.ogs), str(r.genes),
+            t.add_row(escape(r.group), str(r.hgs), str(r.with_ogs), str(r.ogs), str(r.genes),
                       str(r.zero), key=r.group)
         keys = [r.group for r in self.rt_shown]
         if keys:
@@ -1138,7 +1138,7 @@ class PhyloApp(App):
         r = next((x for x in self.rt_rows if x.group == key), None)
         lines = [self._rt_note] if self._rt_note else []
         if r is not None and self._og_cache is not None:
-            line = (f"{r.group}: {r.hgs} HGs · {r.with_output} with output · {r.ogs} OGs · "
+            line = (f"{r.group}: {r.hgs} HGs · {r.with_ogs} with output · {r.ogs} OGs · "
                     f"{r.genes} genes · {r.zero} OGs with support 0")
             bad = r.unreadable                   # the group's own count
             if bad:

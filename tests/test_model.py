@@ -1,6 +1,7 @@
 """phylocli/model.py: the print-free data layer shared by the CLI and the TUI."""
 from __future__ import annotations
 
+import shutil
 import dataclasses
 import os
 import stat
@@ -478,12 +479,70 @@ def test_og_group_rows_sums_per_group(cli):
     exp = {"tfs.A.HG1", "tfs.A.HG11", "tfs.C_x.HG1"}
     rows, missing = model.group_ogs(cfg, exp, "possvm")
     rows.append(model.HGOgs("tfs.C_x.HG1", [], "bad.csv:2: cannot parse row"))
+    rows.append(model.HGOgs("tfs.A.HG3", [model.OG("tfs.A.HG3.all", model.CLUSTER_OG_NAME,
+                [model.Member("Mlei_1", "Mlei", "", "")], None, "", "")], source="cluster"))
+    exp = exp | {"tfs.A.HG3"}
     out = model.og_group_rows(["ALL", "tfs", "cal"], exp, "category", rows)
-    assert [(r.group, r.hgs, r.with_output, r.ogs, r.genes, r.zero, r.unreadable) for r in out] == [
-        ("ALL", 3, 3, 3, 7, 1, 1), ("tfs", 3, 3, 3, 7, 1, 1), ("cal", 0, 0, 0, 0, 0, 0)]
+    # ALL: hgs 4, with_ogs 3, cluster_only 1, ogs 3, genes 7 (the cluster row not counted)
+    assert [(r.group, r.hgs, r.with_ogs, r.cluster_only, r.ogs, r.genes, r.zero, r.unreadable)
+            for r in out] == [
+        ("ALL", 4, 3, 1, 3, 7, 1, 1), ("tfs", 4, 3, 1, 3, 7, 1, 1), ("cal", 0, 0, 0, 0, 0, 0, 0)]
     fam = model.og_group_rows(["tfs.A", "tfs.C_x"], exp, "family", rows[:2])
-    assert [(r.group, r.hgs, r.with_output, r.ogs) for r in fam] == [("tfs.A", 2, 2, 3),
-                                                                     ("tfs.C_x", 1, 0, 0)]
+    assert [(r.group, r.hgs, r.with_ogs, r.ogs) for r in fam] == [("tfs.A", 3, 2, 3),
+                                                                  ("tfs.C_x", 1, 0, 0)]
+
+
+def _clusters(cfg, **hgs):
+    d = cfg.outdir / "clusters"
+    shutil.rmtree(d, ignore_errors=True)     # the cli fixture pre-fills clusters/: start clean
+    d.mkdir(parents=True)
+    for hg, text in hgs.items():
+        (d / f"{hg}.fasta").write_text(text)
+
+
+def test_group_ogs_auto_picks_per_hg(cli):
+    cfg = _cfg()
+    write_results(cfg)                       # HG1: possvm + prev; HG11: possvm only
+    (cfg.outdir / "possvm_prev/tfs.A.HG2.treefile.ortholog_groups.csv").write_text(og_csv(
+        [("Mlei_v05_G5", "tfs.A.HG2.0:like:X", "50.0", "NA", "NA")]))
+    _clusters(cfg, **{"tfs.A.HG3": ">Mlei_v05_G7 desc\nMA\n>Hsap_ENSP9\nMB\n", "tfs.A.HG4": ""})
+    hgs = ["tfs.A.HG1", "tfs.A.HG11", "tfs.A.HG2", "tfs.A.HG3", "tfs.A.HG4", "tfs.C_x.HG1"]
+    rows, missing = model.group_ogs(cfg, hgs, "auto")
+    assert [(r.hg, r.source) for r in rows] == [("tfs.A.HG1", "possvm"), ("tfs.A.HG2", "possvm_prev"),
+                                               ("tfs.A.HG3", "cluster"), ("tfs.A.HG11", "possvm")]
+    assert missing == 2                      # HG4 (empty fasta), C_x.HG1 (nothing)
+    c = rows[2].ogs
+    assert [(o.id, o.name, o.support) for o in c] == [("tfs.A.HG3.all", model.CLUSTER_OG_NAME, None)]
+    assert [(m.gene, m.species) for m in c[0].genes] == [("Mlei_v05_G7", "Mlei"), ("Hsap_ENSP9", "Hsap")]
+    assert [r.source for r in model.group_ogs(cfg, hgs, "possvm")[0]] == ["possvm", "possvm"]
+
+
+def test_group_ogs_auto_error_does_not_fall_back(cli):
+    cfg = _cfg()
+    write_results(cfg)
+    (cfg.outdir / "possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv").write_text(OG_HEAD + "bad\n")
+    _clusters(cfg, **{"tfs.A.HG11": ">Bova_x1\nM\n"})
+    rows, _ = model.group_ogs(cfg, ["tfs.A.HG11"], "auto")
+    assert rows[0].source == "possvm" and rows[0].ogs == [] and "cannot parse row" in rows[0].error
+
+
+def test_clustered_hgs_one_listing(cli):
+    cfg = _cfg()
+    _clusters(cfg, **{"tfs.A.HG3": ">a\nM\n", "tfs.A.HG4": ""})
+    assert model.clustered_hgs(cfg) == {"tfs.A.HG3"}
+
+
+def test_og_sort_key_cluster_row():
+    assert model.og_sort_id(model.OG("x.HG1.all", "", [], None, "", "")) == -1
+    assert model.og_sort_id(model.OG("x.HG1.12", "", [], None, "", "")) == 12
+
+
+def test_og_origins_skip_cluster_rows():
+    class T:
+        def origin(self, sps):
+            return "o"
+    og = model.OG("h.all", model.CLUSTER_OG_NAME, [model.Member("Mlei_1", "Mlei", "", "")], None, "", "")
+    assert model.og_origins([model.HGOgs("h", [og], source="cluster")], T()) == {}
 
 
 def test_origin_tree_path_default(cli):
