@@ -796,6 +796,14 @@ class HGOgs:
     ogs: list                  # [OG]; [] when error is set
     error: str = ""
     source: str = ""           # "possvm" | "possvm_prev" | "cluster" (set by group_ogs)
+    tree: bool = False         # its tree file is there (`t` can open it; set by group_ogs)
+
+
+def tree_listed(hg: str, names) -> bool:
+    """The HG's tree (its ortholog_groups.csv name without the suffix, as hg_tree_files finds
+    it) is among a directory's non-empty `names`."""
+    files = [n for n in names if n.startswith(hg + ".") and n.endswith(OG_SUFFIX)]
+    return len(files) == 1 and files[0][:-len(OG_SUFFIX)] in names
 
 
 CLUSTER_OG_NAME = "(not split: no possvm yet)"
@@ -931,7 +939,7 @@ def group_ogs(cfg: core.Config, hgs, source: str, progress=None,
                 found = True
                 break
             if ogs is not None:
-                rows.append(HGOgs(hg, ogs, source=src))
+                rows.append(HGOgs(hg, ogs, source=src, tree=tree_listed(hg, listing[src])))
                 found = True
                 break
         if found:

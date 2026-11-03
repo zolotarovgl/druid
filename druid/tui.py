@@ -489,7 +489,8 @@ KEYS = {
                   ("o", "results of the group")]),
         ("Group & sort", [("c", "group by category"), ("f", "group by family"),
                           ("s", "sort by the column"), ("h", "only actionable at the column")]),
-        ("Run", [("S", "run step 1: search → cluster (enter dry run · y submit)")]),
+        ("Run", [("S", "run step 1: search → cluster (enter dry run · y submit)"),
+                 ("x", "submit every ready / failed HG and family of every stage")]),
         ("Other", [("R", "refresh"), ("?", "this list"), (":q!", "quit druid")]),
         ("Notes", [("", "search/cluster count families, the other stages HGs"),
                    ("", "default view: failed+ready")])]),
@@ -822,15 +823,60 @@ class PhyloApp(App):
             fatts = history.family_attempts(self.cfg, fams=fams)
             # every applicable stage from ONE attempts read, ONE done scan, ONE squeue call, so
             # that stage changes and the detail panel need no subprocess on a key press
-            by_stage = {st: (model.hg_rows(self.cfg, st, exp,
-                                           fatts if st in core.FAMILY_STAGES else atts,
-                                           done_map, lv, fams=fams)
-                             if core.applicable(self.cfg, st) else [])
-                        for st in TUI_STAGES}
+            by_stage = self._by_stage(exp, atts, fatts, done_map, lv, fams)
             arrays, sacct_known = model.array_rows()
             snap["hg"] = dict(atts=atts + fatts, by_stage=by_stage, arrays=arrays,
                               sacct_known=sacct_known)
         return snap
+
+    def _by_stage(self, exp, atts, fatts, done_map, lv, fams) -> dict:
+        """{stage: [HGRow]} for every stage (empty when not applicable)."""
+        return {st: (model.hg_rows(self.cfg, st, exp,
+                                   fatts if st in core.FAMILY_STAGES else atts,
+                                   done_map, lv, fams=fams)
+                     if core.applicable(self.cfg, st) else [])
+                for st in TUI_STAGES}
+
+    def _all_stage_rows(self) -> dict:
+        """{stage: [HGRow]} read fresh, whatever the view (x on the Jobs tab); also fills
+        self.nseq for the expected HGs. Reads files and runs squeue: worker thread only."""
+        exp = core.expected(self.cfg)
+        done_map = core.report_status.done_by_stage(str(self.cfg.outdir), exp)
+        lv = model.live(exp) or {}
+        fams: set = set()
+        if self.cfg.params.get("genefam_info"):
+            try:
+                fams = core.family_ids(self.cfg)
+            except (OSError, ValueError):
+                fams = set()
+        for hg in exp:
+            if not self.nseq.get(hg):
+                self.nseq[hg] = core.nseq(self.cfg, hg)
+        return self._by_stage(exp, history.attempts(self.cfg),
+                              history.family_attempts(self.cfg, fams=fams), done_map, lv, fams)
+
+    @work(thread=True, exclusive=True, group="submit_all")
+    def _submit_all_bg(self) -> None:
+        try:
+            by_stage = self._all_stage_rows()
+            parts = []
+            for st in TUI_STAGES:
+                rows = [r for r in by_stage.get(st, []) if r.state in ACTIONABLE]
+                if rows:
+                    parts.append((st, resource_groups(self.cfg, st, rows, self.nseq)))
+        except Exception as e:               # never let a worker kill the app
+            self.call_from_thread(self.notify, f"x: {e}", severity="error", markup=False)
+            return
+        self.call_from_thread(self._open_submit_all, parts)
+
+    def _open_submit_all(self, parts: list) -> None:
+        if not parts:
+            self.notify("nothing ready or failed at any stage", severity="warning")
+            return
+        if self.screen is not self.screen_stack[0]:      # a dialog opened meanwhile
+            return
+        self.push_screen(ResubmitScreen(self.cfg, None, None, self.raw, parts=parts),
+                         lambda _jids: self.load_bg())
 
     def load_now(self) -> None:
         self._apply(self._collect())
@@ -1341,6 +1387,8 @@ class PhyloApp(App):
             return False                         # header mode: the hidden row-0 cursor is not a target
         if action == "open_tree":
             return self.view == "results" or (self.view == "overview" and self.tab == "results")
+        if action == "submit_ready" and self.view == "overview":   # Jobs tab: all stages
+            return self.tab == "jobs" and self.screen is self.screen_stack[0]
         if action == "run_step1":                # Jobs tab only, never from inside a dialog
             return (self.view == "overview" and self.tab == "jobs"
                     and self.screen is self.screen_stack[0])
@@ -1588,8 +1636,13 @@ class PhyloApp(App):
 
     def action_submit_ready(self) -> None:
         """x: the resubmit box for every ready / failed HG of this stage and group, whatever the
-        filter and the selection (Grygoriy, 02/11/2026); enter dry-runs it, y submits."""
-        key = model.fam_group_key if self.stage in core.FAMILY_STAGES else model.group_key
+        filter and the selection (Grygoriy, 02/11/2026); enter dry-runs it, y submits.
+        On the Jobs tab: every ready / failed HG and family of every stage (03/11/2026)."""
+        if self.view == "overview":
+            self.notify("collecting ready / failed jobs of every stage…", timeout=3)
+            self._submit_all_bg()
+            return
+        key =model.fam_group_key if self.stage in core.FAMILY_STAGES else model.group_key
         rows = [r for r in self.rows if r.state in ACTIONABLE
                 and (self.group is None or key(r.hg, self.by) == self.group)]
         if not rows:
@@ -1764,12 +1817,15 @@ class PhyloApp(App):
         t.clear()
         for r in rows:
             src = "small" if r.hg in self._res_small else _SRC_LABEL.get(r.source, "")
+            # no tree for `t` (cluster only, an error, or a csv without its tree file): dimmed
+            # (Grygoriy, 03/11/2026)
+            name = Text(r.hg, style="" if r.tree else "dim")
             if r.error:
-                t.add_row(r.hg, src, "–", "–", "!", key=r.hg)
+                t.add_row(name, src, "–", "–", "!", key=r.hg)
             elif r.source == "cluster":
-                t.add_row(r.hg, src, "–", "–", "–", key=r.hg)      # genes: FASTA not read
+                t.add_row(name, src, "–", "–", "–", key=r.hg)      # genes: FASTA not read
             else:
-                t.add_row(r.hg, src, str(len(r.ogs)), str(sum(len(o.genes) for o in r.ogs)),
+                t.add_row(name, src, str(len(r.ogs)), str(sum(len(o.genes) for o in r.ogs)),
                           str(sum(1 for o in r.ogs if o.support == 0)), key=r.hg)
         keys = [r.hg for r in rows]
         if keys:
@@ -2102,9 +2158,17 @@ class ResubmitScreen(ModalScreen):
     Input { width: 14; }
     """
 
-    def __init__(self, cfg: core.Config, stage: str, groups: list, raw: "dict | None" = None):
+    def __init__(self, cfg: core.Config, stage: "str | None", groups: "list | None",
+                 raw: "dict | None" = None, parts: "list | None" = None):
+        """One stage (`stage`, `groups`), or several: `parts` = [(stage, groups)] (x on the Jobs
+        tab, Grygoriy 03/11/2026) -- one row of Inputs per (stage, reason), one run per stage."""
         super().__init__()
-        self.cfg, self.stage, self.groups = cfg, stage, groups
+        self.cfg = cfg
+        self.multi = parts is not None
+        self.parts = parts if self.multi else [(stage, groups)]
+        self.stage = "all stages" if self.multi else stage
+        self.groups = [g for _st, gs in self.parts for g in gs]      # flat, in Input order
+        self._row_stage = [st for st, gs in self.parts for _g in gs]
         self.raw = raw if raw is not None else load_raw()
         self.submitted: list[str] = []
         self._dry_ok = False
@@ -2118,8 +2182,10 @@ class ResubmitScreen(ModalScreen):
         with _Box(id="box"):
             yield Label(f"[b]resubmit · {self.stage}[/]  enter = dry run · y = submit · esc q = cancel")
             for i, (why, res, hgs) in enumerate(self.groups):
+                st = self._row_stage[i]
                 with Horizontal():
-                    yield Label(f"{len(hgs)} {core.unit(self.stage)} · {why or 'other'} · mem ")
+                    yield Label(f"{st + ' · ' if self.multi else ''}{len(hgs)} {core.unit(st)}"
+                                f" · {why or 'other'} · mem ")
                     yield Input(fmt_mem(res.mem_mb).replace(" ", "").replace("GB", "G")
                                 .replace("MB", "M"), id=f"mem-{i}")
                     yield Label(" time ")
@@ -2140,6 +2206,7 @@ class ResubmitScreen(ModalScreen):
             self._out("[yellow]values changed: enter to re-run the dry run[/]")
 
     def _per_hg(self) -> dict:
+        """{stage: {hg: {mem_mb, time_min}}} from the Inputs."""
         per: dict = {}
         for i, (_why, _res, hgs) in enumerate(self.groups):
             mem = core.parse_mem_mb(self.query_one(f"#mem-{i}", Input).value)
@@ -2147,26 +2214,41 @@ class ResubmitScreen(ModalScreen):
             if mem <= 0 or not t:
                 raise ValueError(f"bad value in row {i}: memory and time must be > 0")
             for hg in hgs:
-                per[hg] = {"mem_mb": mem, "time_min": t}
+                per.setdefault(self._row_stage[i], {})[hg] = {"mem_mb": mem, "time_min": t}
         return per
 
     def _build(self, dry_run: bool, per: dict):
-        """Runs squeue/sacct via model.*: call from a worker thread only."""
+        """[(stage, plan)] for every stage with something to submit, or (None, error).
+        Runs squeue/sacct via model.*: call from a worker thread only."""
         try:
             model.require_prefix(self.raw, self.cfg)
         except model.ModelError as e:
             return None, str(e)
-        hgs = [hg for _w, _r, g in self.groups for hg in g]
-        sel = model.select(self.cfg, self.stage, hgs, dry_run=dry_run)
-        if not sel.selected:
-            return None, "\n".join(sel.notes + ["nothing to submit"])
-        msg = model.preflight(self.stage, self.cfg)
-        if msg:
-            return None, msg
-        p = model.plan(self.cfg, self.stage, sel, per_hg=per)
-        if p.errors:
-            return None, "\n".join(f"{k} ({len(v)}): {model.show(v)}" for k, v in p.errors.items())
-        return p, ""
+        plans: list = []
+        notes: list = []
+        for st, groups in self.parts:
+            tag = f"{st}: " if self.multi else ""
+            hgs = [hg for _w, _r, g in groups for hg in g]
+            sel = model.select(self.cfg, st, hgs, dry_run=dry_run)
+            if not sel.selected:
+                notes += [tag + n for n in sel.notes]
+                continue
+            msg = model.preflight(st, self.cfg)
+            if msg:
+                return None, tag + msg
+            p = model.plan(self.cfg, st, sel, per_hg=per.get(st, {}))
+            if p.errors:
+                return None, "\n".join(f"{tag}{k} ({len(v)}): {model.show(v)}"
+                                       for k, v in p.errors.items())
+            if notes:                              # a skipped stage's notes travel with a plan
+                p.notes[:0] = notes
+                notes = []
+            plans.append((st, p))
+        if not plans:
+            return None, "\n".join(notes + ["nothing to submit"])
+        if notes:
+            plans[-1][1].notes.extend(notes)
+        return plans, ""
 
     def _out(self, text: str) -> None:
         self._shown = text
@@ -2251,14 +2333,17 @@ class ResubmitScreen(ModalScreen):
     @work(thread=True, exclusive=True, group="resubmit")
     def _dry_worker(self, per: dict) -> None:
         try:
-            p, err = self._build(True, per)
-            if p is None:
+            plans, err = self._build(True, per)
+            if plans is None:
                 self._post(self._finish, f"[red]{escape(err)}[/]")
                 return
-            lines = ["[cyan]dry run[/] — nothing submitted yet; y to submit"] + [escape(n) for n in p.notes]
-            for k, (res, ids_) in enumerate(p.groups):
-                lines.append(f"array {k}: {len(ids_)} {core.unit(self.stage)} · {res.cpus} cpus · {fmt_mem(res.mem_mb)}"
-                             f" · {fmt_time(res.time_min)} · {res.qos}")
+            lines = ["[cyan]dry run[/] — nothing submitted yet; y to submit"]
+            for st, p in plans:
+                tag = f"{st} · " if self.multi else ""
+                lines += [escape(n) for n in p.notes]
+                for k, (res, ids_) in enumerate(p.groups):
+                    lines.append(f"{tag}array {k}: {len(ids_)} {core.unit(st)} · {res.cpus} cpus"
+                                 f" · {fmt_mem(res.mem_mb)} · {fmt_time(res.time_min)} · {res.qos}")
         except Exception as e:             # never let a worker kill the app
             self._post(self._finish, f"[red]{escape(str(e))}[/]")
             return
@@ -2287,22 +2372,31 @@ class ResubmitScreen(ModalScreen):
     def _submit_worker(self, per: dict) -> None:
         jids: list = []                            # filled by sbatch_all as arrays are queued
         notes: list = []
-        w = None
+        dirs: list = []                            # one run dir per stage written
+        err = ""
+
+        def done_line() -> list:
+            if not jids:
+                return []
+            where = f" · run dir {' '.join(str(d) for d in dirs)}" if dirs else ""
+            return [f"[green]submitted {' '.join(jids)}[/]{where}"]
         try:
-            p, err = self._build(False, per)       # recomputed: state may have moved
-            if p is None:
+            plans, err = self._build(False, per)   # recomputed: state may have moved
+            if plans is None:
                 self._post(self._finish, f"[red]{escape(err)}[/]")
                 return
-            notes = [escape(n) for n in p.notes]
-            w = model.write_run(self.cfg, self.raw, p, dry_run=False)
-            _ids, err = model.sbatch_all(w, jids)
+            for _st, p in plans:                   # one run per stage; stop at the first error
+                notes += [escape(n) for n in p.notes]
+                w = model.write_run(self.cfg, self.raw, p, dry_run=False)
+                dirs.append(w.run_dir)
+                _ids, err = model.sbatch_all(w, jids)
+                if err:
+                    break
         except Exception as e:             # never let a worker kill the app
-            text = "\n".join(notes + ([f"[green]submitted {' '.join(jids)}[/]"
-                                        f"{' · run dir ' + str(w.run_dir) if w else ''}"] if jids else [])
-                              + [f"[red]{escape(str(e))}[/]"])
+            text = "\n".join(notes + done_line() + [f"[red]{escape(str(e))}[/]"])
             self._post(self._finish, text, False, jids)
             return
-        lines = notes + ([f"[green]submitted {' '.join(jids)}[/] · run dir {w.run_dir}"] if jids else [])
+        lines = notes + done_line()
         if err:
             lines.append(f"[red]{escape(err)}[/]")
         self._post(self._finish, "\n".join(lines), False, jids, None, bool(jids) and not err)

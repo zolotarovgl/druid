@@ -12,7 +12,8 @@ from textual.widgets import Static
 
 _LABELS = {"up": "↑", "down": "↓", "left": "←", "right": "→", "pageup": "pgup",
            "pagedown": "pgdn", "plus": "+", "minus": "-", "slash": "/", "escape": "esc",
-           "question_mark": "?", "left_square_bracket": "[", "right_square_bracket": "]"}
+           "question_mark": "?", "left_square_bracket": "[", "right_square_bracket": "]",
+           "less_than_sign": "<", "greater_than_sign": ">"}
 
 
 def key_label(key: str) -> str:

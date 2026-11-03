@@ -25,7 +25,8 @@ KEYS = [
     ("Views", [("v", "outline ↔ cladogram"), ("l", "branch lengths to scale (cladogram)"),
                ("+ -", "tip spacing (starts compact: one row per leaf; + spreads the rows)"),
                ("t", "metadata columns on / off"),
-               ("[ ]", "metadata columns narrower / wider")]),
+               ("[ ]", "metadata columns narrower / wider"),
+               ("< >", "tree (branches) narrower / wider; kept for the session")]),
     ("Collapse", [("enter space", "collapse / expand the clade"),
                   ("s", "contract branches with support < x (polytomies)"),
                   ("m", "collapse single-species clades"),
@@ -67,9 +68,17 @@ class TreeView(ScrollView, can_focus=True):
         Binding("t", "toggle_meta", "metadata"),
         Binding("left_square_bracket", "meta_width(-1)", "metadata narrower", show=False),
         Binding("right_square_bracket", "meta_width(1)", "metadata wider", show=False),
+        Binding("less_than_sign", "tree_width(-1)", "tree narrower", show=False),
+        Binding("greater_than_sign", "tree_width(1)", "tree wider", show=False),
     ]
     META_STEP = 5                            # `[` `]`: columns per press
     META_MIN = 4
+    TREE_STEP = 5                            # `<` `>`: branch columns per press
+    TREE_MIN = 2
+    # the cladogram's branch columns, None = auto (the view width minus 40 for the labels).
+    # A class attribute: set with < >, it holds for every tree opened later in the session
+    # (Grygoriy, 03/11/2026: "make it easy to widen / expand the tree").
+    tree_cols: Optional[int] = None
 
     def __init__(self, model: TreeModel, view: str = "clado", **kwargs):
         super().__init__(**kwargs)
@@ -111,8 +120,8 @@ class TreeView(ScrollView, can_focus=True):
         # 2 narrower than `size` on a tree taller than the screen
         view_w = self.scrollable_content_region.width or 80
         self._fit_w = view_w
-        width = max(view_w - 40, 20)
-        meta = self.show_meta and bool(m.meta_cols)
+        width = self._auto_cols(view_w) if TreeView.tree_cols is None else TreeView.tree_cols
+        meta =self.show_meta and bool(m.meta_cols)
         if self.view == "outline":
             self.rows = layout.outline_rows(m, meta=meta)
         else:                                # names never off-screen: shorter branches instead
@@ -263,6 +272,28 @@ class TreeView(ScrollView, can_focus=True):
         n = m.collapse_by_group()
         self.rebuild()
         self.post_message(TreeView.Note(self, f"{n} {m.group_column()} clades collapsed"))
+
+    @staticmethod
+    def _auto_cols(view_w: int) -> int:
+        return max(view_w - 40, 20)
+
+    def action_tree_width(self, d: int) -> None:
+        """< / >: the cladogram's branch columns TREE_STEP narrower / wider, from TREE_MIN up to
+        the widest that still fits the names on screen; kept for later trees (tree_cols)."""
+        if self.view != "clado":
+            self.post_message(TreeView.Note(self, "tree width: cladogram only (v)"))
+            return
+        view_w = self.scrollable_content_region.width or 80
+        cur = self.branch_width               # what is drawn now (fit_rows may have shrunk it)
+        new = max(cur + d * self.TREE_STEP, self.TREE_MIN)
+        if d > 0:                              # wider than what fits is clamped by fit_rows:
+            fit, _rows = layout.fit_rows(self.model, view_w, new, scaled=self.scaled, gap=self.gap)
+            new = fit
+        TreeView.tree_cols = new
+        self.rebuild()
+        full = new == cur and d > 0
+        self.post_message(TreeView.Note(self, f"tree width {self.branch_width}"
+                                        + (" (widest that fits)" if full else "")))
 
     def action_meta_width(self, d: int) -> None:
         """[ / ]: metadata values and column names cut META_STEP narrower / wider, from META_MIN

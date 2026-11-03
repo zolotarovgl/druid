@@ -349,6 +349,9 @@ and underlined (`n`/`N` step through them; members missing from the tree are rep
 members pane that member's tip. The `*.ortholog_groups.csv` columns show as metadata (`t` in the
 tree, `c` cycles the colouring). `esc` returns to Results unchanged (first `esc` clears the
 underline/search). Not in the header row of a table: `↓` first. A missing tree is a warning, never a crash.
+HGs with no tree to open (cluster only, or a csv without its tree file) are dimmed in the HGs pane.
+In the tree, `<` `>` make the branches narrower / wider; the width holds for the trees opened later
+in the session.
 The tree opens with branch lengths to scale and collapsed by orthogroup (14/10/2026); the OG or
 member it opens on stays expanded (`e` expands all, `l` drops the lengths). The tree's `w`
 (write) prompt is prefilled inside the project and refuses a path outside it.
@@ -369,7 +372,8 @@ HG view panels: stages (top left) · HGs — or families, for search / cluster �
 Keys (HG view): `↑↓` move · `tab` panel · `esc` overview · `f` filter (failed → ready → running → blocked → done) ·
 `space` select · `a` select all shown · `A` unselect all shown · `r` resubmit selection · `x` submit every ready / failed HG of the stage · `l` last log · `o` results · `R` refresh ·
 `S` run step 1 (`druid run`: `enter` dry run, `y` submit; also in Setup, which refuses while prepare is
-running) · `q` quit.
+running) · `q` quit. On the Jobs tab, `x` opens one box for every ready / failed HG and family of
+every stage (one row per stage and resource reason; `enter` dry run, `y` submits one run per stage).
 
 Resubmit: one row per resource group, pre-filled with the automatic bump (out of memory →
 memory ×2, time limit → time ×2, other failures unchanged); memory and time are editable.

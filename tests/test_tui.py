@@ -32,7 +32,8 @@ AUTO_TESTS = {"test_results_auto_lists_prev_only_and_cluster_only_hgs", "test_re
               "test_source_toggle_cycles_three_modes", "test_results_tab_counts_with_ogs_and_cluster_only",
               "test_clusters_dir_listed_once_per_auto_load", "test_t_in_auto_cluster_only_warns_prev_only_opens",
               "test_new_cluster_family_invalidates_results_cache",
-              "test_tab_load_opens_no_cluster_fasta", "test_new_fasta_in_clusters_invalidates_tab_cache"}
+              "test_tab_load_opens_no_cluster_fasta", "test_new_fasta_in_clusters_invalidates_tab_cache",
+              "test_results_hg_without_tree_is_dimmed"}
 
 
 @pytest.fixture(autouse=True)
@@ -718,6 +719,52 @@ def test_x_submits_every_ready_and_failed_hg_of_the_stage(cli, monkeypatch):
             assert isinstance(scr, tui.ResubmitScreen) and scr.stage == "align"
             assert {h for g in scr.groups for h in g[2]} == want
             assert app.selected == set()
+    _run(go())
+
+
+def test_x_on_jobs_overview_submits_every_ready_and_failed_across_stages(cli, monkeypatch):
+    """x on the Jobs tab: one box for every ready / failed HG and family of every stage
+    (Grygoriy, 03/11/2026); enter dry-runs each stage, y submits them all."""
+    assert cli(["submit", "align", "tfs.A.HG11", "tfs.C_x.HG1"]).exit_code == 0
+    monkeypatch.setenv("FAKE_SACCT", SACCT_OOM)
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            assert app.view == "overview" and app.tab == "jobs"
+            await pilot.press("x")
+            for _ in range(50):                       # rows are collected in a worker
+                await pilot.pause()
+                if isinstance(app.screen, tui.ResubmitScreen):
+                    break
+            scr = app.screen
+            assert isinstance(scr, tui.ResubmitScreen)
+            want = {st: {r.hg for r in rows if r.state in tui.ACTIONABLE}
+                    for st, rows in app._all_stage_rows().items()}
+            want = {st: hs for st, hs in want.items() if hs}
+            assert len(want) >= 2 and "align" in want     # several stages, align failed ones
+            got: dict = {}
+            for st, groups in scr.parts:
+                got.setdefault(st, set()).update(h for g in groups for h in g[2])
+            assert got == want
+            await pilot.press("enter")                    # dry run: every stage planned
+            for _ in range(100):
+                await pilot.pause()
+                if scr._dry_ok or "[red]" in scr._shown:
+                    break
+            assert scr._dry_ok, scr._shown
+            for st in want:
+                assert st in scr._shown
+            n_arrays = scr._shown.count("array ")
+            await pilot.press("y")                        # one run per stage, all submitted
+            for _ in range(100):
+                await pilot.pause()
+                if app.screen is not scr:
+                    break
+            assert app.screen is not scr, scr._shown
+            assert len(scr.submitted) == n_arrays >= len(want)
     _run(go())
 
 
@@ -4168,6 +4215,30 @@ def test_t_in_auto_cluster_only_warns_prev_only_opens(cli, monkeypatch):
             await _press_t(app, pilot, "#res", hgs.index("tfs.A.HG11"))
             assert isinstance(app.screen, TreeScreen)
             assert "tfs.A.HG11 · possvm_prev" in app.screen.query_one(TreeView).border_title
+    _run(go())
+
+
+def test_results_hg_without_tree_is_dimmed(cli):
+    """Results window: an HG with no tree to open (`t`) has its name dimmed (Grygoriy,
+    03/11/2026): cluster-only, or a possvm csv whose tree file is missing."""
+    from rich.text import Text
+    _prev_only_hg11(_cfg())
+    (_cfg().outdir / "possvm_prev/tfs.A.HG11.treefile").write_text("(Mlei_v05_G1:1,Zzz_q1:1);\n")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "ALL")
+            t = app.query_one("#res")
+            cells = {str(t.get_cell_at((i, 0))): t.get_cell_at((i, 0)) for i in range(t.row_count)}
+            dim = {h for h, c in cells.items() if isinstance(c, Text) and "dim" in str(c.style)}
+            assert "tfs.C_x.HG1" in dim                       # cluster only: no tree
+            assert "tfs.A.HG11" not in dim                    # possvm_prev tree present
+            src = {str(t.get_cell_at((i, 0))): str(t.get_cell_at((i, 1)))
+                   for i in range(t.row_count)}
+            no_file = [h for h, s in src.items() if s in ("possvm", "prev") and h != "tfs.A.HG11"]
+            for h in no_file:                                 # csv but no tree file written
+                assert h in dim
     _run(go())
 
 
