@@ -135,10 +135,30 @@ def ov_cell(c: tuple, width: int, bar: int, glyphs) -> str:
             + "".join(f"[{fg}]{ch * k}[/]" for (ch, fg), k in zip(glyphs, n) if k))
 
 
-def _possvm_sig(states: dict) -> frozenset:
-    """(stage, hg) of every finished POSSVM output: the Results caches go stale when it moves."""
-    return frozenset((st, hg) for st in ("possvm", "possvm_prev")
-                     for hg, v in states.get(st, {}).items() if v == 0)
+def _possvm_sig(states: dict, fstates: "dict | None" = None) -> frozenset:
+    """(stage, hg) of every finished POSSVM output, plus (cluster, family) of every finished
+    cluster step (`fstates`, family states): the Results caches go stale when it moves."""
+    sig = frozenset((st, hg) for st in ("possvm", "possvm_prev")
+                    for hg, v in states.get(st, {}).items() if v == 0)
+    return sig | frozenset(("cluster", f) for f, v in (fstates or {}).get("cluster", {}).items()
+                           if v == 0)
+
+
+SOURCE_MODES = ("auto", "possvm", "possvm_prev")
+
+
+def next_source(mode: "str | None") -> str:
+    """The `p` key: auto -> possvm -> possvm_prev -> auto."""
+    return SOURCE_MODES[(SOURCE_MODES.index(mode) + 1) % len(SOURCE_MODES)] if mode in SOURCE_MODES \
+        else SOURCE_MODES[0]
+
+
+_SRC_LABEL = {"possvm": "possvm", "possvm_prev": "prev", "cluster": "cluster"}
+
+
+def _real_ogs(r) -> list:
+    """The OGs of an HG row; a cluster-only HG's one pseudo-OG is not an ortholog group."""
+    return [] if r.error or r.source == "cluster" else r.ogs
 
 
 def _todo_at(r, stage: str) -> tuple:
@@ -220,10 +240,11 @@ def _finite(x: "float | None") -> float:
     return -math.inf if x is None or x != x else x
 
 
-RES_COLS = [SortCol("hg", "HG"), SortCol("ogs", "OGs", True), SortCol("genes", "genes", True),
-            SortCol("zero", "⚠", True)]
+RES_COLS = [SortCol("hg", "HG"), SortCol("source", "source"), SortCol("ogs", "OGs", True),
+            SortCol("genes", "genes", True), SortCol("zero", "⚠", True)]
 RES_KEYS = {"hg": (lambda r: model.hg_sort_key(r.hg), False),     # an unreadable HG: -1
-            "ogs": (lambda r: -1 if r.error else len(r.ogs), True),
+            "source": (lambda r: r.source, False),
+            "ogs": (lambda r: -1 if r.error else len(_real_ogs(r)), True),
             "genes": (lambda r: -1 if r.error else sum(len(o.genes) for o in r.ogs), True),
             "zero": (lambda r: -1 if r.error else sum(1 for o in r.ogs if o.support == 0), True)}
 # no reference-ortholog columns in OGs: the reference is per gene (it differs within 19 % of
@@ -252,7 +273,8 @@ MEM_KEYS = {"gene": (lambda p: p[1].gene, False), "sp": (lambda p: p[1].species,
 
 # Results tab (first screen): one row per Jobs group; names = model.OGGroupRow fields.
 RT_COLS = [SortCol("group", "group"), SortCol("hgs", "HGs", True),
-           SortCol("with_ogs", "with output", True), SortCol("ogs", "OGs", True),
+           SortCol("with_ogs", "with OGs", True), SortCol("cluster_only", "cluster only", True),
+           SortCol("ogs", "OGs", True),
            SortCol("genes", "genes", True), SortCol("zero", "⚠ sup 0", True)]
 RT_KEYS = {c.name: ((lambda r, n=c.name: getattr(r, n)), c.numeric) for c in RT_COLS}
 
@@ -608,7 +630,8 @@ class PhyloApp(App):
         self.res_from = "overview"              # the view esc returns to from Results
         self.res_group = ""
         self.res_hgs: list[str] = []
-        self.res_source: "str | None" = None    # None = model.default_source(), in the worker
+        self.res_source: "str | None" = None    # None = first load running; else a SOURCE_MODES name
+        self._res_by = "category"               # grouping of the open Results window
         self.res_rows: list = []                # [model.HGOgs] of the open group
         self.res_missing = 0
         self._res_focus: "str | None" = None    # HG to put the Results cursor on after a load
@@ -630,7 +653,7 @@ class PhyloApp(App):
         self.ov_hide: "str | None" = None       # stage name; h
         self.ov_shown: list = []                # ov_rows as displayed (sorted / filtered)
         self.tab = "jobs"                       # first-screen tab: "jobs" | "results" | "setup"; tab
-        self.rt_source: "str | None" = None     # Results tab source; None = default_source
+        self.rt_source: str = "auto"              # Results tab source mode (SOURCE_MODES)
         self.rt_hide: "str | None" = None       # Results tab: count column name; h
         self.rt_rows: list = []                 # [model.OGGroupRow], Jobs group order
         self.rt_shown: list = []
@@ -642,6 +665,7 @@ class PhyloApp(App):
         self._tab_text = ""
         self._ovsteps_text = ""                 # the step 1 / step 2 line above the overview
         self._res_want: "str | None" = None     # source asked for by the opener (Results tab)
+        self._res_small: set = set()            # cluster-only HGs outside the expected set
         self._cmd: "str | None" = None          # the `:` command typed so far; None = not in one
 
     def compose(self) -> ComposeResult:
@@ -1039,7 +1063,7 @@ class PhyloApp(App):
         """A POSSVM output finished (or vanished) since the cache was read: drop it.  On the
         Results tab the old rows stay shown while a background re-read runs; the cache is made
         unusable for the Results window at once."""
-        if self._og_cache is None or _possvm_sig(self._ov_inputs[1]) == self._og_sig:
+        if self._og_cache is None or _possvm_sig(self._ov_inputs[1], self._ov_inputs[3]) == self._og_sig:
             return
         if self.view == "overview" and self.tab == "results":
             self._og_cache = dict(self._og_cache, hgs=frozenset())     # shown, not reusable
@@ -1060,7 +1084,7 @@ class PhyloApp(App):
         if not self._ov_inputs[0]:               # no snapshot yet: _apply -> _maybe_load_rtab reads
             return
         self._rt_gen += 1
-        self._og_sig = _possvm_sig(self._ov_inputs[1])
+        self._og_sig = _possvm_sig(self._ov_inputs[1], self._ov_inputs[3])
         if not keep_rows:
             self._og_cache = None
         self.query_one("#rtab").add_class("loading")
@@ -1075,15 +1099,16 @@ class PhyloApp(App):
         """Every expected HG's ortholog_groups.csv, read once (NFS; ~10 s for ~1,900 files).
         Own worker group: load_bg and the Results window load never cancel it, nor it them."""
         worker = get_current_worker()
-        snap = dict(gen=gen, source=source or "possvm", rows=[], hgs=hgs, note="")
+        snap = dict(gen=gen, source=source or "auto", rows=[], hgs=hgs, note="")
         try:
-            snap["source"] = source or model.default_source(self.cfg)
+            if snap["source"] == "auto":         # the cluster-only (and small) HGs too
+                snap["hgs"] = sorted(set(hgs) | model.clustered_hgs(self.cfg), key=model.hg_sort_key)
 
             def progress(k: int, n: int) -> None:   # throttled: ~every 50 files
                 if k and k % 50 == 0 and not worker.is_cancelled:
                     self.call_from_thread(self._rt_progress, gen, k, n)
             snap["rows"], _missing = model.group_ogs(
-                self.cfg, hgs, snap["source"], progress=progress,
+                self.cfg, snap["hgs"], snap["source"], progress=progress,
                 cancelled=lambda: worker.is_cancelled or gen != self._rt_gen)
         except Exception as e:                   # never let a worker kill the app
             snap["note"] = f"cannot read {snap['source']}/: {e}"
@@ -1120,8 +1145,8 @@ class PhyloApp(App):
         keep, keep_row, col = self._key_at_cursor(t), t.cursor_row, t.cursor_column
         t.clear()
         for r in self.rt_shown:
-            t.add_row(escape(r.group), str(r.hgs), str(r.with_ogs), str(r.ogs), str(r.genes),
-                      str(r.zero), key=r.group)
+            t.add_row(escape(r.group), str(r.hgs), str(r.with_ogs), str(r.cluster_only), str(r.ogs),
+                      str(r.genes), str(r.zero), key=r.group)
         keys = [r.group for r in self.rt_shown]
         if keys:
             t.move_cursor(row=keys.index(keep) if keep in keys else max(0, min(keep_row, len(keys) - 1)),
@@ -1138,7 +1163,7 @@ class PhyloApp(App):
         r = next((x for x in self.rt_rows if x.group == key), None)
         lines = [self._rt_note] if self._rt_note else []
         if r is not None and self._og_cache is not None:
-            line = (f"{r.group}: {r.hgs} HGs · {r.with_ogs} with output · {r.ogs} OGs · "
+            line = (f"{r.group}: {r.hgs} HGs · {r.with_ogs} with OGs · {r.cluster_only} cluster only · {r.ogs} OGs · "
                     f"{r.genes} genes · {r.zero} OGs with support 0")
             bad = r.unreadable                   # the group's own count
             if bad:
@@ -1600,7 +1625,8 @@ class PhyloApp(App):
                               key=model.hg_sort_key)
         self.res_from, self.res_group, self._res_focus = self.view, group, focus
         self.res_source, self.res_rows, self.res_missing = None, [], 0
-        self._res_want = source                 # None = default_source(), in the worker
+        self._res_by = by
+        self._res_want = source or self.rt_source    # the Results tab's mode unless asked
         self._flt = {"res": "", "ogs": "", "members": ""}
         inp = self.query_one("#memfilter", Input)
         inp.value = ""
@@ -1620,7 +1646,7 @@ class PhyloApp(App):
         self._res_note = "loading…"
         self.sub_title = f"Results · {self.res_group} · {self.res_source or '…'}"
         self._fill_ogs()
-        self._load_results(list(self.res_hgs), self.res_source or self._res_want, self._res_gen,
+        self._load_results(list(self.res_hgs), self.res_source or self._res_want or "auto", self._res_gen,
                            self._og_cache)
 
     @work(thread=True, exclusive=True, group="results")
@@ -1630,11 +1656,15 @@ class PhyloApp(App):
         species tree tips and species_info.tsv: never on the UI thread.  Own worker group:
         load_bg (default group, exclusive) must not cancel it, nor it load_bg."""
         worker = get_current_worker()
-        snap = dict(gen=gen, source=source or "possvm", rows=[], missing=0, note="",
+        snap = dict(gen=gen, source=source or "auto", rows=[], missing=0, note="",
                     universe=self._universe, phyla=self._phyla, sp_note="",
                     otree=self._otree, origins={}, otree_err="")
         try:
-            snap["source"] = source or model.default_source(self.cfg)
+            if snap["source"] == "auto":         # + the clustered HGs of the group (small ones too)
+                by, grp = self._res_by, self.res_group
+                hgs = sorted(set(hgs) | {h for h in model.clustered_hgs(self.cfg)
+                                         if grp == "ALL" or model.group_key(h, by) == grp},
+                             key=model.hg_sort_key)
             def progress(k: int, n: int) -> None:   # throttled: ~every 50 files
                 if k and k % 50 == 0 and not worker.is_cancelled:
                     self.call_from_thread(self._res_progress, gen, k, n)
@@ -1687,8 +1717,11 @@ class PhyloApp(App):
         self._otree, self._origins = snap["otree"], snap["origins"]
         if snap["otree_err"]:
             self._notify_once(snap["otree_err"])
-        self._res_note = snap["note"] or ("" if self.res_rows else
-                                          f"no ortholog groups yet ({self.res_source} not done)")
+        exp = self._ov_inputs[0]
+        self._res_small = {r.hg for r in self.res_rows if r.source == "cluster" and r.hg not in exp}
+        self._res_note = snap["note"] or (
+            "" if self.res_rows else "no clustered HGs yet" if self.res_source == "auto"
+            else f"no ortholog groups yet ({self.res_source} not done)")
         t = self.query_one("#res", DataTable)
         focus, self._res_focus = self._res_focus, None
         keep = focus or self._key_at_cursor(t)
@@ -1710,10 +1743,13 @@ class PhyloApp(App):
         rows = sort_rows([r for r in self.res_rows if q in r.hg.lower()], t.sort_state, RES_KEYS)
         t.clear()
         for r in rows:
+            src = "small" if r.hg in self._res_small else _SRC_LABEL.get(r.source, "")
             if r.error:
-                t.add_row(r.hg, "–", "–", "!", key=r.hg)
+                t.add_row(r.hg, src, "–", "–", "!", key=r.hg)
+            elif r.source == "cluster":
+                t.add_row(r.hg, src, "–", str(sum(len(o.genes) for o in r.ogs)), "–", key=r.hg)
             else:
-                t.add_row(r.hg, str(len(r.ogs)), str(sum(len(o.genes) for o in r.ogs)),
+                t.add_row(r.hg, src, str(len(r.ogs)), str(sum(len(o.genes) for o in r.ogs)),
                           str(sum(1 for o in r.ogs if o.support == 0)), key=r.hg)
         keys = [r.hg for r in rows]
         if keys:
@@ -1764,7 +1800,11 @@ class PhyloApp(App):
             key = self._key_at_cursor(self.query_one("#members", DataTable))
             gene = key.split(":", 1)[1] if key else None
         self._tree_gen += 1                      # an earlier, slower load is dropped when it lands
-        self._load_tree(r.hg, self.res_source, og, gene, self._tree_gen)
+        src = r.source if self.res_source == "auto" else self.res_source
+        if src not in ("possvm", "possvm_prev"):
+            self.notify(f"{r.hg}: not split yet, no tree", severity="warning")
+            return
+        self._load_tree(r.hg, src, og, gene, self._tree_gen)
 
     def _tree_current(self, gen: int) -> bool:
         """A load's result may still be shown: it is the latest t, Results is still open, and no
@@ -1845,6 +1885,8 @@ class PhyloApp(App):
 
     def _origin_text(self, og_id: str) -> str:
         """`?` while the origin tree is unreadable, `–` for an OG with no species on it."""
+        if og_id.endswith(".all"):
+            return "–"                           # a cluster-only HG's pseudo-OG has no origin
         if self._otree is None:
             return "?"
         o = self._origins.get(og_id)
@@ -1942,8 +1984,10 @@ class PhyloApp(App):
               if empty[p] and self._flt[p]]
         if nm:
             head = "; ".join(([head] if head else []) + nm)
-        hint = "⚠ = support 0 (GeneRax bug case" + ("; check possvm_prev)" if self.res_source == "possvm" else ")")
-        parts = ([f"{len(r.ogs)} OGs"] if r is not None and not r.error else []) + [
+        eff = r.source if r is not None and self.res_source == "auto" else self.res_source
+        hint = "⚠ = support 0 (GeneRax bug case" + ("; check possvm_prev)" if eff == "possvm" else ")")
+        parts = ([f"{len(_real_ogs(r))} OGs"] if r is not None and not r.error and r.source != "cluster"
+                 else ["not split (cluster only)"] if r is not None and r.source == "cluster" else []) + [
             self.res_source or "…", hint]
         if self.res_missing:
             parts.append(f"{self.res_missing} HG{'' if self.res_missing == 1 else 's'} without output")
@@ -1957,12 +2001,12 @@ class PhyloApp(App):
         if self.view == "overview" and self.tab == "results":
             if self._og_cache is None:           # the first read is still running
                 return
-            self.rt_source = "possvm_prev" if self._og_cache["source"] == "possvm" else "possvm"
+            self.rt_source = next_source(self._og_cache["source"])
             self._reload_rtab()
             return
         if self.view != "results" or self.res_source is None:   # first load still running
             return
-        self.res_source = "possvm_prev" if self.res_source == "possvm" else "possvm"
+        self.res_source = next_source(self.res_source)
         self._reload_results()
 
     def action_member_filter(self) -> None:

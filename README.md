@@ -327,20 +327,24 @@ highlighted stage (on search/cluster: families); `h` again shows all.
 
 `o` opens the **Results** window for the overview row under the cursor (`ALL` included); in the
 HG view, for the highlighted HG's category/family (that HG highlighted) or, on search/cluster,
-for the highlighted family's HGs. Four panes, `tab` between them: **Results** (the group's HGs
-that have POSSVM output: OGs, genes, OGs with support 0 `⚠`; the footer counts the HGs without
-output), **OGs** (the ortholog groups of the highlighted HG, largest first: OG, genes, spp,
+for the highlighted family's HGs. Four panes, `tab` between them: **Results** (every HG of the group
+that is clustered, from the moment its cluster FASTA exists: `source` = `possvm`, `prev`
+(possvm_prev only), `cluster` (not split yet: one row `(not split: no possvm yet)` in OGs holding
+all its genes) or `small` (below `min_seqs` / `min_distinct`, never reaches step 2); OGs, genes,
+OGs with support 0 `⚠`; the footer counts the HGs without output). The Results tab's columns:
+group, HGs, `with OGs` (possvm or possvm_prev), `cluster only`, OGs, genes, `⚠ sup 0`, **OGs** (the ortholog groups of the highlighted HG, largest first: OG, genes, spp,
 support, name; no reference orthologs here: each gene has its own, shown in members), **members** (the highlighted
 OG's rows of `*.ortholog_groups.csv`: gene, species, reference ortholog and support; `/` filters,
 `enter` keeps the filter, `esc` clears it) and **species** (per phylum `k/m spp  n genes` with
 the species and their counts, absent phyla last; the universe is the tips of
-`params.SPECIES_TREE`, phyla from `data/species_info.tsv`). `p` switches `possvm/` (post-GeneRax,
-default) ↔ `possvm_prev/` (raw IQ-TREE); `esc` goes back. Support `0.0 ⚠` is the GeneRax bug
+`params.SPECIES_TREE`, phyla from `data/species_info.tsv`). `p` cycles the source: `auto` (default; per HG
+`possvm/` if it has output, else `possvm_prev/`, else the cluster FASTA) → `possvm/` (post-GeneRax)
+→ `possvm_prev/` (raw IQ-TREE) → `auto`; a forced source lists only the HGs that have it. `esc` goes back. Support `0.0 ⚠` is the GeneRax bug
 case: check `possvm_prev`. Files are read in the background.
 
 `t` (in a group's Results) opens the gene tree of the highlighted HG in the embedded
-treeview (vendored, below), from the `p` source (`possvm` or `possvm_prev`; the border title says
-which): on the HGs pane the whole tree; on the OGs pane the OG's MRCA with its members bold
+treeview (vendored, below), from the HG's own source (`possvm` or `possvm_prev`; the border title says
+which; a cluster-only HG has no tree): on the HGs pane the whole tree; on the OGs pane the OG's MRCA with its members bold
 and underlined (`n`/`N` step through them; members missing from the tree are reported); on the
 members pane that member's tip. The `*.ortholog_groups.csv` columns show as metadata (`t` in the
 tree, `c` cycles the colouring). `esc` returns to Results unchanged (first `esc` clears the

@@ -11,7 +11,7 @@ pytest.importorskip("textual")
 
 from druid import core, paths, tui  # noqa: E402
 from tests.test_cli import _state, cli  # noqa: E402,F401
-from tests.test_model import OG_HEAD, write_results  # noqa: E402
+from tests.test_model import OG_HEAD, POSSVM_HG11, og_csv, write_results  # noqa: E402
 
 SACCT_OOM = ("12345_0|COMPLETED|10M|00:01:00|0:0\\n"
              "12345_1|OUT_OF_MEMORY|4100M|00:03:00|0:125\\n")
@@ -23,6 +23,25 @@ def _cfg():
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+# Tests that exercise the default "auto" source (per HG: possvm > possvm_prev > cluster FASTA).
+# Every other Results test predates it and pins the old possvm-first behaviour: the fixture's
+# cluster FASTAs would otherwise show up there as cluster-only HGs.
+AUTO_TESTS = {"test_results_auto_lists_prev_only_and_cluster_only_hgs", "test_results_small_hg_marked",
+              "test_source_toggle_cycles_three_modes", "test_results_tab_counts_with_ogs_and_cluster_only"}
+
+
+@pytest.fixture(autouse=True)
+def _legacy_possvm_source(request, monkeypatch):
+    if request.node.name in AUTO_TESTS:
+        return
+    init = tui.PhyloApp.__init__
+
+    def pinned(self, *a, **k):
+        init(self, *a, **k)
+        self.rt_source = "possvm"
+    monkeypatch.setattr(tui.PhyloApp, "__init__", pinned)
 
 
 def test_tui_loads_and_filters_failed(cli, monkeypatch):
@@ -1173,7 +1192,7 @@ def test_o_on_overview_opens_results_for_that_group(cli):
             assert [r.hg for r in app.res_rows] == ["tfs.A.HG1", "tfs.A.HG11"]   # C_x: no output
             assert app.res_missing == 1 and "1 HG without output" in app._res_foot
             assert app.query_one("#res").border_title == "Results · tfs"
-            assert _cells(app, "#res", 0) == ["tfs.A.HG1", "2", "5", "1"]
+            assert _cells(app, "#res", 0) == ["tfs.A.HG1", "possvm", "2", "5", "1"]
             assert app.query_one("#ogs").border_title == "OGs · tfs.A.HG1 · possvm"
             assert _cells(app, "#ogs", 0) == ["HG1.0", "3", "2", "78.4", "T/Tbx19", "root"]   # no ref columns; origin last
             assert _cells(app, "#ogs", 1)[3] == "0.0 ⚠"
@@ -1418,6 +1437,10 @@ def test_p_switches_source_and_recomputes_results(cli):
             await pilot.press("p")
             await app.workers.wait_for_complete()
             await pilot.pause()
+            assert app.res_source == "auto" and len(app.res_rows) == 4     # + 2 cluster-only HGs
+            await pilot.press("p")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
             assert app.res_source == "possvm" and len(app.res_rows) == 2
     _run(go())
 
@@ -1502,7 +1525,7 @@ def test_results_bad_row_is_shown_not_a_crash(cli):
         async with app.run_test() as pilot:
             await _open_results(app, pilot, "tfs")
             assert [r.hg for r in app.res_rows] == ["tfs.A.HG1", "tfs.A.HG11"]
-            assert _cells(app, "#res", 1) == ["tfs.A.HG11", "–", "–", "!"]
+            assert _cells(app, "#res", 1) == ["tfs.A.HG11", "possvm", "–", "–", "!"]
             await _press(pilot, "down")
             assert f"{p}:2:" in app._species_text and f"{p}:2:" in app._res_foot
             assert app.query_one("#ogs").row_count == 0 and _member_genes(app) == []
@@ -2320,9 +2343,9 @@ def test_results_panes_header_sort_independently(cli):
         app = tui.PhyloApp(_cfg(), refresh_s=3600)
         async with app.run_test() as pilot:
             await _open_results(app, pilot, "tfs")
-            await _key(pilot, "up", "right", "enter", "enter")      # Results: OGs ascending
+            await _key(pilot, "up", "right", "right", "enter", "enter")   # Results: OGs ascending
             assert _tcol(app, "#res") == ["tfs.A.HG11", "tfs.A.HG1"]
-            assert _heads(app, "#res") == ["HG", "OGs ▲", "genes", "⚠"]
+            assert _heads(app, "#res") == ["HG", "source", "OGs ▲", "genes", "⚠"]
             await _key(pilot, "down")
             assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG11"
             await _key(pilot, "up")                                  # cursor back on HG1 ...
@@ -2342,14 +2365,14 @@ def test_results_panes_header_sort_independently(cli):
             assert _member_genes(app) == ["Hsap_ENSP2", "Nvec_v1_g3"]
             await _key(pilot, "enter")
             assert _member_genes(app) == ["Nvec_v1_g3", "Hsap_ENSP2"]
-            assert _heads(app, "#res")[1] == "OGs ▲"                 # each pane its own sort
+            assert _heads(app, "#res")[2] == "OGs ▲"                 # each pane its own sort
             assert app.query_one("#res").sort_state == ("ogs", True)
             assert app.query_one("#ogs").sort_state == ("support", True)
             assert app.query_one("#members").sort_state == ("sp", True)
             await pilot.press("p")                                   # new source: sorts kept
             await app.workers.wait_for_complete()
             await pilot.pause()
-            assert app.res_source == "possvm_prev" and _heads(app, "#res")[1] == "OGs ▲"
+            assert app.res_source == "possvm_prev" and _heads(app, "#res")[2] == "OGs ▲"
     _run(go())
 
 
@@ -2460,7 +2483,7 @@ def test_rendered_header_shows_the_arrow_and_widths_do_not_move(cli):
             await _open_results(app, pilot, "tfs")
             before = _widths(app, "#res")
             assert "OGs ▲" not in _rendered_header(app, "#res")
-            await _key(pilot, "up", "right", "enter")                # OGs: numbers, descending
+            await _key(pilot, "up", "right", "right", "enter")        # OGs: numbers, descending
             assert "OGs ▼" in _rendered_header(app, "#res")
             await _key(pilot, "enter")
             assert "OGs ▲" in _rendered_header(app, "#res")
@@ -2500,7 +2523,7 @@ def test_sorting_res_keeps_the_og_cursor(cli):
             ogs = app.query_one("#ogs")
             await _key(pilot, "tab", "down")                         # OGs: HG1.1
             assert app._key_at_cursor(ogs) == "tfs.A.HG1.1"
-            await _key(pilot, "shift+tab", "up", "right", "enter", "enter")   # Results: OGs asc
+            await _key(pilot, "shift+tab", "up", "right", "right", "enter", "enter")   # Results: OGs asc
             assert _tcol(app, "#res") == ["tfs.A.HG11", "tfs.A.HG1"]
             assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG1"
             assert app._key_at_cursor(ogs) == "tfs.A.HG1.1"
@@ -2637,7 +2660,7 @@ def test_results_tab_reads_once_and_window_reuses_it(cli, monkeypatch):
             win = [_cells(app, "#res", i) for i in range(app.query_one("#res").row_count)]
             tab = next(r for r in app.rt_rows if r.group == "tfs")
             assert (tab.with_ogs, tab.hgs) == (len(app.res_rows), len(app.res_rows) + app.res_missing)
-            assert (tab.ogs, tab.genes, tab.zero) == tuple(sum(int(c[i]) for c in win) for i in (1, 2, 3))
+            assert (tab.ogs, tab.genes, tab.zero) == tuple(sum(int(c[i]) for c in win) for i in (2, 3, 4))
             assert calls == [(3, "possvm")]                          # no second read
             await _key(pilot, "escape")
             assert app.view == "overview" and app.tab == "results" and app.focused is rt
@@ -2685,7 +2708,7 @@ def test_results_tab_sort_hide_and_header_keep_all_pinned(cli, monkeypatch):
         async with app.run_test() as pilot:
             await _results_tab(app, pilot)
             rt = app.query_one("#rtab")
-            rt.move_cursor(row=1, column=3)                          # OGs
+            rt.move_cursor(row=1, column=4)                          # OGs
             await pilot.pause()
             await _key(pilot, "h")
             assert [r[0] for r in _rt(app)] == ["ALL", "tfs"]
@@ -2698,9 +2721,9 @@ def test_results_tab_sort_hide_and_header_keep_all_pinned(cli, monkeypatch):
             assert app.rt_hide is None
             await _key(pilot, "s")                                   # s on a cell: group ▲
             assert rt.sort_state == ("group", False) and [r[0] for r in _rt(app)] == ["ALL", "cal", "slc", "tfs"]
-            await _key(pilot, "up", "right", "right", "right", "enter")   # header: OGs ▼
+            await _key(pilot, "up", "right", "right", "right", "right", "enter")   # header: OGs ▼
             assert app.view == "overview"                            # enter in the header never opens
-            assert rt.sort_state == ("ogs", False) and _heads(app, "#rtab")[3] == "OGs ▼"
+            assert rt.sort_state == ("ogs", False) and _heads(app, "#rtab")[4] == "OGs ▼"
             assert [r[0] for r in _rt(app)][:2] == ["ALL", "tfs"]
             app.load_now()                                           # refresh: sort kept, no read
             await pilot.pause()
@@ -2761,7 +2784,7 @@ def test_results_tab_keys_touch_no_files_or_slurm(cli, monkeypatch):
             monkeypatch.setattr(core.report_status, "nonempty_files", boom)
             monkeypatch.setattr(tui.model, "read_ogs", boom)
             monkeypatch.setattr(tui.model, "_slurm", boom)
-            app.query_one("#rtab").move_cursor(row=0, column=3)
+            app.query_one("#rtab").move_cursor(row=0, column=4)
             await _key(pilot, "s", "h", "h", "up", "right", "enter", "down", "f", "c",
                        "shift+tab", "tab")
             assert app.tab == "results" and app.query_one("#rtab").sort_state == ("genes", False)
@@ -2868,7 +2891,7 @@ def test_set_cols_sizes_a_sorted_column_like_a_resort(cli):
             t.on_sort = None                                         # no row refill: labels only
             t.sort_state = None
             t.set_cols(tui.RES_COLS)
-            t.sort_by(1)                                            # plain re-sort: OGs ▼, pre-sized
+            t.sort_by(2)                                            # plain re-sort: OGs ▼, pre-sized
             await pilot.pause()
             assert t.sort_state == ("ogs", False)
             after_sort = _widths(app, "#res")
@@ -4007,4 +4030,80 @@ def test_S_preflight_and_nothing_to_submit(run, monkeypatch):
             await pilot.press("y")
             await _settle(app, pilot)
             assert _sb_calls() == [] and scr.submitted == []
+    _run(go())
+
+
+# ---- Results: auto source per HG, clustered-only HGs, three-way toggle ---------------------------
+def _prev_only_hg11(cfg):
+    """tfs.A.HG1 possvm, tfs.A.HG11 possvm_prev only, tfs.C_x.HG1 and tfs.B.HG2 (small): cluster only."""
+    write_results(cfg)
+    (cfg.outdir / "possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv").unlink()
+    (cfg.outdir / "possvm_prev/tfs.A.HG11.treefile.ortholog_groups.csv").write_text(og_csv(POSSVM_HG11))
+
+
+def test_results_auto_lists_prev_only_and_cluster_only_hgs(cli):
+    _prev_only_hg11(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "ALL")
+            assert app.res_source == "auto"
+            assert dict(zip(_tcol(app, "#res"), _tcol(app, "#res", 1))) == {
+                "tfs.A.HG1": "possvm", "tfs.A.HG11": "prev",
+                "tfs.B.HG2": "small", "tfs.C_x.HG1": "cluster"}
+            app.query_one("#res").move_cursor(row=_tcol(app, "#res").index("tfs.C_x.HG1"))
+            await pilot.pause()
+            assert _tcol(app, "#ogs", 4) == [model_name()]
+            assert len(_member_genes(app)) == 600
+    _run(go())
+
+
+def model_name():
+    from druid import model
+    return tui.escape(tui._trunc(model.CLUSTER_OG_NAME))
+
+
+def test_results_small_hg_marked(cli):
+    _prev_only_hg11(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "ALL")
+            rows = dict(zip(_tcol(app, "#res"), _tcol(app, "#res", 1)))
+            assert rows["tfs.B.HG2"] == "small" and rows["tfs.C_x.HG1"] == "cluster"
+    _run(go())
+
+
+def test_source_toggle_cycles_three_modes(cli):
+    _prev_only_hg11(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _open_results(app, pilot, "ALL")
+            seen = [app.res_source]
+            for _ in range(3):
+                await pilot.press("p")
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+                seen.append(app.res_source)
+                if app.res_source == "possvm":
+                    assert _tcol(app, "#res") == ["tfs.A.HG1"]       # HG11 / HG2 / C_x not listed
+            assert seen == ["auto", "possvm", "possvm_prev", "auto"]
+    _run(go())
+
+
+def test_results_tab_counts_with_ogs_and_cluster_only(cli):
+    _prev_only_hg11(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            r = app.rt_shown[0]
+            assert (r.group, r.hgs, r.with_ogs, r.cluster_only) == ("ALL", 3, 2, 1)
+            assert _heads(app, "#rtab")[2:4] == ["with OGs", "cluster only"]
+            assert "auto" in app.query_one("#rtab").border_title
     _run(go())
