@@ -665,6 +665,7 @@ class PhyloApp(App):
         self._tab_text = ""
         self._ovsteps_text = ""                 # the step 1 / step 2 line above the overview
         self._res_want: "str | None" = None     # source asked for by the opener (Results tab)
+        self._cluster_ogs: set = set()          # ids of cluster-only pseudo-OGs (no origin)
         self._res_small: set = set()            # cluster-only HGs outside the expected set
         self._cmd: "str | None" = None          # the `:` command typed so far; None = not in one
 
@@ -1101,15 +1102,17 @@ class PhyloApp(App):
         worker = get_current_worker()
         snap = dict(gen=gen, source=source or "auto", rows=[], hgs=hgs, note="")
         try:
+            clustered = None
             if snap["source"] == "auto":         # the cluster-only (and small) HGs too
-                snap["hgs"] = sorted(set(hgs) | model.clustered_hgs(self.cfg), key=model.hg_sort_key)
+                clustered = model.clustered_hgs(self.cfg)
+                snap["hgs"] = sorted(set(hgs) | clustered, key=model.hg_sort_key)
 
             def progress(k: int, n: int) -> None:   # throttled: ~every 50 files
                 if k and k % 50 == 0 and not worker.is_cancelled:
                     self.call_from_thread(self._rt_progress, gen, k, n)
             snap["rows"], _missing = model.group_ogs(
                 self.cfg, snap["hgs"], snap["source"], progress=progress,
-                cancelled=lambda: worker.is_cancelled or gen != self._rt_gen)
+                cancelled=lambda: worker.is_cancelled or gen != self._rt_gen, clustered=clustered)
         except Exception as e:                   # never let a worker kill the app
             snap["note"] = f"cannot read {snap['source']}/: {e}"
         if worker.is_cancelled:
@@ -1660,9 +1663,11 @@ class PhyloApp(App):
                     universe=self._universe, phyla=self._phyla, sp_note="",
                     otree=self._otree, origins={}, otree_err="")
         try:
+            clustered = None
             if snap["source"] == "auto":         # + the clustered HGs of the group (small ones too)
                 by, grp = self._res_by, self.res_group
-                hgs = sorted(set(hgs) | {h for h in model.clustered_hgs(self.cfg)
+                clustered = model.clustered_hgs(self.cfg)
+                hgs = sorted(set(hgs) | {h for h in clustered
                                          if grp == "ALL" or model.group_key(h, by) == grp},
                              key=model.hg_sort_key)
             def progress(k: int, n: int) -> None:   # throttled: ~every 50 files
@@ -1675,7 +1680,8 @@ class PhyloApp(App):
             else:
                 snap["rows"], snap["missing"] = model.group_ogs(
                     self.cfg, hgs, snap["source"], progress=progress,
-                    cancelled=lambda: worker.is_cancelled or gen != self._res_gen)
+                    cancelled=lambda: worker.is_cancelled or gen != self._res_gen,
+                    clustered=clustered)
         except Exception as e:                   # never let a worker kill the app
             snap["note"] = f"cannot read {snap['source']}/: {e}"
         notes = []
@@ -1718,6 +1724,7 @@ class PhyloApp(App):
         if snap["otree_err"]:
             self._notify_once(snap["otree_err"])
         exp = self._ov_inputs[0]
+        self._cluster_ogs = {o.id for r in self.res_rows if r.source == "cluster" for o in r.ogs}
         self._res_small = {r.hg for r in self.res_rows if r.source == "cluster" and r.hg not in exp}
         self._res_note = snap["note"] or (
             "" if self.res_rows else "no clustered HGs yet" if self.res_source == "auto"
@@ -1885,7 +1892,7 @@ class PhyloApp(App):
 
     def _origin_text(self, og_id: str) -> str:
         """`?` while the origin tree is unreadable, `–` for an OG with no species on it."""
-        if og_id.endswith(".all"):
+        if og_id in self._cluster_ogs:
             return "–"                           # a cluster-only HG's pseudo-OG has no origin
         if self._otree is None:
             return "?"

@@ -339,7 +339,7 @@ OG's rows of `*.ortholog_groups.csv`: gene, species, reference ortholog and supp
 the species and their counts, absent phyla last; the universe is the tips of
 `params.SPECIES_TREE`, phyla from `data/species_info.tsv`). `p` cycles the source: `auto` (default; per HG
 `possvm/` if it has output, else `possvm_prev/`, else the cluster FASTA) → `possvm/` (post-GeneRax)
-→ `possvm_prev/` (raw IQ-TREE) → `auto`; a forced source lists only the HGs that have it. `esc` goes back. Support `0.0 ⚠` is the GeneRax bug
+→ `possvm_prev/` (raw IQ-TREE) → `auto`; a forced source lists only the HGs that have it. The Results tab's counts cover the expected HGs only; HGs below `min_seqs` / `min_distinct` are listed in the window as `small`. `esc` goes back. Support `0.0 ⚠` is the GeneRax bug
 case: check `possvm_prev`. Files are read in the background.
 
 `t` (in a group's Results) opens the gene tree of the highlighted HG in the embedded

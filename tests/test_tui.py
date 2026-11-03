@@ -29,12 +29,14 @@ def _run(coro):
 # Every other Results test predates it and pins the old possvm-first behaviour: the fixture's
 # cluster FASTAs would otherwise show up there as cluster-only HGs.
 AUTO_TESTS = {"test_results_auto_lists_prev_only_and_cluster_only_hgs", "test_results_small_hg_marked",
-              "test_source_toggle_cycles_three_modes", "test_results_tab_counts_with_ogs_and_cluster_only"}
+              "test_source_toggle_cycles_three_modes", "test_results_tab_counts_with_ogs_and_cluster_only",
+              "test_clusters_dir_listed_once_per_auto_load", "test_t_in_auto_cluster_only_warns_prev_only_opens",
+              "test_new_cluster_family_invalidates_results_cache"}
 
 
 @pytest.fixture(autouse=True)
 def _legacy_possvm_source(request, monkeypatch):
-    if request.node.name in AUTO_TESTS:
+    if request.node.name.split("[")[0] in AUTO_TESTS:
         return
     init = tui.PhyloApp.__init__
 
@@ -4106,4 +4108,81 @@ def test_results_tab_counts_with_ogs_and_cluster_only(cli):
             assert (r.group, r.hgs, r.with_ogs, r.cluster_only) == ("ALL", 3, 2, 1)
             assert _heads(app, "#rtab")[2:4] == ["with OGs", "cluster only"]
             assert "auto" in app.query_one("#rtab").border_title
+    _run(go())
+
+
+def test_clusters_dir_listed_once_per_auto_load(cli, monkeypatch):
+    _prev_only_hg11(_cfg())
+    seen = []
+    real = core.report_status.nonempty_files
+
+    def counted(path, *a, **k):
+        seen.append(str(path))
+        return real(path, *a, **k)
+    monkeypatch.setattr(core.report_status, "nonempty_files", counted)
+
+    def n_clusters():
+        return sum(1 for p in seen if p.rstrip("/").endswith("clusters"))
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            seen.clear()
+            await pilot.press("tab")                              # Results tab: one load
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert n_clusters() == 1
+            seen.clear()
+            await pilot.press("enter")                            # window load (cache reused)
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.view == "results" and n_clusters() == 1
+            seen.clear()
+            await pilot.press("p", "p", "p")                      # back to auto: a fresh read
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.res_source == "auto" and n_clusters() == 1
+    _run(go())
+
+
+def test_t_in_auto_cluster_only_warns_prev_only_opens(cli, monkeypatch):
+    _prev_only_hg11(_cfg())
+    (_cfg().outdir / "possvm_prev/tfs.A.HG11.treefile").write_text("(Mlei_v05_G1:1,Zzz_q1:1);\n")
+
+    async def go():
+        from treeview.widget import TreeScreen, TreeView
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        notes = []
+        orig = app.notify
+        monkeypatch.setattr(app, "notify",
+                            lambda msg, *a, **k: (notes.append(str(msg)), orig(msg, *a, **k)))
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "ALL")
+            hgs = _tcol(app, "#res")
+            await _press_t(app, pilot, "#res", hgs.index("tfs.C_x.HG1"))
+            assert not isinstance(app.screen, TreeScreen)
+            assert any("not split yet" in n for n in notes)
+            await _press_t(app, pilot, "#res", hgs.index("tfs.A.HG11"))
+            assert isinstance(app.screen, TreeScreen)
+            assert "tfs.A.HG11 · possvm_prev" in app.screen.query_one(TreeView).border_title
+    _run(go())
+
+
+def test_new_cluster_family_invalidates_results_cache(cli):
+    write_results(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            exp, st, fams, fst = app._ov_inputs
+            assert app._og_cache["hgs"]
+            before = tui._possvm_sig(st, fst)
+            fst2 = dict(fst, cluster=dict(fst.get("cluster", {}), **{"tfs.Z": 0}))
+            assert tui._possvm_sig(st, fst2) != before
+            app._ov_inputs = (exp, st, fams, fst2)
+            app._og_cache_check()
+            assert app._og_cache["hgs"] == frozenset()            # shown, no longer reusable
     _run(go())

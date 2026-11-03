@@ -901,17 +901,18 @@ def hg_sort_key(hg: str) -> tuple:
 
 
 def group_ogs(cfg: core.Config, hgs, source: str, progress=None,
-              cancelled=None) -> tuple[list[HGOgs], int]:
+              cancelled=None, clustered: "set | None" = None) -> tuple[list[HGOgs], int]:
     """(one HGOgs per HG with output, sorted by HG id; number of HGs without output).
     Lists <outdir>/<source>/ once (NFS); an unreadable file becomes that HG's error.
     source "auto": per HG the possvm csv, else possvm_prev, else the cluster FASTA as one
     pseudo-OG (HGOgs.source says which); a csv that fails to parse is the HG's error (no fall-back).
+    `clustered` = clustered_hgs(cfg) when the caller already listed clusters/ (auto only).
     Optional `progress(k, n)` is called before each HG; `cancelled()` true stops early
     (the partial result is returned; the caller discards it)."""
     auto = source == "auto"
     chain = ["possvm", "possvm_prev"] if auto else [source]
     listing = {s: core.report_status.nonempty_files(str(cfg.outdir / s)) for s in chain}
-    clustered = clustered_hgs(cfg) if auto else set()
+    clustered = (clustered if clustered is not None else clustered_hgs(cfg)) if auto else set()
     rows: list[HGOgs] = []
     missing = 0
     todo = sorted(hgs, key=hg_sort_key)
