@@ -406,14 +406,6 @@ def test_group_ogs_lists_hgs_with_output_one_listing(cli, monkeypatch):
         ["tfs.A.HG1", "tfs.A.HG2", "tfs.A.HG10"]
 
 
-def test_default_source(cli):
-    import shutil
-    cfg = _cfg()
-    assert model.default_source(cfg) == "possvm"
-    shutil.rmtree(cfg.outdir / "possvm")
-    assert model.default_source(cfg) == "possvm_prev"
-
-
 def test_species_universe_reads_tip_names(cli):
     cfg = _cfg()
     write_results(cfg)
@@ -513,7 +505,9 @@ def test_group_ogs_auto_picks_per_hg(cli):
     assert missing == 2                      # HG4 (empty fasta), C_x.HG1 (nothing)
     c = rows[2].ogs
     assert [(o.id, o.name, o.support) for o in c] == [("tfs.A.HG3.all", model.CLUSTER_OG_NAME, None)]
-    assert [(m.gene, m.species) for m in c[0].genes] == [("Mlei_v05_G7", "Mlei"), ("Hsap_ENSP9", "Hsap")]
+    assert c[0].genes == []                  # the FASTA is not opened: members are read lazily
+    assert [(m.gene, m.species) for m in model.read_cluster_members(cfg, "tfs.A.HG3")] == [
+        ("Mlei_v05_G7", "Mlei"), ("Hsap_ENSP9", "Hsap")]
     assert [r.source for r in model.group_ogs(cfg, hgs, "possvm")[0]] == ["possvm", "possvm"]
 
 
@@ -643,3 +637,10 @@ def test_live_matches_by_job_id(cli, monkeypatch):
     assert model.run_stage(runs / "junk") is None
     monkeypatch.setenv("FAKE_SQUEUE", "777_1|chromo-search\n5_0|nf-ALN_(tfs.A.HG1)\n")
     assert model.live({"tfs.A.HG1"}) == {"search": {"a.F2"}, "align": {"tfs.A.HG1"}}
+
+
+def test_clustered_hgs_ignores_stray_fasta(cli):
+    cfg = _cfg()
+    (cfg.outdir / "clusters/stray.fasta").write_text(">a\nAA\n")
+    got = model.clustered_hgs(cfg)
+    assert "stray" not in got and "tfs.A.HG1" in got

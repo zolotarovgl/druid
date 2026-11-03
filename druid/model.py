@@ -835,10 +835,11 @@ def og_sort_id(og: OG) -> int:
 
 
 def clustered_hgs(cfg: core.Config) -> set[str]:
-    """Stems of the non-empty <outdir>/clusters/*.fasta (one directory listing)."""
+    """Stems of the non-empty <outdir>/clusters/*<id>.HG*.fasta (one directory listing; a file
+    without ".HG" in its name is no HG, as in report_status.expected_hgs)."""
     suf = ".fasta"
     return {n[:-len(suf)] for n in core.report_status.nonempty_files(str(cfg.outdir / "clusters"))
-            if n.endswith(suf)}
+            if n.endswith(suf) and ".HG" in n}
 
 
 def read_cluster_members(cfg: core.Config, hg: str) -> list[Member]:
@@ -936,18 +937,13 @@ def group_ogs(cfg: core.Config, hgs, source: str, progress=None,
         if found:
             continue
         if hg in clustered:
-            members = read_cluster_members(cfg, hg)
-            if members:
-                rows.append(HGOgs(hg, [OG(f"{hg}.all", CLUSTER_OG_NAME, members, None, "", "")],
-                                  source="cluster"))
-                continue
+            # existence only (the listing said non-empty): the TUI reads the members lazily,
+            # for the highlighted HG, with read_cluster_members
+            rows.append(HGOgs(hg, [OG(f"{hg}.all", CLUSTER_OG_NAME, [], None, "", "")],
+                              source="cluster"))
+            continue
         missing += 1
     return rows, missing
-
-
-def default_source(cfg: core.Config) -> str:
-    """possvm/ (post-GeneRax) when it exists, else possvm_prev/ (raw IQ-TREE)."""
-    return "possvm" if (cfg.outdir / "possvm").is_dir() else "possvm_prev"
 
 
 _NEWICK_TIP = re.compile(r"[(,]\s*([^\s():,;\[\]]+)")    # a name right after '(' or ',' = a tip

@@ -31,7 +31,8 @@ def _run(coro):
 AUTO_TESTS = {"test_results_auto_lists_prev_only_and_cluster_only_hgs", "test_results_small_hg_marked",
               "test_source_toggle_cycles_three_modes", "test_results_tab_counts_with_ogs_and_cluster_only",
               "test_clusters_dir_listed_once_per_auto_load", "test_t_in_auto_cluster_only_warns_prev_only_opens",
-              "test_new_cluster_family_invalidates_results_cache"}
+              "test_new_cluster_family_invalidates_results_cache",
+              "test_tab_load_opens_no_cluster_fasta", "test_new_fasta_in_clusters_invalidates_tab_cache"}
 
 
 @pytest.fixture(autouse=True)
@@ -4185,4 +4186,45 @@ def test_new_cluster_family_invalidates_results_cache(cli):
             app._ov_inputs = (exp, st, fams, fst2)
             app._og_cache_check()
             assert app._og_cache["hgs"] == frozenset()            # shown, no longer reusable
+    _run(go())
+
+
+def test_tab_load_opens_no_cluster_fasta(cli, monkeypatch):
+    _prev_only_hg11(_cfg())
+    opened = []
+    real = tui.model.read_cluster_members
+    monkeypatch.setattr(tui.model, "read_cluster_members",
+                        lambda cfg, hg: (opened.append(hg), real(cfg, hg))[1])
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            assert app._og_cache["rows"]["tfs.C_x.HG1"].source == "cluster"
+            assert opened == []                                   # existence only, no file read
+            await pilot.press("enter")                            # window on ALL
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert opened == [] or set(opened) == {_tcol(app, "#res")[0]}   # at most the highlighted HG
+            hgs = _tcol(app, "#res")
+            app.query_one("#res").move_cursor(row=hgs.index("tfs.C_x.HG1"))
+            await pilot.pause()
+            assert opened.count("tfs.C_x.HG1") == 1 and len(_member_genes(app)) == 600
+            assert _cells(app, "#res", hgs.index("tfs.C_x.HG1"))[3] == "–"   # genes column: not read
+    _run(go())
+
+
+def test_new_fasta_in_clusters_invalidates_tab_cache(cli):
+    _prev_only_hg11(_cfg())
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            await _results_tab(app, pilot)
+            assert "tfs.A.HG9" not in app._og_cache["rows"]
+            (_cfg().outdir / "clusters/tfs.A.HG9.fasta").write_text(">x\nAA\n>y\nAA\n")
+            app.load_now()                                        # a refresh, no _cluster.tsv change
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "tfs.A.HG9" in app._og_cache["rows"]
     _run(go())

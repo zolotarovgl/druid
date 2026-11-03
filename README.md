@@ -330,7 +330,7 @@ HG view, for the highlighted HG's category/family (that HG highlighted) or, on s
 for the highlighted family's HGs. Four panes, `tab` between them: **Results** (every HG of the group
 that is clustered, from the moment its cluster FASTA exists: `source` = `possvm`, `prev`
 (possvm_prev only), `cluster` (not split yet: one row `(not split: no possvm yet)` in OGs holding
-all its genes) or `small` (below `min_seqs` / `min_distinct`, never reaches step 2); OGs, genes,
+all its genes, read from the FASTA only when the HG is highlighted, so its `genes` cell in the HG list shows `–`) or `small` (below `min_seqs` / `min_distinct`, never reaches step 2); OGs, genes,
 OGs with support 0 `⚠`; the footer counts the HGs without output). The Results tab's columns:
 group, HGs, `with OGs` (possvm or possvm_prev), `cluster only`, OGs, genes, `⚠ sup 0`, **OGs** (the ortholog groups of the highlighted HG, largest first: OG, genes, spp,
 support, name; no reference orthologs here: each gene has its own, shown in members), **members** (the highlighted

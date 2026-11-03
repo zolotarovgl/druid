@@ -135,13 +135,14 @@ def ov_cell(c: tuple, width: int, bar: int, glyphs) -> str:
             + "".join(f"[{fg}]{ch * k}[/]" for (ch, fg), k in zip(glyphs, n) if k))
 
 
-def _possvm_sig(states: dict, fstates: "dict | None" = None) -> frozenset:
+def _possvm_sig(states: dict, fstates: "dict | None" = None, exp=(), clustered=()) -> frozenset:
     """(stage, hg) of every finished POSSVM output, plus (cluster, family) of every finished
     cluster step (`fstates`, family states): the Results caches go stale when it moves."""
     sig = frozenset((st, hg) for st in ("possvm", "possvm_prev")
                     for hg, v in states.get(st, {}).items() if v == 0)
-    return sig | frozenset(("cluster", f) for f, v in (fstates or {}).get("cluster", {}).items()
-                           if v == 0)
+    return (sig | frozenset(("cluster", f) for f, v in (fstates or {}).get("cluster", {}).items()
+                            if v == 0)
+            | frozenset(("exp", h) for h in exp) | frozenset(("clu", h) for h in clustered))
 
 
 SOURCE_MODES = ("auto", "possvm", "possvm_prev")
@@ -245,8 +246,10 @@ RES_COLS = [SortCol("hg", "HG"), SortCol("source", "source"), SortCol("ogs", "OG
 RES_KEYS = {"hg": (lambda r: model.hg_sort_key(r.hg), False),     # an unreadable HG: -1
             "source": (lambda r: r.source, False),
             "ogs": (lambda r: -1 if r.error else len(_real_ogs(r)), True),
-            "genes": (lambda r: -1 if r.error else sum(len(o.genes) for o in r.ogs), True),
-            "zero": (lambda r: -1 if r.error else sum(1 for o in r.ogs if o.support == 0), True)}
+            "genes": (lambda r: -1 if r.error or r.source == "cluster"
+                      else sum(len(o.genes) for o in r.ogs), True),
+            "zero": (lambda r: -1 if r.error or r.source == "cluster"
+                     else sum(1 for o in r.ogs if o.support == 0), True)}
 # no reference-ortholog columns in OGs: the reference is per gene (it differs within 19 % of
 # OGs) and is shown per row in `members` (Grygoriy, 09/10/2026)
 OG_COLS = [SortCol("og", "OG"), SortCol("genes", "genes", True), SortCol("spp", "spp", True),
@@ -659,6 +662,7 @@ class PhyloApp(App):
         self.rt_shown: list = []
         self._og_cache: "dict | None" = None    # {source, rows: {hg: HGOgs}, hgs: frozenset}
         self._rt_gen = 0
+        self._clustered: frozenset = frozenset()   # clusters/ stems at the last refresh
         self._og_sig: "frozenset | None" = None  # which POSSVM outputs were done when it was read
         self._rt_note = ""
         self._rt_foot = ""
@@ -803,7 +807,12 @@ class PhyloApp(App):
         by = self.by
         ov_rows, _k = model.group_rows(self.cfg, exp, by, states=states, fams=fams, fstates=fstates)
         hg_count = dict(collections.Counter(model.group_key(h, "family") for h in exp))
+        try:                                 # one listing of clusters/ per refresh (cache signature)
+            clustered = frozenset(model.clustered_hgs(self.cfg))
+        except OSError:
+            clustered = frozenset()
         snap = dict(ov_rows=ov_rows, by=by, ov_inputs=(exp, states, fams, fstates), known=known,
+                    clustered=clustered,
                     fam_warn=fam_warn, hg_count=hg_count, when=datetime.now(), hg=None)
         if self.view == "hgs":               # the slow part: attempt history, only in the HG view
             for hg in exp:                   # FASTAs are read here, off the UI thread, once
@@ -892,6 +901,7 @@ class PhyloApp(App):
 
     def _apply(self, snap: dict) -> None:
         self._ov_inputs = snap["ov_inputs"]
+        self._clustered = snap.get("clustered", self._clustered)
         self.hg_count = snap["hg_count"]
         if snap["by"] != self.by:            # c/f pressed while this was being collected
             self._regroup()
@@ -1060,11 +1070,14 @@ class PhyloApp(App):
     def _rt_loading(self) -> bool:
         return self.query_one("#rtab").has_class("loading")
 
+    def _cur_sig(self) -> frozenset:
+        return _possvm_sig(self._ov_inputs[1], self._ov_inputs[3], self._ov_inputs[0], self._clustered)
+
     def _og_cache_check(self) -> None:
         """A POSSVM output finished (or vanished) since the cache was read: drop it.  On the
         Results tab the old rows stay shown while a background re-read runs; the cache is made
         unusable for the Results window at once."""
-        if self._og_cache is None or _possvm_sig(self._ov_inputs[1], self._ov_inputs[3]) == self._og_sig:
+        if self._og_cache is None or self._cur_sig() == self._og_sig:
             return
         if self.view == "overview" and self.tab == "results":
             self._og_cache = dict(self._og_cache, hgs=frozenset())     # shown, not reusable
@@ -1085,7 +1098,7 @@ class PhyloApp(App):
         if not self._ov_inputs[0]:               # no snapshot yet: _apply -> _maybe_load_rtab reads
             return
         self._rt_gen += 1
-        self._og_sig = _possvm_sig(self._ov_inputs[1], self._ov_inputs[3])
+        self._og_sig = self._cur_sig()
         if not keep_rows:
             self._og_cache = None
         self.query_one("#rtab").add_class("loading")
@@ -1754,7 +1767,7 @@ class PhyloApp(App):
             if r.error:
                 t.add_row(r.hg, src, "–", "–", "!", key=r.hg)
             elif r.source == "cluster":
-                t.add_row(r.hg, src, "–", str(sum(len(o.genes) for o in r.ogs)), "–", key=r.hg)
+                t.add_row(r.hg, src, "–", "–", "–", key=r.hg)      # genes: FASTA not read
             else:
                 t.add_row(r.hg, src, str(len(r.ogs)), str(sum(len(o.genes) for o in r.ogs)),
                           str(sum(1 for o in r.ogs if o.support == 0)), key=r.hg)
@@ -1899,11 +1912,25 @@ class PhyloApp(App):
         o = self._origins.get(og_id)
         return "–" if o is None else o.label
 
+    def _load_cluster_members(self, r) -> None:
+        """A cluster-only HG's pseudo-OG is built without its genes (group_ogs never opens the
+        FASTA); the highlighted HG's are read here, once, and kept on the row."""
+        if r is None or r.source != "cluster" or r.error:
+            return
+        for og in r.ogs:
+            if og.genes:
+                continue
+            try:
+                og.genes = model.read_cluster_members(self.cfg, r.hg)
+            except OSError as e:
+                self._notify_once(f"{r.hg}: cannot read its cluster FASTA: {e}")
+
     def _fill_ogs(self, keep: "str | None" = None) -> None:
         """OG table of the HG under the Results cursor (in memory), then its members/species.
         The cursor stays on OG `keep` (default: the OG under the cursor now) when it is still
         shown, e.g. while typing an OGs or Results filter or after a re-sort; else row 0."""
         r = self._cur_res()
+        self._load_cluster_members(r)
         t = self.query_one("#ogs", SortTable)
         if keep is None:
             keep = self._key_at_cursor(t)
@@ -1914,7 +1941,8 @@ class PhyloApp(App):
                 t.sort_state = None
             t.set_cols(cols)
         t.clear()
-        t.border_title = f"OGs · {r.hg if r else '–'} · {self.res_source or '…'}{self._ftag('ogs')}"
+        src = r.source if r is not None and self.res_source == "auto" and r.source else self.res_source
+        t.border_title = f"OGs · {r.hg if r else '–'} · {src or '…'}{self._ftag('ogs')}"
         q = self._flt["ogs"].lower()
         ogs = [o for o in r.ogs if q in o.id.lower() or q in o.name.lower()
                or (on and q in self._origin_text(o.id).lower())] if r else []
