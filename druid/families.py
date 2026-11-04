@@ -60,12 +60,25 @@ def ticked_ids(rows) -> set[str]:
     return {f"{_pref(r)}.{r.class_name.strip()}" for r in rows}
 
 
-def hmm_rows(hmm_dir) -> list[Row]:
+def inflation_of(path, family_id: str) -> str:
+    """The inflation field of the first row of the families file whose id (<pref>.<class_name>) is
+    family_id; '' when absent, blank, or the file is unreadable."""
+    try:
+        rows = read(path)
+    except (OSError, TypeError, ValueError):
+        return ""
+    for r in rows:
+        if f"{_pref(r)}.{r.class_name.strip()}" == family_id:
+            return r.inflation.strip()
+    return ""
+
+
+def hmm_rows(hmm_dir, inflation: str = "1.1") -> list[Row]:
     """One default row per *.hmm in hmm_dir (read only): threshold GA when the file has a GA line
-    (curated gathering cutoff), else the e-value 1e-5."""
+    (curated gathering cutoff), else the e-value 1e-5; inflation as given (the params default)."""
     out: list[Row] = []
     for p in sorted(Path(hmm_dir).glob("*.hmm")):
         with open(p, errors="replace") as fh:
             has_ga = any(l.startswith("GA ") for l in fh)
-        out.append(Row(p.stem, p.stem, "1.1", "3", "GA" if has_ga else "1e-5", "custom", "cus"))
+        out.append(Row(p.stem, p.stem, inflation, "3", "GA" if has_ga else "1e-5", "custom", "cus"))
     return out

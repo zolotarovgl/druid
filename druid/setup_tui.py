@@ -35,7 +35,7 @@ SRC_FIELDS = ("name", "dir", "glob", "tax")                          # #src-<fie
 SEARCH = {"rb-file": "file", "rb-hmm": "hmm"}                         # radio id -> search type
 # the editable families-file columns (#fe-<col>, in order) and what the pipeline does with each,
 # checked 23/10/2026 in submodules/phylogeny/helper/hmmsearch.py and druid/stages/cluster.sh
-EDIT_COLS = {"inflation": "inflation (per family; the cluster stage uses params.s2_inflation)",
+EDIT_COLS = {"inflation": "inflation (per family; overrides the default params.s2_inflation)",
              "min_seqs": "min_seqs (per family; the stages use params.min_seqs)",
              "threshold": "threshold (GA: hmmsearch --cut_ga; else a --domE e-value)",
              "pref1": "pref1 (category)",
@@ -52,6 +52,12 @@ OPTION_KEYS = "↑↓ move · space/enter toggle"     # Analyses switches, Tree 
 def _run_editor(path: Path) -> int:
     """$EDITOR (fallback nano) on `path`, in the foreground; its exit code. Tests replace it."""
     return subprocess.call(shlex.split(os.environ.get("EDITOR") or "nano") + [str(path)])
+
+
+def _default_inflation(raw: dict) -> str:
+    """params.s2_inflation of a raw druid.yaml mapping ('1.1' when absent)."""
+    params = raw.get("params") if isinstance(raw, dict) else None
+    return str((params or {}).get("s2_inflation", "1.1")) if isinstance(params, dict) else "1.1"
 
 
 def _resolve(p: str, root: Path) -> Path:
@@ -461,7 +467,7 @@ class SetupScreen(Screen):
         src = raw.get("families_source")
         rows = families.read(_resolve(str(src), root)) if src else families.library()
         if self._hmm_dir is not None and self._hmm_dir.is_dir():
-            rows = rows + families.hmm_rows(self._hmm_dir)
+            rows = rows + families.hmm_rows(self._hmm_dir, _default_inflation(raw))
         return rows
 
     def _write(self, changes: dict, done: str = "", fam_rows=None) -> None:
@@ -1076,7 +1082,7 @@ class SetupScreen(Screen):
         """families.hmm_rows(d), or None with the error on the bottom line (an unreadable .hmm
         must not crash the app)."""
         try:
-            return families.hmm_rows(d)
+            return families.hmm_rows(d, _default_inflation(self._raw))
         except Exception as e:                   # PermissionError, a directory named x.hmm, ...
             self._refuse(f"ERROR: cannot read the HMMs in {d}: {type(e).__name__}: {e}")
             return None

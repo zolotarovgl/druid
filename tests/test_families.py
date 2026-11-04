@@ -42,3 +42,9 @@ def test_hmm_dir_untouched(tmp_path):
         d.chmod(stat.S_IRWXU)
     assert (os.stat(d).st_mtime_ns, os.stat(d / "a.hmm").st_mtime_ns) == before
     assert sorted(os.listdir(d)) == ["a.hmm"]
+
+
+def test_hmm_rows_take_the_default_inflation(tmp_path):
+    (tmp_path / "X.hmm").write_text("HMMER3\nGA 10 10;\n")
+    assert families.hmm_rows(tmp_path, "1.4")[0].inflation == "1.4"
+    assert families.hmm_rows(tmp_path)[0].inflation == "1.1"

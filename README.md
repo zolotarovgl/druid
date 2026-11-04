@@ -285,6 +285,10 @@ mirror `nextflow.config` + the `precise` profile and the 24/09/2026 run
 inputs and may point anywhere; everything druid writes (`outdir`, `runs_dir`, `infasta`,
 `genefam_info`) must be inside the project. The template is `druid/templates/druid.yaml`.
 
+The `inflation` column of the families file overrides `params.s2_inflation` for that family's
+`cluster` run (blank = the default). Before 04/11/2026 the column was ignored, so families whose
+value differs from the default cluster differently on their next cluster run.
+
 ## Environment variables
 
 | variable | effect |

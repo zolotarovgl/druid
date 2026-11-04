@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from druid import paths
+from druid import families, paths
 from druid.core import (Config, publish_dir, publish_patterns,
                            stage_inputs)
 
@@ -28,6 +28,10 @@ def stage_env(cfg: Config, stage: str, hg: str, cpus: int) -> dict[str, str]:
             env[str(k)] = "true" if v else "false"
         else:
             env[str(k)] = "" if v is None else str(v)       # hmm_dir: null -> "" (not "None")
+    if stage == "cluster":                  # the family's own inflation beats the params default
+        infl = families.inflation_of(cfg.params.get("genefam_info"), hg)
+        if infl:
+            env["s2_inflation"] = infl
     return env
 
 

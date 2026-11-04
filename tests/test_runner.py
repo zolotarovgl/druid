@@ -179,3 +179,15 @@ def test_cluster_no_hits_exits_0(results_tree, monkeypatch, tmp_path, capsys):
     assert "no hits: nothing to cluster for a.F1" in capsys.readouterr().out
     assert not (root/"work"/"a.F1").exists()
     assert set(os.listdir(cfg.outdir/"clusters")) == before
+
+
+def test_cluster_env_uses_the_familys_inflation(results_tree, tmp_path):
+    cfg, root = results_tree
+    fam = tmp_path / "fam.csv"
+    fam.write_text("Fox\tForkhead\t1.6\t3\tGA\ttfs\ttfs\nSox\tHMG\t\t3\tGA\ttfs\ttfs\n")
+    cfg.params["genefam_info"] = str(fam)
+    cfg.params["s2_inflation"] = 1.1
+    assert runner.stage_env(cfg, "cluster", "tfs.Fox", 2)["s2_inflation"] == "1.6"
+    assert runner.stage_env(cfg, "cluster", "tfs.Sox", 2)["s2_inflation"] == "1.1"   # blank field
+    assert runner.stage_env(cfg, "cluster", "tfs.Nope", 2)["s2_inflation"] == "1.1"  # absent id
+    assert runner.stage_env(cfg, "align", "tfs.Fox.HG1", 2)["s2_inflation"] == "1.1"  # other stages
