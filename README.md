@@ -24,7 +24,16 @@ In **Setup** (`tab` moves between panes, `enter` selects, `esc` / `q` back, `:q!
 3. **Analyses**: GeneRax / origins on or off (both off: no species tree needed).
 4. **Tree** (only if a switch is on): place ticked species missing from the tree.
 5. **Families**: filter, `a` ticks all shown (`space` / `enter` one at a time).
-6. `P` prepares (`data/input.fasta`, trees, `species_info.tsv`), then `S` launches step 1:
+6. **Parameters** (optional; the defaults run): the stage settings, grouped by stage. Clustering
+   (MCL inflation default, recluster size, domain expand, cpus), Alignment (MAFFT: linsi · einsi ·
+   ginsi · auto), Phylogeny (fasttree / iqtree2 / iqtree3, IQ-TREE model, min seqs / min distinct),
+   GeneRax (substitution model, SPR radius, cpus; greyed when GeneRax is off), POSSVM (reference
+   species from the ticked ones, reference gene-names file). Lists: `enter` opens, `↑↓ enter`
+   picks; numbers and the path: type, `enter` writes (a bad value is refused, nothing written).
+   A value in `druid.yaml` outside the lists is shown as `custom: <value>` and kept. From the first
+   job on, everything but the cpus is read-only (it would change every output). A family's own
+   `inflation` (Families, `e`) overrides the default.
+7. `P` prepares (`data/input.fasta`, trees, `species_info.tsv`), then `S` launches step 1:
    `enter` dry run, `y` submits search + linked cluster.
 
 Or from the shell, after Setup: `druid prepare`, `druid run -n` (dry run), `druid run`.

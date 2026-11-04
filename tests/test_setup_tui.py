@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import dataclasses
 
 import pytest
@@ -11,7 +10,8 @@ import yaml
 pytest.importorskip("textual")
 from textual.color import Color  # noqa: E402
 
-from druid import core, families, paths, project, setup_state, setup_tui, sptree, tui, yamledit  # noqa: E402
+from druid import (core, families, params_form, paths, project, setup_state, setup_tui,  # noqa: E402
+                   sptree, tui, yamledit)
 from tests.conftest import GENEFAM  # noqa: E402
 from tests.test_cli import cli  # noqa: E402,F401  (fixture)
 
@@ -479,22 +479,15 @@ def test_blockers_line_updates(proj, monkeypatch):
             await pilot.press("down", "space")                            # Bbb: any change re-reads
             await pilot.pause()
             assert "KeyError" in _text(scr, "#blockers")
-            # Config: e runs $EDITOR (suspended app), then re-validates; a broken file is ERROR:
-            await _section(pilot, scr, "Config")
-            assert "proteomes_dir:" in _text(scr, "#cfg-text")
-            seen = []
-
-            def editor(path):
-                seen.append(path)
-                path.write_text(path.read_text().replace("qos: normal", "qos: [unclosed"))
-                return 0
-            monkeypatch.setattr(setup_tui, "_run_editor", editor)
-            monkeypatch.setattr(app, "suspend", contextlib.nullcontext)
-            await pilot.press("e")
+            # a druid.yaml broken outside Setup: ERROR: on re-read, Parameters marked and read-only
+            f = paths.config_file()
+            f.write_text(f.read_text().replace("qos: normal", "qos: [unclosed"))
+            scr._reload()
+            scr._refresh()
             await pilot.pause()
-            assert seen == [paths.config_file()]
             assert _text(scr, "#blockers").startswith("ERROR:") and "not valid YAML" in _text(scr, "#blockers")
-            assert _text(scr, "#lbl-config").endswith("!")
+            assert _text(scr, "#lbl-parameters").endswith("!")
+            assert scr.query_one("#pa-s2_inflation").disabled
     _run(go())
 
 
@@ -518,8 +511,6 @@ def test_setup_on_locked_project_writes_nothing(cli, monkeypatch, tmp_path):
     Path(core.load_config(f).params["genefam_info"]).write_text("")   # empty: Families would fill it
     files = {p: p.read_bytes() for p in paths.project_root().rglob("*")
              if p.is_file() and ".druid" not in p.parts}
-    monkeypatch.setattr(setup_tui, "_run_editor", lambda path: pytest.fail("editor started"))
-
     async def go():
         app = tui.PhyloApp(core.load_config(f), refresh_s=3600)
         async with app.run_test() as pilot:
@@ -544,6 +535,17 @@ def test_setup_on_locked_project_writes_nothing(cli, monkeypatch, tmp_path):
                 assert sw.disabled
                 sw.value = not sw.value
                 await pilot.pause()
+            for fld in params_form.FIELDS:                            # Parameters: all read-only
+                assert scr.query_one(f"#pa-{fld.key}").disabled
+            assert "prepare: locked" in _text(scr, "#pa-reason")
+            sel = scr.query_one("#pa-TREE_METHOD")                    # behind the UI: refused
+            orig = sel.value
+            sel.value = "fasttree" if orig != "fasttree" else "iqtree3"
+            await pilot.pause()
+            assert sel.value == orig                                  # put back to the file's
+            scr._set_param("s2_inflation", "2.5")
+            await pilot.pause()
+            assert "prepare: locked" in _text(scr, "#blockers")
             await _section(pilot, scr, "Species")                     # table ticks: space, down, space, a
             scr.query_one("#sp-filter").value = ""
             t = scr.query_one("#sp-table")
@@ -571,6 +573,146 @@ def test_setup_on_locked_project_writes_nothing(cli, monkeypatch, tmp_path):
     assert f.read_bytes() == before
     assert {p: p.read_bytes() for p in paths.project_root().rglob("*")      # families, placements,
             if p.is_file() and ".druid" not in p.parts} == files            # trees: nothing written
+
+
+# ---- Parameters (04/11/2026: replaces the nano Config editor) ---------------------------------------
+
+async def _pick(pilot, scr, wid, downs):
+    """Open the Select `wid` (enter), move `downs` options down, pick (enter)."""
+    scr.query_one(wid).focus()
+    await pilot.pause()
+    await pilot.press("enter")
+    await pilot.pause()
+    await pilot.press(*(["down"] * downs), "enter")
+    await pilot.pause()
+
+
+async def _type(pilot, scr, wid, text):
+    inp = scr.query_one(wid)
+    inp.focus()
+    inp.value = ""
+    await pilot.pause()
+    await pilot.press(*text, "enter")
+    await pilot.pause()
+
+
+def test_parameters_preset_writes_param(proj):
+    yamledit.update_config({("species",): ["Aaa", "Bbb"]})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Parameters")
+            assert scr.focused is scr.query_one("#pa-s2_inflation")          # enter: the first field
+            assert str(paths.config_file()) in _text(scr, "#pa-path")
+            assert scr.query_one("#pa-TREE_METHOD").value == "iqtree2"
+            await _pick(pilot, scr, "#pa-TREE_METHOD", 1)                    # fasttree iqtree2 [iqtree3]
+            assert _raw()["params"]["TREE_METHOD"] == "iqtree3"
+            assert "SPECIES_TREE" in paths.config_file().read_text()         # rest of file intact
+            await _pick(pilot, scr, "#pa-MAFFT_OPT", 3)                      # linsi ... [auto]
+            assert _raw()["params"]["MAFFT_OPT"] == "--auto"
+            assert scr.query_one("#pa-REFSPECIES").value == "Aaa"            # the ticked species
+            await _pick(pilot, scr, "#pa-REFSPECIES", 1)
+            assert _raw()["params"]["REFSPECIES"] == "Bbb"
+    _run(go())
+
+
+def test_parameters_number_typed_and_refused(proj):
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Parameters")
+            await _type(pilot, scr, "#pa-s2_inflation", "1.4")
+            v = _raw()["params"]["s2_inflation"]
+            assert v == 1.4 and isinstance(v, float)
+            await _type(pilot, scr, "#pa-max_n", "500")
+            v = _raw()["params"]["max_n"]
+            assert v == 500 and isinstance(v, int) and not isinstance(v, bool)
+            before = paths.config_file().read_text()
+            await _type(pilot, scr, "#pa-s2_inflation", "abc")
+            assert _text(scr, "#blockers").startswith("ERROR:")
+            assert paths.config_file().read_text() == before and _raw()["params"]["s2_inflation"] == 1.4
+            assert scr.query_one("#pa-s2_inflation").value == "1.4"         # the file's value back
+            await _type(pilot, scr, "#pa-min_seqs", "2")                     # below the minimum 4
+            assert _text(scr, "#blockers").startswith("ERROR:") and _raw()["params"]["min_seqs"] == 5
+            await _type(pilot, scr, "#pa-REFNAMES", "data/nope.csv")         # a file that is not there
+            assert "file not found" in _text(scr, "#blockers")
+            assert paths.config_file().read_text() == before
+    _run(go())
+
+
+def test_parameters_unknown_value_survives_opening(proj):
+    yamledit.update_config({("params", "MAFFT_OPT"): "--auto --reorder"})
+    before = paths.config_file().read_text()
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Parameters")
+            sel = scr.query_one("#pa-MAFFT_OPT")
+            assert sel.value == "--auto --reorder"                           # shown as "custom: ..."
+            for _ in range(len(params_form.FIELDS) + 2):                     # every field, then the list
+                await pilot.press("tab")
+                await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+            assert scr.query_one("#pa-REFSPECIES").value == "Aaa"            # not ticked: kept too
+            sel.value = "--auto"                                             # not a pick: put back
+            await pilot.pause()
+            assert sel.value == "--auto --reorder"
+    _run(go())
+    assert paths.config_file().read_text() == before
+
+
+def test_parameters_frozen_after_first_job(proj):
+    yamledit.update_config({("species_locked",): True})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Parameters")
+            for wid in ("#pa-MAFFT_OPT", "#pa-s2_inflation", "#pa-REFSPECIES", "#pa-min_seqs"):
+                assert scr.query_one(wid).disabled
+            assert "first job" in _text(scr, "#pa-reason")
+            assert scr.focused is scr.query_one("#pa-s1_ncpu")                # the first editable one
+            for wid in ("#pa-s2_ncpu", "#pa-NCPU_GENERAX"):
+                assert not scr.query_one(wid).disabled
+            await _type(pilot, scr, "#pa-s1_ncpu", "8")
+            assert _raw()["params"]["s1_ncpu"] == 8
+            scr._set_param("s2_inflation", "2.5")                            # behind the UI: refused
+            await pilot.pause()
+            assert "first job" in _text(scr, "#blockers") and _raw()["params"]["s2_inflation"] == 1.1
+    _run(go())
+
+
+def test_parameters_generax_group_greyed_when_off(proj):
+    yamledit.update_config({("params", "run_generax"): False})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Parameters")
+            for wid in ("#pa-SUBS_MODEL", "#pa-MAX_SPR", "#pa-NCPU_GENERAX"):
+                assert scr.query_one(wid).disabled
+            assert "GeneRax is off" in _text(scr, "#pa-gx-note")
+            assert not scr.query_one("#pa-TREE_METHOD").disabled
+            await _section(pilot, scr, "Analyses")                           # GeneRax on: editable
+            await pilot.press("space")
+            await pilot.pause()
+            assert _raw()["params"]["run_generax"] is True
+            assert not scr.query_one("#pa-SUBS_MODEL").disabled and not _text(scr, "#pa-gx-note")
+    _run(go())
+
+
+def test_no_config_editor(proj):
+    assert "Config" not in setup_tui.SetupScreen.SECTIONS and not hasattr(setup_tui, "_run_editor")
+    assert setup_tui.SetupScreen.SECTIONS[7] == "Parameters"
+    assert not any(b.action == "edit_config" for b in setup_tui.SetupScreen.BINDINGS)
 
 
 # ---- Tree, Search, Families, prepare (Task 8) ----------------------------------------------------

@@ -1,32 +1,30 @@
 """The TUI Setup tab (sub-project 2, 23/10/2026): proteome sources, the species picker, the analyses
 switches, the base species tree (v3 curated / chromo / custom) and the placement of ticked species
-missing from it, the search type, the families and druid.yaml, with the blockers `prepare` would
-report on the bottom line; `P` runs prepare, `S` then step 1 (the Jobs tab's run box). Config
-writes go through yamledit.update_config, the placements and families files through
-sptree / families (paths). An adopted project (prepare: locked) is read-only throughout; a
-species-locked one in the Species and Tree sections (the families stay editable). Imported by
-druid.tui when the Setup tab opens."""
+missing from it, the search type, the families and the stage parameters (params_form: lists for
+discrete settings, typed numbers), with the blockers `prepare` would report on the bottom line;
+`P` runs prepare, `S` then step 1 (the Jobs tab's run box). Config writes go through
+yamledit.update_config, the placements and families files through sptree / families (paths). An
+adopted project (prepare: locked) is read-only throughout; a species-locked one (the first job
+exists) in the Species and Tree sections and in the Parameters that affect every output (the cpus
+and the families stay editable). Imported by druid.tui when the Setup tab opens."""
 from __future__ import annotations
 
 import dataclasses
-import os
 import re
-import shlex
-import subprocess
 from pathlib import Path
 
 from rich.text import Text
 from textual import work
-from textual.app import ComposeResult, SuspendNotSupported
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import (ContentSwitcher, DataTable, Footer, Header, Input, Label, ListItem,
-                             ListView, RadioButton, RadioSet, Static, Switch)
+                             ListView, RadioButton, RadioSet, Select, Static, Switch)
 
 from ete3 import Tree
 
-from druid import core, families, paths, prepare, setup_state, sptree, yamledit
+from druid import core, families, params_form, paths, prepare, setup_state, sptree, yamledit
 from druid.tui import DruidTreeScreen, RunScreen   # vendored TreeScreen + druid's key help; S's box
 from treeview import model as tvm                # vendored: core puts druid/vendor on sys.path
 
@@ -47,11 +45,12 @@ TREE_LABELS = {"v3": "v3 curated, 59 tips", "chromo": "chromo, 94 tips", "custom
 LOCKED_ALL = "read-only: adopted project (prepare: locked); druid never changes its druid.yaml here"
 RUN_HINT = "S: run step 1 (search → cluster)"    # after a good prepare: the next step
 OPTION_KEYS = "↑↓ move · space/enter toggle"     # Analyses switches, Tree / Search radio sets
-
-
-def _run_editor(path: Path) -> int:
-    """$EDITOR (fallback nano) on `path`, in the foreground; its exit code. Tests replace it."""
-    return subprocess.call(shlex.split(os.environ.get("EDITOR") or "nano") + [str(path)])
+PA_FIELDS = {f.key: f for f in params_form.FIELDS}   # Parameters: #pa-<key> -> its field
+PA_FROZEN = ("read-only: set before the first job; changing it would change every output "
+             "(the cpus stay editable)")
+PA_NOCFG = "read-only until druid.yaml loads (see the errors below)"
+PA_GX_OFF = "GeneRax is off (Analyses): these settings are not used"
+PA_HELP = "a list: enter opens it, ↑↓ enter picks · a number or path: type it, enter writes"
 
 
 def _default_inflation(raw: dict) -> str:
@@ -168,7 +167,7 @@ class PlaceScreen(DruidTreeScreen):
 class SetupScreen(Screen):
     """Left: the sections, each with a mark (✓ fine, ! needs attention, a number = how many);
     right: the highlighted section; bottom: the last error and the blockers."""
-    SECTIONS = ("Project", "Source", "Species", "Analyses", "Tree", "Search", "Families", "Config")
+    SECTIONS = ("Project", "Source", "Species", "Analyses", "Tree", "Search", "Families", "Parameters")
     DEFAULT_CSS = """
     SetupScreen #setup-tabbar { height: 1; }
     SetupScreen #setup-body { height: 1fr; }
@@ -195,6 +194,10 @@ class SetupScreen(Screen):
     SetupScreen Switch:focus { border: tall orange; }
     SetupScreen RadioSet:focus { border: tall orange; }
     SetupScreen .note { color: $text-muted; height: auto; }
+    SetupScreen .pa-group { text-style: bold; height: auto; padding: 1 0 0 0; }
+    SetupScreen #sec-parameters .row Label { width: 28; }
+    SetupScreen #sec-parameters Select { width: 1fr; }
+    SetupScreen #sec-parameters Input { width: 1fr; }
     SetupScreen #blockers { height: auto; max-height: 8; color: $warning; }
     SetupScreen #warnings { height: auto; max-height: 8; display: none; border: round $primary; }
     SetupScreen #warnings:focus { border: round orange; }
@@ -209,7 +212,6 @@ class SetupScreen(Screen):
         Binding("space", "toggle", "tick"),
         Binding("a", "tick_all", "tick shown"),
         Binding("A", "untick_all", "untick shown"),
-        Binding("e", "edit_config", "edit druid.yaml"),
         Binding("e", "edit_family", "edit row"),     # Families; enter ticks (Grygoriy, 23/10/2026)
         Binding("P", "prepare", "prepare"),
         Binding("S", "run_step1", "run step 1"),
@@ -254,6 +256,8 @@ class SetupScreen(Screen):
         self._fam_nfile = 0                      # rows in the families file
         self._fam_shown: list = []               # indices into _fam passing the filter
         self._fam_edit = None                    # the _fam index in the edit form
+        self._pa_opts: dict = {}                 # Parameters: key -> the options its Select shows
+        self._pa_frozen = False                  # Parameters: frozen fields read-only (first job)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -336,9 +340,25 @@ class SetupScreen(Screen):
                             inp.border_title = col
                             yield inp
                     yield Static("", id="fam-count", markup=False)
-                with VerticalScroll(id="sec-config"):
-                    yield Static("", id="cfg-help", classes="note", markup=False)
-                    yield Static("", id="cfg-text", markup=False)
+                # one scrolling form, a heading per stage group (spec 2026-11-04); the scroll
+                # itself takes no focus: tab goes field to field
+                with VerticalScroll(id="sec-parameters", can_focus=False):
+                    yield Static("", id="pa-path", classes="note", markup=False)
+                    yield Static("", id="pa-reason", classes="note", markup=False)
+                    group = None
+                    for f in params_form.FIELDS:
+                        if f.group != group:
+                            group = f.group
+                            yield Static(group, classes="pa-group", markup=False)
+                            if group == "GeneRax":
+                                yield Static("", id="pa-gx-note", classes="note", markup=False)
+                        with Horizontal(classes="row"):
+                            yield Label(f.label)
+                            if f.kind in ("preset", "species"):
+                                # the options come from the file in _fill_params; a placeholder now
+                                yield Select([("", "")], allow_blank=False, id=f"pa-{f.key}")
+                            else:
+                                yield Input(placeholder=f.key, id=f"pa-{f.key}")
         yield Static("", id="blockers", markup=False)
         with VerticalScroll(id="warnings"):          # w; height-limited, scrolls
             yield Static("", id="warn-text", markup=False)
@@ -406,6 +426,8 @@ class SetupScreen(Screen):
         params = raw.get("params") if isinstance(raw.get("params"), dict) else {}
         self._reload_tree(raw, params, root)
         self._reload_families(raw, params, root)
+        self._pa_frozen = self._cfg is not None and self._try(   # Parameters: the first job exists
+            "parameters freeze", lambda: params_form.frozen(raw, self._cfg), True)
 
     def _reload_tree(self, raw: dict, params: dict, root: Path) -> None:
         """The base binary tree, the placements, the tree built from them and who is missing; a
@@ -500,7 +522,7 @@ class SetupScreen(Screen):
                 "Tree": "·" if not self._tree_on else "!" if self._tree_err or self._missing else "✓",
                 "Search": "!" if hmm_bad else "✓",
                 "Families": str(nfam) if nfam and self._fam_nfile else "!",
-                "Config": "!" if self._cfg is None else "✓"}
+                "Parameters": "!" if self._cfg is None else "✓"}
 
     def _refresh(self) -> None:
         for name, mark in self._marks().items():
@@ -512,7 +534,7 @@ class SetupScreen(Screen):
         self._fill_tree()
         self._fill_search()
         self._fill_families()
-        self._fill_config()
+        self._fill_params()
         self._fill_blockers()
 
     def show_command(self, text: str) -> None:
@@ -712,16 +734,84 @@ class SetupScreen(Screen):
         self.query_one("#fam-reason", Static).update(
             reason or "space enter: tick / untick · a: tick all shown · e: edit the row's settings")
 
-    def _fill_config(self) -> None:
-        f = paths.config_file()
-        try:
-            text = f.read_text()
-        except OSError as e:
-            text = f"cannot read {f}: {e}"
-        help_ = LOCKED_ALL if self._ro_all else \
-            "e: edit in $EDITOR (fallback nano); druid.yaml is checked again on return"
-        self.query_one("#cfg-help", Static).update(f"{f}\n{help_}\n")
-        self.query_one("#cfg-text", Static).update(text)
+    # ---- Parameters -------------------------------------------------------------------------
+    def _params(self) -> dict:
+        p = self._raw.get("params")
+        return p if isinstance(p, dict) else {}
+
+    def _pa_reason(self, f: "params_form.Field") -> str:
+        """Why field `f` is read-only now ("" = editable)."""
+        if self._ro_all:
+            return LOCKED_ALL
+        if self._cfg is None:
+            return PA_NOCFG
+        if f.frozen and self._pa_frozen:
+            return PA_FROZEN
+        if f.group == "GeneRax" and not self._params().get("run_generax"):
+            return PA_GX_OFF
+        return ""
+
+    def _fill_params(self) -> None:
+        """Each field shows the file's value; showing it is never a write (Select.Changed is
+        prevented here, and on_select_changed ignores what the user did not pick)."""
+        params = self._params()
+        species = list(dict.fromkeys(sp for sp, _src in self._sel))
+        for f in params_form.FIELDS:
+            w = self.query_one(f"#pa-{f.key}")
+            cur = params.get(f.key)
+            if isinstance(w, Select):
+                opts = params_form.choices(f, cur, species) or [("(no species ticked)", "")]
+                with w.prevent(Select.Changed):
+                    if opts != self._pa_opts.get(f.key):  # unchanged: keep the open list as is
+                        w.set_options(opts)
+                        self._pa_opts[f.key] = opts
+                    w.value = cur if cur not in (None, "") else opts[0][1]
+            elif not w.has_focus:                # a value being typed is left alone
+                w.value = "" if cur is None else str(cur)
+            w.disabled = bool(self._pa_reason(f))
+        self.query_one("#pa-path", Static).update(f"druid.yaml: {paths.config_file()}")
+        note = (LOCKED_ALL if self._ro_all else PA_NOCFG if self._cfg is None
+                else PA_FROZEN if self._pa_frozen else PA_HELP)
+        self.query_one("#pa-reason", Static).update(note)
+        gx_off = not self._ro_all and self._cfg is not None and not params.get("run_generax")
+        self.query_one("#pa-gx-note", Static).update(PA_GX_OFF if gx_off else "")
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """A list pick in Parameters. Only one the user made, while the list has the focus, is
+        written: the Select's own mount-time value and anything set behind the UI are put back
+        to the file's value."""
+        wid = event.select.id or ""
+        if not wid.startswith("pa-"):
+            return
+        f = PA_FIELDS[wid[len("pa-"):]]
+        if event.value == self._params().get(f.key):
+            return
+        if not event.select.has_focus_within or event.value == "":
+            self._fill_params()
+            return
+        self._set_param(f.key, str(event.value))
+
+    def _set_param(self, key: str, text: str) -> None:
+        """Write params.<key> from `text` (a picked value or what was typed), parsed by
+        params_form (numbers as int / float); refused with the reason (nothing written, the field
+        back to the file's value) when read-only or invalid."""
+        f = PA_FIELDS[key]
+        self._reload()                           # the file decides, not what was last shown
+        why = self._pa_reason(f)
+        if not why:
+            try:
+                value = params_form.parse(f, text, paths.project_root())
+            except ValueError as e:
+                why = f"ERROR: {e}"
+        if why:
+            w = self.query_one(f"#pa-{key}")
+            if isinstance(w, Input):
+                cur = self._params().get(key)
+                w.value = "" if cur is None else str(cur)
+            self._msg = why
+            self._refresh()
+            return
+        self._write({("params", key): value}, done=f"params.{key} = {value}")
 
     # ---- navigation -------------------------------------------------------------------------
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
@@ -739,8 +829,10 @@ class SetupScreen(Screen):
             return
         target = {"Project": "#job-prefix", "Source": "#src-name", "Species": "#sp-filter", "Analyses": "#sw-generax",
                   "Tree": "#tree-missing" if self._tree_on and self._missing else "#tree-base",
-                  "Search": "#se-type", "Families": "#fam-filter",
-                  "Config": "#sec-config"}.get(self.current)
+                  "Search": "#se-type", "Families": "#fam-filter"}.get(self.current)
+        if self.current == "Parameters":         # the first editable field (frozen: the cpus)
+            target = next((f"#pa-{f.key}" for f in params_form.FIELDS
+                           if not self.query_one(f"#pa-{f.key}").disabled), None)
         if target:
             w = self.query_one(target)
             if not w.disabled and w.display:
@@ -751,8 +843,6 @@ class SetupScreen(Screen):
             return self.current in ("Species", "Families")
         if action in ("tick_all", "untick_all"):
             return self.current in ("Species", "Families")
-        if action == "edit_config":
-            return self.current == "Config"
         if action == "edit_family":
             return self.current == "Families"
         if action == "switch_move":              # else ↑↓ go on to the focused widget's parents
@@ -793,6 +883,8 @@ class SetupScreen(Screen):
             self._set_families_source(event.value.strip())
         elif wid == "se-hmmdir":
             self._set_hmm_dir(event.value.strip())
+        elif wid.startswith("pa-"):
+            self._set_param(wid[len("pa-"):], event.value)
         elif wid.startswith("fe-"):
             cols = list(EDIT_COLS)
             i = cols.index(wid[len("fe-"):])
@@ -1335,22 +1427,3 @@ class SetupScreen(Screen):
             return
         self.app.push_screen(RunScreen(self._cfg, self._raw),
                              lambda _jids: (self._reload(), self._refresh()))
-
-    # ---- Config -----------------------------------------------------------------------------
-    def action_edit_config(self) -> None:
-        if self._ro_all:
-            self._msg = LOCKED_ALL
-            self._fill_blockers()
-            return
-        f = paths.config_file()
-        try:
-            with self.app.suspend():
-                rc = _run_editor(f)
-        except SuspendNotSupported:
-            self._msg = "ERROR: this terminal cannot suspend the TUI; edit druid.yaml outside it"
-        except OSError as e:
-            self._msg = f"ERROR: cannot start the editor: {e}"
-        else:
-            self._msg = f"the editor exited with {rc}" if rc else ""
-        self._reload()
-        self._refresh()
