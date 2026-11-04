@@ -35,7 +35,7 @@ def proj(tmp_path):
         (root / "data" / f).write_text(TREE)
     yamledit.update_config({("proteomes_dir",): str(prot), ("proteome_glob",): "{sp}.faa",
                             ("taxonomy",): "data/tax.tsv", ("species",): ["Wxyz", "Abcd", "Hsap"],
-                            ("job_prefix",): "t"})
+                            ("job_prefix",): "t", ("params", "REFSPECIES"): "Hsap"})
     return root, prot
 
 

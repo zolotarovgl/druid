@@ -37,7 +37,7 @@ def proj(tmp_path):
     for f in ("base_tree.binary.newick", "base_tree.newick"):
         (root / "data" / f).write_text("((Aaa:1,Bbb:1):1,Ccc:1)R;")
     yamledit.update_config({("proteomes_dir",): str(prot), ("taxonomy",): "data/tax.tsv",
-                            ("job_prefix",): "t"})
+                            ("job_prefix",): "t", ("params", "REFSPECIES"): "Aaa"})
     return root, prot, mine
 
 

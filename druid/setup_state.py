@@ -242,6 +242,13 @@ def blockers(raw: dict, cfg: core.Config, root: Path) -> list:
     if sel and trees_needed(params):
         out.extend(_tree_blockers(raw, root, list(dict.fromkeys(sp for sp, _ in sel)),
                                   bool(params.get("run_generax"))))
+    if sel:                                     # POSSVM reference: a ticked species, a names file that exists
+        ref = params.get("REFSPECIES")
+        if ref and ref not in by_sp:
+            out.append(f"REFSPECIES {ref} is not a ticked species")
+        names = params.get("REFNAMES")
+        if names and not _resolve(names, root).is_file():
+            out.append(f"REFNAMES {names} not found")
     if not core.family_ids(cfg, strict=False):
         out.append("no families in params.genefam_info")
     return out

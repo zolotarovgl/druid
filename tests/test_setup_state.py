@@ -26,7 +26,8 @@ def proj(tmp_path):
     for f in ("base_tree.binary.newick", "base_tree.newick"):   # species tree for the tree blockers
         (root / "data" / f).write_text("((Aaa:1,Bbb:1):1,Nope:1)R;")
     yamledit.update_config({("proteomes_dir",): str(prot), ("taxonomy",): "data/tax.tsv",
-                            ("species",): ["Aaa"], ("job_prefix",): "t"})
+                            ("species",): ["Aaa"], ("job_prefix",): "t",
+                            ("params", "REFSPECIES"): "Aaa"})   # the template's Mmus is not ticked here
     return root, prot
 
 
@@ -242,3 +243,21 @@ def test_blockers_need_job_prefix(proj):
     assert "no job_prefix (Setup › Project)" not in ss.blockers(raw, cfg, root)
     adopted = {**no, "prepare": "locked"}
     assert "no job_prefix (Setup › Project)" not in ss.blockers(adopted, cfg0, root)
+
+
+def test_refspecies_not_ticked_is_a_blocker(proj):
+    root, _prot = proj
+    raw, cfg = _raw()
+    raw = {**raw, "species": ["Aaa"], "params": {**raw["params"], "REFSPECIES": "Hsap"}}
+    assert "REFSPECIES Hsap is not a ticked species" in ss.blockers(raw, cfg, root)
+    raw["params"]["REFSPECIES"] = "Aaa"
+    assert not any(b.startswith("REFSPECIES") for b in ss.blockers(raw, cfg, root))
+
+
+def test_refnames_missing_is_a_blocker(proj):
+    root, _prot = proj
+    raw, cfg = _raw()
+    raw = {**raw, "params": {**raw["params"], "REFNAMES": "data/nope.csv"}}
+    assert any(b.startswith("REFNAMES") and "not found" in b for b in ss.blockers(raw, cfg, root))
+    raw["species"] = []                          # only when species are ticked
+    assert not any(b.startswith("REFNAMES") for b in ss.blockers(raw, cfg, root))
