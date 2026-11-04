@@ -12,6 +12,6 @@ if ! clipkit --help >/dev/null 2>&1; then
     echo "clipkit is required for Step 2 trimming but is not runnable in the current environment." >&2
     exit 1
 fi
-python ${DRUID_HOME}/submodules/phylogeny/main.py align -f ${FASTA} -o ${ID}.aln.fasta -c ${CPUS} -m "${MAFFT_OPT}"
+python ${DRUID_HOME}/submodules/phylogeny/main.py align -f ${FASTA} -o ${ID}.aln.fasta -c ${CPUS} --mafft="${MAFFT_OPT}"
 python ${DRUID_HOME}/druid/helpers/remove_gaponly.py ${ID}.aln.fasta ${ID}.aln.fasta_tmp
 mv ${ID}.aln.fasta_tmp ${ID}.aln.fasta

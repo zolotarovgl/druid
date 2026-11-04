@@ -604,9 +604,11 @@ def write_run(cfg: core.Config, raw: dict, p: Plan, dry_run: bool, max_running: 
     import copy
     import yaml
     run_dir = new_run_dir(p.stage, dry_run)
-    if p.stage == "search":
-        # main.py hmmsearch reads the family's row at run time: the jobs read a copy taken now
-        # (the file the ids were validated against), and the run keeps it as the record.
+    if p.stage in ("search", "cluster"):
+        # main.py hmmsearch reads the family's row at run time, and a cluster job its inflation
+        # (runner.stage_env): the jobs read a copy taken now (the file the ids were validated
+        # against), and the run keeps it as the record. A linked search + cluster submission
+        # writes both run dirs in one step1run.write call, so both copies are of the same file.
         raw = copy.deepcopy(raw)
         snap = run_dir / "genefam.csv"
         paths.copy2(cfg.params["genefam_info"], snap)

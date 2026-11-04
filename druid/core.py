@@ -56,7 +56,9 @@ def job_prefix_error(v) -> str:
 
 
 def _abs(p, root: Path | None = None) -> str:
-    p = Path(p)
+    """`p` absolute: `~` expanded (as Setup and setup_state._resolve read it), relative = under
+    `root` (default: the project root)."""
+    p = Path(p).expanduser()
     return str(p if p.is_absolute() else (root if root is not None else paths.project_root()) / p)
 
 

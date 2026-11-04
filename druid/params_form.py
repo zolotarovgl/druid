@@ -2,6 +2,7 @@
 logic; the Setup screen renders it. Spec: docs/superpowers/specs/2026-11-04-setup-parameters-design.md."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,6 +67,8 @@ def parse(field: Field, text: str, root: Path):
             v = conv(text)
         except ValueError:
             raise ValueError(f"{field.label}: {text!r} is not {'an integer' if conv is int else 'a number'}") from None
+        if not math.isfinite(v):                 # float("inf"), float("nan")
+            raise ValueError(f"{field.label}: {text!r} is not a finite number")
         if field.key == "s2_inflation":
             if not v > 0:
                 raise ValueError(f"{field.label}: must be > 0")

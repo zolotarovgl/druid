@@ -272,9 +272,9 @@ than 500 sequences). Resources: the HG's `resources.tsv` row if it has one, else
 `submit` prints how many selected HGs had a row. `--mem/--time/--cpus` override that for every
 selected HG. No retry ladder. Outputs are
 published to `results/<dir>/` only on success (marker file last).
-A `search` submission copies the genefam file to `<run>/genefam.csv` and its run-dir
-`config.yaml` points there: the jobs search the rows that were validated, even if the file is
-edited while they wait in the queue. (The configuration copy inside a run directory is always
+A `search` or `cluster` submission copies the genefam file to `<run>/genefam.csv` and its run-dir
+`config.yaml` points there: the jobs search the rows that were validated, and cluster with the
+family's `inflation` as it was, even if the file is edited while they wait in the queue. (The configuration copy inside a run directory is always
 named `config.yaml`; the project's own file is `druid.yaml`.)
 
 ## druid.yaml

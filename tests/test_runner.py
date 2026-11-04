@@ -191,3 +191,8 @@ def test_cluster_env_uses_the_familys_inflation(results_tree, tmp_path):
     assert runner.stage_env(cfg, "cluster", "tfs.Sox", 2)["s2_inflation"] == "1.1"   # blank field
     assert runner.stage_env(cfg, "cluster", "tfs.Nope", 2)["s2_inflation"] == "1.1"  # absent id
     assert runner.stage_env(cfg, "align", "tfs.Fox.HG1", 2)["s2_inflation"] == "1.1"  # other stages
+    # a hand-edited value that is no finite number > 0 falls back to the default (final review)
+    fam.write_text("".join(f"F{i}\tH\t{v}\t3\tGA\ttfs\ttfs\n"
+                           for i, v in enumerate(("abc", "0", "-1", "inf", "nan", "2.0"))))
+    assert [runner.stage_env(cfg, "cluster", f"tfs.F{i}", 2)["s2_inflation"]
+            for i in range(6)] == ["1.1"] * 5 + ["2.0"]

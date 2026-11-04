@@ -144,7 +144,8 @@ def plan_run(cfg: core.Config, raw: dict, fam: "str | None" = None, dry_run: boo
 
 def write(cfg: core.Config, raw: dict, rp: RunPlan, dry_run: bool, max_running: int = 50,
           partition: "str | None" = None, qos: "str | None" = None) -> RunWritten:
-    """One run dir per non-empty plan (search snapshots genefam.csv); the linked cluster run dir's
+    """One run dir per non-empty plan (search and cluster each snapshot genefam.csv, back to back
+    from the same file); the linked cluster run dir's
     ids files are the search run dir's, byte for byte."""
     def one(p):
         return (model.write_run(cfg, raw, p, dry_run, max_running, partition, qos)

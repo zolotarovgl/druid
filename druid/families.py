@@ -5,6 +5,7 @@ The families file is tab-separated (despite the .csv name), no header, the colum
 with pref = the last non-empty field, exactly core.parse_genefam."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, fields
 from pathlib import Path
 
@@ -62,14 +63,20 @@ def ticked_ids(rows) -> set[str]:
 
 def inflation_of(path, family_id: str) -> str:
     """The inflation field of the first row of the families file whose id (<pref>.<class_name>) is
-    family_id; '' when absent, blank, or the file is unreadable."""
+    family_id; '' (the caller's default applies) when absent, blank, not a finite number > 0, or
+    the file is unreadable."""
     try:
         rows = read(path)
     except (OSError, TypeError, ValueError):
         return ""
     for r in rows:
         if f"{_pref(r)}.{r.class_name.strip()}" == family_id:
-            return r.inflation.strip()
+            v = r.inflation.strip()
+            try:
+                ok = math.isfinite(float(v)) and float(v) > 0
+            except ValueError:
+                ok = False
+            return v if ok else ""
     return ""
 
 

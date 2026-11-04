@@ -517,6 +517,21 @@ def test_write_run_search_snapshots_genefam(cli, results_tree):
     assert not (w.run_dir / "genefam.csv").exists()               # HG stages: no snapshot
 
 
+def test_write_run_cluster_snapshots_genefam(cli, results_tree):
+    """A cluster job reads its family's inflation (runner.stage_env) from the run's copy of the
+    families file, not the live one edited after the submission (final review 04/11/2026)."""
+    cfg, root = results_tree
+    src = root / "gene_families_searchinfo.csv"
+    src.write_text(src.read_text().replace("A\tPF_A\t1.1", "A\tPF_A\t1.7"))
+    p = model.plan(cfg, "cluster", model.Selection(["tfs.A"], [], set()))
+    w = model.write_run(cfg, _raw(), p, dry_run=True)
+    snap = w.run_dir / "genefam.csv"
+    run_cfg = core.load_config(w.run_dir / "config.yaml")
+    assert run_cfg.params["genefam_info"] == str(snap)
+    src.write_text(src.read_text().replace("A\tPF_A\t1.7", "A\tPF_A\t2.5"))   # edited afterwards
+    assert runner.stage_env(run_cfg, "cluster", "tfs.A", 2)["s2_inflation"] == "1.7"
+
+
 # ---- Task 5: CLI -----------------------------------------------------------------------------
 
 def test_summary_family_rows_first(cli, results_tree):
