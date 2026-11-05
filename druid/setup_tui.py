@@ -46,6 +46,7 @@ LOCKED_ALL = "read-only: adopted project (prepare: locked); druid never changes 
 RUN_HINT = "S: run step 1 (search → cluster)"    # after a good prepare: the next step
 OPTION_KEYS = "↑↓ move · space/enter toggle"     # Analyses switches, Tree / Search radio sets
 PA_FIELDS = {f.key: f for f in params_form.FIELDS}   # Parameters: #pa-<key> -> its field
+PA_STEP1_GROUP = "Clustering"                        # the step 1 group; every other is step 2
 PA_FROZEN = ("read-only: set before the first job; changing it would change every output "
              "(the cpus stay editable)")
 PA_NOCFG = "read-only until druid.yaml loads (see the errors below)"
@@ -195,7 +196,11 @@ class SetupScreen(Screen):
     SetupScreen RadioSet:focus { border: tall orange; }
     SetupScreen .note { color: $text-muted; height: auto; }
     SetupScreen .pa-group { text-style: bold; height: auto; padding: 1 0 0 0; }
-    SetupScreen #sec-parameters .row Label { width: 28; }
+    SetupScreen #pa-cols { height: auto; }
+    SetupScreen .pa-col { width: 1fr; height: auto; padding: 0 1; }
+    SetupScreen #pa-step1 { border-right: solid $primary; }
+    SetupScreen .pa-step { text-style: bold underline; height: auto; }
+    SetupScreen #sec-parameters .row Label { width: 22; }
     SetupScreen #sec-parameters Select { width: 1fr; }
     SetupScreen #sec-parameters Input { width: 1fr; }
     SetupScreen #blockers { height: auto; max-height: 8; color: $warning; }
@@ -345,20 +350,30 @@ class SetupScreen(Screen):
                 with VerticalScroll(id="sec-parameters", can_focus=False):
                     yield Static("", id="pa-path", classes="note", markup=False)
                     yield Static("", id="pa-reason", classes="note", markup=False)
-                    group = None
-                    for f in params_form.FIELDS:
-                        if f.group != group:
-                            group = f.group
-                            yield Static(group, classes="pa-group", markup=False)
-                            if group == "GeneRax":
-                                yield Static("", id="pa-gx-note", classes="note", markup=False)
-                        with Horizontal(classes="row"):
-                            yield Label(f.label)
-                            if f.kind in ("preset", "species"):
-                                # the options come from the file in _fill_params; a placeholder now
-                                yield Select([("", "")], allow_blank=False, id=f"pa-{f.key}")
-                            else:
-                                yield Input(placeholder=f.key, id=f"pa-{f.key}")
+                    # step 1 (search + cluster) left, step 2 (align -> possvm) right, a vertical
+                    # line between them (Grygoriy, 05/11/2026)
+                    with Horizontal(id="pa-cols"):
+                        for step, col_id in (("Step 1", "pa-step1"), ("Step 2", "pa-step2")):
+                            with Vertical(id=col_id, classes="pa-col"):
+                                yield Static(step, classes="pa-step", markup=False)
+                                group = None
+                                for f in params_form.FIELDS:
+                                    if (f.group == PA_STEP1_GROUP) != (step == "Step 1"):
+                                        continue
+                                    if f.group != group:
+                                        group = f.group
+                                        yield Static(group, classes="pa-group", markup=False)
+                                        if group == "GeneRax":
+                                            yield Static("", id="pa-gx-note", classes="note",
+                                                         markup=False)
+                                    with Horizontal(classes="row"):
+                                        yield Label(f.label)
+                                        if f.kind in ("preset", "species"):
+                                            # options come from the file in _fill_params
+                                            yield Select([("", "")], allow_blank=False,
+                                                         id=f"pa-{f.key}")
+                                        else:
+                                            yield Input(placeholder=f.key, id=f"pa-{f.key}")
         yield Static("", id="blockers", markup=False)
         with VerticalScroll(id="warnings"):          # w; height-limited, scrolls
             yield Static("", id="warn-text", markup=False)

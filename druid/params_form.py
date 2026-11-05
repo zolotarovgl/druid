@@ -27,7 +27,7 @@ def _preset(key, group, label, presets):
 
 FIELDS = (
     Field("s2_inflation", "Clustering", "MCL inflation (default)", "number", num="float"),
-    Field("max_n", "Clustering", "recluster HGs above", "number", num="int", minimum=1),
+    Field("max_n", "Clustering", "maximum HG size (seq)", "number", num="int", minimum=1),
     Field("domain_expand", "Clustering", "domain expand (aa)", "number", num="int", minimum=0),
     Field("s1_ncpu", "Clustering", "search cpus", "number", num="int", minimum=1, frozen=False),
     Field("s2_ncpu", "Clustering", "cluster cpus", "number", num="int", minimum=1, frozen=False),

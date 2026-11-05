@@ -605,6 +605,10 @@ def test_parameters_preset_writes_param(proj):
             scr = await _setup(app, pilot)
             await _section(pilot, scr, "Parameters")
             assert scr.focused is scr.query_one("#pa-s2_inflation")          # enter: the first field
+            s1, s2 = scr.query_one("#pa-step1"), scr.query_one("#pa-step2")  # side by side
+            assert s1.query("#pa-max_n") and not s1.query("#pa-MAFFT_OPT")
+            assert s2.query("#pa-MAFFT_OPT") and s2.query("#pa-REFNAMES") and not s2.query("#pa-max_n")
+            assert s2.region.x > s1.region.x and s2.region.y == s1.region.y
             assert str(paths.config_file()) in _text(scr, "#pa-path")
             assert scr.query_one("#pa-TREE_METHOD").value == "iqtree2"
             await _pick(pilot, scr, "#pa-TREE_METHOD", 1)                    # fasttree iqtree2 [iqtree3]
