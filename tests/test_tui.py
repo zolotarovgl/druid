@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("textual")
 
-from druid import core, paths, tui  # noqa: E402
+from druid import core, model, paths, tui  # noqa: E402
 from tests.test_cli import _state, cli  # noqa: E402,F401
 from tests.test_model import OG_HEAD, POSSVM_HG11, og_csv, write_results  # noqa: E402
 
@@ -4298,4 +4298,60 @@ def test_new_fasta_in_clusters_invalidates_tab_cache(cli):
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert "tfs.A.HG9" in app._og_cache["rows"]
+    _run(go())
+
+
+def test_generax_off_hides_its_stages(cli):
+    """GeneRax off: possvm_prev / generax / gxsup are not shown at all (Grygoriy, 05/11/2026:
+    they showed as n/a), in the overview, the stages panel and the HG detail."""
+    import dataclasses
+    cfg = _cfg()
+    off = dataclasses.replace(cfg, params={**cfg.params, "run_generax": False})
+    assert tui.tui_stages(off) == ["search", "cluster", "align", "tree", "possvm"]
+    assert tui.ov_columns(off) == ["search", "cluster", None, "align", "tree", "possvm"]
+    assert tui.stage_at_column(tui.ov_column("possvm", tui.ov_columns(off)),
+                               tui.ov_columns(off)) == "possvm"
+
+    async def go():
+        app = tui.PhyloApp(off, refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            heads = [h.strip() for h in _heads(app, "#overview")]
+            assert "possvm" in heads and not {"generax", "possvm_prev", "gxsup"} & set(heads)
+            assert "n/a" not in [str(c) for c in app.query_one("#overview").get_row_at(0)]
+            app.open_group("ALL", "align")
+            await pilot.pause()
+            st = app.query_one("#stages")
+            assert [st.get_row_at(i)[0] for i in range(st.row_count)] == tui.tui_stages(off)
+    _run(go())
+
+
+def test_running_jobs_pane_lists_this_projects_jobs(cli, monkeypatch):
+    """Under the Jobs overview: this project's squeue lines in list_current_jobs' columns; a
+    foreign druid-less job and another project's Nextflow job are left out (05/11/2026)."""
+    hg = sorted(core.expected(_cfg()))[0]
+    d = model.runs_dir() / "20261105-120000_align"
+    d.mkdir(parents=True)
+    (d / "ids_0.txt").write_text("tfs.A.HG9\n")
+    (d / "jobs.tsv").write_text(f"4242\t{d / 'ids_0.txt'}\n")
+    monkeypatch.setenv("FAKE_SQUEUE", "".join(f"{x}\n" for x in (
+        "4242_[0]|whatever|PENDING|0:00|2:00:00|4G|1|100|(Priority)",
+        f"999|nf-PHY_({hg})|RUNNING|1:00|1:00:00|2G|1|50|node7",
+        "888|nf-PHY_(zzz.Q.HG1)|RUNNING|1:00|1:00:00|2G|1|50|node8",
+        "777|someone-else|RUNNING|1:00|1:00:00|2G|1|50|node9")))
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test() as pilot:
+            app.load_now()
+            await pilot.pause()
+            q = app.query_one("#queue")
+            assert q.display and [c.label.plain for c in q.ordered_columns] == list(model.QUEUE_COLS)
+            assert [q.get_row_at(i)[0] for i in range(q.row_count)] == ["4242_[0]", "999"]
+            assert q.get_row_at(0)[8] == "(Priority)" and "(2)" in q.border_title
+            await pilot.press("tab")                                 # Results tab: hidden
+            await pilot.pause()
+            assert not q.display
     _run(go())

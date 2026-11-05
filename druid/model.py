@@ -104,6 +104,41 @@ def live(expected: set) -> dict[str, set[str]] | None:
     return dict(out)
 
 
+# The columns of Grygoriy's `list_current_jobs` (squeue -o "%.10i %j %.8T %.8M %.8l %.6m %.4D
+# %.8Q %R"), shown under the Jobs overview (05/11/2026).
+QUEUE_COLS = ("job", "name", "state", "time", "limit", "mem", "nodes", "prio", "reason")
+QUEUE_FMT = "|".join(("%i", "%j", "%T", "%M", "%l", "%m", "%D", "%Q", "%R"))
+
+
+def project_jobs(expected: set, fams: "set | None" = None) -> list[tuple] | None:
+    """This project's jobs in SLURM now, one row per squeue line (arrays as squeue groups them),
+    QUEUE_COLS fields: druid's arrays (job id in runs/*/jobs.tsv) and Nextflow jobs whose tag is
+    one of `expected` or a family of this project (`fams`, plus the families of `expected`).
+    None when squeue is not on PATH."""
+    lines = squeue(QUEUE_FMT)
+    if lines is None:
+        return None
+    jobs = jobs_map()
+    fams = set(fams or ()) | {group_key(h, "family") for h in expected}
+    out = []
+    for line in lines:
+        f = line.split("|")
+        if len(f) != len(QUEUE_COLS):
+            continue
+        f = [x.strip() for x in f]
+        jid, name = f[0], f[1]
+        mine = jid.partition("_")[0] in jobs
+        if not mine and name.startswith("nf-"):
+            nf = nf_job(name)
+            if nf:
+                tag = nf[1]
+                mine = (tag in fams if history.PROC_STAGE[nf[0]] in core.FAMILY_STAGES
+                        else bool(history._resolve_tag(tag, expected)))
+        if mine:
+            out.append(tuple(f))
+    return out
+
+
 def live_hgs(stage: str, allow_no_squeue: bool = False, expected: set | None = None) -> set[str]:
     lv = live(expected if expected is not None else set())
     if lv is None:

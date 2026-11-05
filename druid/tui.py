@@ -46,15 +46,29 @@ OV_COLUMNS = [*core.FAMILY_STAGES, None, *core.HG_STAGES]
 # labels (Grygoriy, 02/11/2026; was a second header row since 09/10/2026).
 
 
-def ov_column(stage: str) -> int:
+def tui_stages(cfg: "core.Config | None" = None) -> list:
+    """The stages shown for `cfg`: the ones that run (core.applicable); GeneRax off hides
+    possvm_prev / generax / gxsup (Grygoriy, 05/11/2026: no n/a rows for stages that never run).
+    None = every stage."""
+    return [s for s in TUI_STAGES if cfg is None or core.applicable(cfg, s)]
+
+
+def ov_columns(cfg: "core.Config | None" = None) -> list:
+    """OV_COLUMNS without the stages that do not run for `cfg`."""
+    shown = set(tui_stages(cfg))
+    return [st for st in OV_COLUMNS if st is None or st in shown]
+
+
+def ov_column(stage: str, cols: "list | None" = None) -> int:
     """Overview column of `stage` (after the group and HGs columns, skipping the separator)."""
-    return 2 + OV_COLUMNS.index(stage)
+    return 2 + (OV_COLUMNS if cols is None else cols).index(stage)
 
 
-def stage_at_column(col: int) -> "str | None":
+def stage_at_column(col: int, cols: "list | None" = None) -> "str | None":
     """The stage of an overview column; None for group, HGs and the separator (not a stage).
     The one column->stage mapping: enter, cursor restore and the `s` sort use it."""
-    return OV_COLUMNS[col - 2] if 2 <= col < 2 + len(OV_COLUMNS) else None
+    cols = OV_COLUMNS if cols is None else cols
+    return cols[col - 2] if 2 <= col < 2 + len(cols) else None
 
 
 def _short_og(og_id: str) -> str:
@@ -207,8 +221,13 @@ def sort_rows(rows: list, sort: "tuple | None", keys: dict) -> list:
     return sorted(rows, key=key, reverse=numeric != sort[1])
 
 
-OV_COLS = [SortCol("group", "group"), SortCol("HGs", "HGs", True),
-           *(SortCol(None, OV_SEP) if st is None else SortCol(st, st, True) for st in OV_COLUMNS)]
+def ov_sortcols(cols: list) -> list:
+    """The overview's SortCols for the stage columns `cols` (OV_COLUMNS or ov_columns(cfg))."""
+    return [SortCol("group", "group"), SortCol("HGs", "HGs", True),
+            *(SortCol(None, OV_SEP) if st is None else SortCol(st, st, True) for st in cols)]
+
+
+OV_COLS = ov_sortcols(OV_COLUMNS)
 
 
 def hg_cols(unit: str) -> list:
@@ -556,6 +575,7 @@ class PhyloApp(App):
     #strip #status { height: 1; color: $warning; }
     #ov { height: 1fr; }
     #overview { height: 1fr; border: round $primary; }
+    #queue { height: auto; max-height: 12; border: round $primary; }
     #ovfoot { height: auto; }
     #ovsteps { height: 1; color: $text-muted; }
     #tabbar { height: 1; }
@@ -684,6 +704,7 @@ class PhyloApp(App):
             yield Static("", id="tabbar")
             yield Static("", id="ovsteps")      # step 1 / step 2 over their columns
             yield SortTable(id="overview", cursor_type="cell")
+            yield DataTable(id="queue", cursor_type="none", show_cursor=False)
             yield SortTable(id="rtab", cursor_type="cell")
             yield Static("", id="ovfoot")
         with Grid(id="hgview"):
@@ -706,7 +727,11 @@ class PhyloApp(App):
 
     def on_mount(self) -> None:
         self.query_one("#stages", DataTable).add_columns("stage", "done", "run", "ready", "blk", "total")
-        self.query_one("#overview", SortTable).set_cols(OV_COLS)
+        self.query_one("#overview", SortTable).set_cols(ov_sortcols(ov_columns(self.cfg)))
+        q = self.query_one("#queue", DataTable)
+        q.add_columns(*model.QUEUE_COLS)
+        q.can_focus = False                      # shown only; tab / arrows stay on the overview
+        q.border_title = "Running jobs"
         self.query_one("#rtab", SortTable).set_cols(RT_COLS)
         self._set_units(force=True)
         self.query_one("#res", SortTable).set_cols(RES_COLS)
@@ -812,8 +837,14 @@ class PhyloApp(App):
             clustered = frozenset(model.clustered_hgs(self.cfg))
         except OSError:
             clustered = frozenset()
+        queue = None
+        if known and self.view == "overview" and self.tab == "jobs":   # the running-jobs pane
+            try:
+                queue = model.project_jobs(exp, fams)
+            except model.ModelError:
+                queue = None
         snap = dict(ov_rows=ov_rows, by=by, ov_inputs=(exp, states, fams, fstates), known=known,
-                    clustered=clustered,
+                    clustered=clustered, queue=queue,
                     fam_warn=fam_warn, hg_count=hg_count, when=datetime.now(), hg=None)
         if self.view == "hgs":               # the slow part: attempt history, only in the HG view
             for hg in exp:                   # FASTAs are read here, off the UI thread, once
@@ -953,6 +984,8 @@ class PhyloApp(App):
             self._regroup()
         else:
             self._fill_overview(snap["ov_rows"])
+        if snap.get("queue") is not None:
+            self._fill_queue(snap["queue"])
         self._og_cache_check()
         self._maybe_load_rtab()
         hg = snap["hg"]
@@ -1040,6 +1073,7 @@ class PhyloApp(App):
         self.query_one("#resv").display = self.view == "results"
         jobs = self.tab == "jobs"
         self.query_one("#overview").display = jobs
+        self.query_one("#queue").display = jobs
         self.query_one("#ovsteps").display = jobs
         self.query_one("#rtab").display = not jobs
         self._set_tabbar()
@@ -1239,19 +1273,24 @@ class PhyloApp(App):
     def _fill_overview(self, rows: list) -> None:
         self.ov_rows = rows                      # as computed; ov_shown is what the table shows
         self.ov_shown = ov_order(rows, self.ov_sort, self.ov_hide)
-        t =self.query_one("#overview", DataTable)
+        t =self.query_one("#overview", SortTable)
+        cols = ov_columns(self.cfg)
         keep = self._key_at_cursor(t)
         keep_row = t.cursor_row
         col = t.cursor_column
-        if col >= 2 and stage_at_column(col) is None:      # never restore onto the separator
+        want = ov_sortcols(cols)
+        if [c.name for c in t.cols] != [c.name for c in want]:   # GeneRax switched in Setup
+            t.set_cols(want)
+            col = min(col, len(want) - 1)
+        if col >= 2 and stage_at_column(col, cols) is None:      # never restore onto the separator
             col += 1
         t.clear()
         width = {st: max((len(f"{c[0]}/{sum(c)}") for r in self.ov_shown
                           for c in [r.per_stage.get(st)] if c), default=0)
-                 for st in OV_COLUMNS if st is not None}     # numbers right-aligned per column
+                 for st in cols if st is not None}     # numbers right-aligned per column
         for r in self.ov_shown:
             cells = []
-            for st in OV_COLUMNS:
+            for st in cols:
                 if st is None:
                     cells.append(OV_SEP)
                     continue
@@ -1269,6 +1308,15 @@ class PhyloApp(App):
         self._overview_footer()
         if self._og_cache is not None:          # same groups (c / f, refresh) on the Results tab
             self._fill_rtab()
+
+    def _fill_queue(self, rows: list) -> None:
+        """The running-jobs pane under the overview: this project's squeue lines, in the
+        columns of `list_current_jobs` (Grygoriy, 05/11/2026)."""
+        q = self.query_one("#queue", DataTable)
+        q.clear()
+        for r in rows:
+            q.add_row(*r)
+        q.border_title = f"Running jobs ({len(rows)})"
 
     def _fill_ovsteps(self) -> None:
         """The line above the overview: "step 1 ──┐" over search..cluster (the ┐ on the │
@@ -1305,7 +1353,7 @@ class PhyloApp(App):
         if not t.columns:
             return None
         col = t.cursor_column
-        return ("group", "HGs")[col] if col < 2 else stage_at_column(col)
+        return ("group", "HGs")[col] if col < 2 else stage_at_column(col, ov_columns(self.cfg))
 
     def _overview_footer(self) -> None:
         """#ovfoot is the Results tab's status line; on the Jobs tab it is hidden (the per-row
@@ -1331,15 +1379,16 @@ class PhyloApp(App):
         st = self.query_one("#stages", DataTable)
         keep_stage = self.stage
         st.clear()
-        for name in TUI_STAGES:
+        shown = tui_stages(self.cfg)
+        for name in shown:
             c = row.per_stage.get(name)
             if c is None:
                 st.add_row(name, "n/a", "", "", "", "", key=name)
             else:
                 total = row.n_fams if name in core.FAMILY_STAGES else row.total   # families / HGs
                 st.add_row(name, str(c[0]), str(c[1]), str(c[2]), str(c[3]), str(total), key=name)
-        if keep_stage in TUI_STAGES:
-            st.move_cursor(row=TUI_STAGES.index(keep_stage))
+        if keep_stage in shown:
+            st.move_cursor(row=shown.index(keep_stage))
 
     def _auto_pick_filter(self) -> None:
         """While the filter is still the automatic one, pick the first filter (FILTERS order)
@@ -1363,7 +1412,7 @@ class PhyloApp(App):
             self.stage = stage
             st = self.query_one("#stages", DataTable)
             if st.row_count:
-                st.move_cursor(row=TUI_STAGES.index(stage))
+                st.move_cursor(row=tui_stages(self.cfg).index(stage))
         self.rows = self.by_stage.get(self.stage, [])
         self._auto_filter = True
         self._auto_pick_filter()
@@ -1485,7 +1534,8 @@ class PhyloApp(App):
             return
         if event.data_table.id != "overview" or self.view != "overview":
             return
-        stage = stage_at_column(event.coordinate.column)   # None: group, HGs or │ -> current stage
+        stage = stage_at_column(event.coordinate.column,    # None: group, HGs or │ -> current stage
+                                ov_columns(self.cfg))
         self.open_group(event.cell_key.row_key.value, stage)
 
     def on_data_table_cell_highlighted(self, event: DataTable.CellHighlighted) -> None:
@@ -1526,7 +1576,8 @@ class PhyloApp(App):
         if self.stage in core.FAMILY_STAGES:
             head, stages = f"[b]{hg}[/]  {self.hg_count.get(hg, 0)} HGs", core.FAMILY_STAGES
         else:
-            head, stages = f"[b]{hg}[/]  {self.nseq.get(hg, 0)} seqs", core.HG_STAGES
+            head, stages = (f"[b]{hg}[/]  {self.nseq.get(hg, 0)} seqs",
+                            [s for s in core.HG_STAGES if core.applicable(self.cfg, s)])
         latest = history.latest_by_stage([a for a in self.atts if a.hg == hg])
         lines = [head, ""]
         for st in stages:
