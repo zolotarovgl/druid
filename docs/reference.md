@@ -288,7 +288,11 @@ stages read (`MAFFT_OPT`, `TREE_METHOD`, `IQTREE2_MODEL`, `SUBS_MODEL`, `SPECIES
 `resources_tsv`, `min_seqs`, `min_distinct`). `job_prefix` is required (Setup › Project in the
 TUI, or `job_prefix:` in the file): 1-20 characters, letters, digits and `_`, starting with a
 letter; jobs are named `<job_prefix>-<stage>`, and `druid jobs` / the TUI show only the jobs of
-this project's own runs. An adopted project keeps its old `phylo-<stage>` names. Relative paths are relative to the project. Values
+this project's own runs. An adopted project keeps its old `phylo-<stage>` names.
+GeneRax runs with the substitution model IQ-TREE selected for the family (the
+`Best-fit model:` line of `gene_trees/<HG>.log`, e.g. `WAG+F+I+G4`); `SUBS_MODEL` is used only
+when there is none (FastTree, a fixed IQ-TREE model). Until 05/11/2026 GeneRax always ran with
+`SUBS_MODEL`, so GeneRax trees made before then used LG for every family. Relative paths are relative to the project. Values
 mirror `nextflow.config` + the `precise` profile and the 24/09/2026 run
 (`-profile slurm,precise --run_generax`). `proteomes_dir`, `pfam_db` and `hmm_dir` are read-only
 inputs and may point anywhere; everything druid writes (`outdir`, `runs_dir`, `infasta`,
