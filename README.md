@@ -6,7 +6,6 @@ one SLURM job array per stage. Full reference: [docs/reference.md](docs/referenc
 ## Test run (CRG cluster, lab members)
 
 ```bash
-ssh login1.hpc.crg.es
 git clone --recurse-submodules https://github.com/zolotarovgl/druid
 conda activate /no_backup/asebe/gzolotarov/druid-env-test/env
 module load OpenMPI
