@@ -347,7 +347,7 @@ class SortTable(DataTable):
         """Show the current sort / header cursor in the labels.  The width never changes (a
         sortable label measures 2 cells more than its text, see _HeadText), so only the caches
         of the rendered header have to go: notify_style_update() is the public method that
-        clears them and refreshes (checked on Textual 8.2.8, see README)."""
+        clears them and refreshes (checked on Textual 8.2.8, see docs/reference.md)."""
         for i, col in enumerate(self.ordered_columns[:len(self.cols)]):
             col.label = self._label(i)
         self.notify_style_update()
