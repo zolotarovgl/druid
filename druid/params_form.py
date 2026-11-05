@@ -41,7 +41,7 @@ FIELDS = (
             [(v, v) for v in ("TEST", "MFP", "LG+G4", "WAG+G4")]),
     Field("min_seqs", "Phylogeny", "min seqs", "number", num="int", minimum=4),
     Field("min_distinct", "Phylogeny", "min distinct", "number", num="int", minimum=1),
-    _preset("SUBS_MODEL", "GeneRax", "substitution model", [(v, v) for v in ("LG", "LG+G", "WAG", "JTT")]),
+    _preset("SUBS_MODEL", "GeneRax", "model if no IQ-TREE fit",[(v, v) for v in ("LG", "LG+G", "WAG", "JTT")]),
     Field("MAX_SPR", "GeneRax", "max SPR radius", "number", num="int", minimum=1),
     Field("NCPU_GENERAX", "GeneRax", "cpus", "number", num="int", minimum=1, frozen=False),
     Field("REFSPECIES", "POSSVM", "reference species", "species"),

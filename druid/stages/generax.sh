@@ -5,6 +5,17 @@ ALN="$1"
 TREE="$2"
 SPECIES_TREE_FILE="$3"
 
+# The substitution model IQ-TREE selected for this family (Grygoriy, 05/11/2026), as gxsup does;
+# SUBS_MODEL only when the tree log has none (FastTree, a fixed model, no log). GeneRax reads
+# IQ-TREE's syntax (WAG+F+I+G4, JTT+I, ...; checked on GeneRax in phylo, 05/11/2026).
+PHYLOG="${OUTDIR}/gene_trees/${ID}.log"
+MODEL=""
+if [[ -s "$PHYLOG" ]]; then
+    MODEL=$(sed -n 's/.*Best-fit model: \([^ ]*\).*/\1/p' "$PHYLOG" | head -1)
+fi
+if [[ -z "$MODEL" ]]; then MODEL="${SUBS_MODEL}"; fi
+echo "${ID}: GeneRax substitution model $MODEL" >&2
+
 export OMP_NUM_THREADS=${CPUS}
 export OPENBLAS_NUM_THREADS=${CPUS}
 export MKL_NUM_THREADS=${CPUS}
@@ -62,7 +73,7 @@ python ${DRUID_HOME}/submodules/phylogeny/main.py generax \
     --gene_tree $GENE_TREE \
     --species_tree ${SPECIES_TREE_FILE} \
     --output_dir ${ID}_generax \
-    --subs_model ${SUBS_MODEL} \
+    --subs_model "${MODEL}" \
     --max_spr ${MAX_SPR} \
     --cpus ${CPUS} \
     --logfile ${ID}.generax.log \
