@@ -29,6 +29,13 @@ def tips(newick: str) -> set:
     return {n.name for n in _load(newick).iter_leaves()}
 
 
+def tip_list(newick: str) -> list:
+    """The tip names in tree order (tips() as a list)."""
+    if not newick.strip():
+        return []
+    return [n.name for n in _load(newick).iter_leaves()]
+
+
 def has_polytomy(newick: str) -> bool:
     return bool(newick.strip()) and any(len(n.children) > 2 for n in _load(newick).traverse())
 

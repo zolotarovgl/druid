@@ -689,13 +689,23 @@ def test_init_without_dest_uses_the_current_dir(tmp_path, monkeypatch):
     assert (tmp_path / "druid.yaml").is_file()
 
 
-def test_init_without_dest_in_a_non_empty_dir_writes_nothing(tmp_path, monkeypatch):
+def test_init_without_dest_in_a_non_empty_dir_keeps_its_files(tmp_path, monkeypatch):
     _tty(monkeypatch, False)
     (tmp_path / "x.txt").write_text("keep")
     monkeypatch.chdir(tmp_path)
     r = CliRunner().invoke(cli_mod.app, ["init"])
-    assert r.exit_code == 2 and "not empty" in r.output
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["x.txt"]
+    assert r.exit_code == 0, r.output
+    assert (tmp_path / "druid.yaml").is_file() and (tmp_path / "x.txt").read_text() == "keep"
+
+
+def test_init_without_dest_in_a_project_writes_nothing(tmp_path, monkeypatch):
+    _tty(monkeypatch, False)
+    (tmp_path / "druid.yaml").write_text("mine")
+    monkeypatch.chdir(tmp_path)
+    r = CliRunner().invoke(cli_mod.app, ["init"])
+    assert r.exit_code == 2 and "druid.yaml already exists" in r.output
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["druid.yaml"]
+    assert (tmp_path / "druid.yaml").read_text() == "mine"
 
 
 def test_init_on_a_tty_opens_tui_on_new_project(tmp_path, monkeypatch):

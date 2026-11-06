@@ -174,6 +174,54 @@ def tree_base(raw: dict, root: Path) -> str:
     return "chromo" if _resolve(ts, root) == Path(root) / CHROMO_TREE else "custom"
 
 
+# Species sets for the Setup Species filter (Grygoriy, 06/11/2026): "@v3" / "@chromo" = the tips of
+# the project's copy of a shipped tree; "@<file>" = the codes in a text file.
+SPECIES_SETS = {"v3": "data/base_tree.newick", "chromo": CHROMO_TREE}
+
+
+def _tree_tips(p: Path) -> list:
+    from ete3.parser.newick import NewickError   # ete3: only when a set is asked for
+    from druid import sptree
+    try:
+        return sptree.tip_list(Path(p).read_text())
+    except NewickError as e:
+        raise ValueError(f"not a newick tree ({e})") from None
+
+
+def species_set(spec: str, root: Path) -> tuple:
+    """(codes in order, "") for "@v3", "@chromo" (case ignored) or "@<file>" (absolute or relative
+    to the project root; codes split on whitespace and commas, `#` starts a comment, duplicates
+    dropped); ([], one-line error) when it cannot be read."""
+    name = spec.strip()[1:].strip()
+    if not name:
+        return [], "type @v3, @chromo or @<file> (one species code per line)"
+    tree = SPECIES_SETS.get(name.lower())
+    p = _resolve(tree or name, root)
+    if not p.is_file():
+        return [], f"{p}: file not found"
+    try:
+        if tree:
+            codes = _tree_tips(p)
+        else:
+            codes = [w for line in p.read_text().splitlines()
+                     for w in re.split(r"[,\s]+", line.split("#", 1)[0]) if w]
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return [], f"{p}: {e}"
+    codes = list(dict.fromkeys(codes))
+    return (codes, "") if codes else ([], f"{p}: no species codes")
+
+
+def shipped_tips(root: Path) -> set:
+    """Every tip of the project's shipped trees (v3, chromo); a missing or broken tree adds none."""
+    out = set()
+    for rel in SPECIES_SETS.values():
+        try:
+            out |= set(_tree_tips(Path(root) / rel))
+        except (OSError, UnicodeDecodeError, ValueError):
+            pass
+    return out
+
+
 def base_tree_files(raw: dict, root: Path):
     """(binary, origin) newick paths: raw["tree_source"] (one user tree for both) if set, else the
     project's data/base_tree.binary.newick and data/base_tree.newick."""

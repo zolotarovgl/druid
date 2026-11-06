@@ -341,8 +341,8 @@ def _on_terminal() -> bool:
 
 
 @app.command()
-def init(dest: Path = typer.Argument(Path("."), help="new or empty directory (default: the "
-                                                     "current directory)"),
+def init(dest: Path = typer.Argument(Path("."), help="project directory without druid.yaml or "
+                                                     "data/ (default: the current directory)"),
          no_tui: bool = typer.Option(False, "--no-tui", help="do not open the TUI afterwards")):
     """Make a druid project directory, then open the TUI on it."""
     from datetime import date

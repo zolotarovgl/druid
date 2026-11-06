@@ -22,8 +22,13 @@ class ProjectError(RuntimeError):
 
 def init(dest: Path, today: str) -> list:
     dest = Path(dest).expanduser().resolve()
-    if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
-        raise ProjectError(f"{dest} is not empty; druid init needs a new or empty directory")
+    # A non-empty dir is fine (Grygoriy, 06/11/2026); init never overwrites, so only the names it
+    # writes block it: druid.yaml and data/.
+    if dest.exists() and not dest.is_dir():
+        raise ProjectError(f"{dest} is not a directory")
+    for name in (paths.CONFIG_NAME, "data"):
+        if (dest / name).exists() or (dest / name).is_symlink():
+            raise ProjectError(f"{dest / name} already exists; druid init writes nothing there")
     paths.mkdir(dest / "data", parents=True, exist_ok=True, root=dest)
     out = [paths.write_text(dest / "druid.yaml", TEMPLATE.read_text().format(today=today), root=dest)]
     out += [paths.copy2(DATA / f, dest / "data" / f, root=dest) for f in ShippedData]

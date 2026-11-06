@@ -1837,3 +1837,39 @@ def test_S_refused_while_prepare_runs(proj, monkeypatch):
             await pilot.pause()
             assert isinstance(app.screen, tui.RunScreen)
     _run(go())
+
+
+def test_species_sets_and_dim_rows(proj):
+    """@v3 / @<file> in the Species filter; species in no shipped tree are dim (06/11/2026)."""
+    root, _prot, _mine = proj
+    (root / "data" / "base_tree.newick").write_text("(Aaa:1,Ccc:1)R;")   # Bbb: in no shipped tree
+    (root / "data" / "my.txt").write_text("# mine\nBbb\nQqq, Aaa\n")
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            t = scr.query_one("#sp-table")
+            rows = {str(t.get_row_at(i)[1]): t.get_row_at(i)[1] for i in range(t.row_count)}
+            assert rows["Bbb"].style == "dim" and rows["Aaa"].style == ""
+            assert "1 dim: in no shipped tree" in _text(scr, "#sp-count")
+            scr.query_one("#sp-filter").value = "@v3"
+            await pilot.pause()
+            assert [str(t.get_row_at(i)[1]) for i in range(t.row_count)] == ["Aaa"]
+            assert "not found: Ccc" in _text(scr, "#sp-count")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert _raw()["species"] == ["Aaa"]
+            scr.query_one("#sp-filter").value = "@data/my.txt"
+            await pilot.pause()
+            assert [str(t.get_row_at(i)[1]) for i in range(t.row_count)] == ["Bbb", "Aaa"]
+            assert "not found: Qqq" in _text(scr, "#sp-count")
+            t.focus()
+            await pilot.press("A")                                    # untick the set
+            await pilot.pause()
+            assert _raw().get("species") in ([], None)
+            scr.query_one("#sp-filter").value = "@nope.txt"
+            await pilot.pause()
+            assert t.row_count == 0 and "nope.txt: file not found" in _text(scr, "#sp-count")
+    _run(go())

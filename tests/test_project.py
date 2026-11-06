@@ -41,14 +41,39 @@ def test_init_into_an_empty_existing_dir_is_fine(tmp_path):
     assert (tmp_path / "e" / "druid.yaml").is_file()
 
 
-def test_init_refuses_a_non_empty_dir_and_writes_nothing(tmp_path):
+def test_init_into_a_non_empty_dir_keeps_its_files(tmp_path):
+    """Grygoriy, 06/11/2026: a non-empty dir is fine; only druid.yaml / data/ block init."""
     d = tmp_path / "full"
     d.mkdir()
     (d / "x").write_text("x")
+    (d / "sub").mkdir()
+    (d / "sub" / "y").write_text("y")
+    project.init(d, today="14/10/2026")
+    assert (d / "druid.yaml").is_file() and (d / "data" / "base_tree.newick").is_file()
+    assert (d / "x").read_text() == "x" and (d / "sub" / "y").read_text() == "y"
+
+
+@pytest.mark.parametrize("taken", ["druid.yaml", "data"])
+def test_init_refuses_an_existing_project_file_and_writes_nothing(tmp_path, taken):
+    d = tmp_path / "full"
+    d.mkdir()
+    (d / "x").write_text("x")
+    if taken == "data":
+        (d / "data").mkdir()
+    else:
+        (d / taken).write_text("mine")
     before = _tree_state(d)
-    with pytest.raises(project.ProjectError, match="not empty"):
+    with pytest.raises(project.ProjectError, match=f"{taken} already exists"):
         project.init(d, today="14/10/2026")
     assert _tree_state(d) == before
+
+
+def test_init_refuses_a_file_as_dest(tmp_path):
+    f = tmp_path / "f"
+    f.write_text("x")
+    with pytest.raises(project.ProjectError, match="not a directory"):
+        project.init(f, today="14/10/2026")
+    assert f.read_text() == "x"
 
 
 def _phylohpc(tmp_path) -> Path:
@@ -98,7 +123,7 @@ def test_cli_init_and_adopt(tmp_path):
     assert r.exit_code == 0, r.output
     assert "druid.yaml" in r.output
     r = CliRunner().invoke(cli.app, ["init", str(tmp_path / "p")])
-    assert r.exit_code == 2 and "not empty" in r.output
+    assert r.exit_code == 2 and "druid.yaml already exists" in r.output
 
 
 @pytest.mark.parametrize("text", ["a: [unclosed\n", "- just\n- a list\n", "scalar\n"])

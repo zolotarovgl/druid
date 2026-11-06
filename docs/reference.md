@@ -97,7 +97,7 @@ MaxArraySize), each chunk its own `ids_<k>.txt` / `array_<k>.sbatch` / sbatch ca
 ## Projects
 
 ```
-druid init DIR       # (--no-tui: stay in the shell, otherwise opens the TUI on DIR) new or empty directory: druid.yaml + data/ (shipped trees, species_info.tsv, Mmus names, empty families.csv)
+druid init DIR       # (--no-tui: stay in the shell, otherwise opens the TUI on DIR; DIR defaults to .) any directory without druid.yaml or data/ (existing files are kept): druid.yaml + data/ (shipped trees, species_info.tsv, Mmus names, empty families.csv)
 druid adopt DIR      # an existing phylohpc project (has phylocli/config.yaml): writes only DIR/druid.yaml
 ```
 

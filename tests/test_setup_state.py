@@ -261,3 +261,46 @@ def test_refnames_missing_is_a_blocker(proj):
     assert any(b.startswith("REFNAMES") and "not found" in b for b in ss.blockers(raw, cfg, root))
     raw["species"] = []                          # only when species are ticked
     assert not any(b.startswith("REFNAMES") for b in ss.blockers(raw, cfg, root))
+
+
+# ---- species sets: @v3 / @chromo / @<file> (Grygoriy, 06/11/2026) ---------------------------------
+def test_species_set_from_the_shipped_trees(tmp_path):
+    root = tmp_path / "p"
+    project.init(root, "06/11/2026")
+    v3, err = ss.species_set("@v3", root)
+    assert err == "" and len(v3) == 59 and v3[0] == "Mbre" and len(set(v3)) == 59
+    chromo, err = ss.species_set("@CHROMO", root)
+    assert err == "" and len(chromo) == 94
+    assert ss.shipped_tips(root) == set(v3) | set(chromo)
+
+
+def test_species_set_from_a_text_file(tmp_path):
+    (tmp_path / "sp.txt").write_text("# my set\nMlei\n\nHsap, Nvec  Mlei\n  Aque # sponge\n")
+    want = ["Mlei", "Hsap", "Nvec", "Aque"]
+    assert ss.species_set("@sp.txt", tmp_path) == (want, "")                 # project-relative
+    assert ss.species_set(f"@{tmp_path / 'sp.txt'}", tmp_path / "x") == (want, "")   # absolute
+
+
+def test_species_set_errors(tmp_path):
+    codes, err = ss.species_set("@nope.txt", tmp_path)
+    assert codes == [] and "not found" in err and "nope.txt" in err
+    (tmp_path / "empty.txt").write_text("# nothing\n\n")
+    assert ss.species_set("@empty.txt", tmp_path) == ([], f"{tmp_path / 'empty.txt'}: no species codes")
+    codes, err = ss.species_set("@", tmp_path)
+    assert codes == [] and "@v3" in err
+
+
+def test_shipped_tips_survives_a_missing_tree(tmp_path):
+    root = tmp_path / "p"
+    project.init(root, "06/11/2026")
+    (root / ss.CHROMO_TREE).unlink()
+    assert len(ss.shipped_tips(root)) == 59
+
+
+def test_species_set_broken_tree_is_an_error_not_a_crash(tmp_path):
+    root = tmp_path / "p"
+    project.init(root, "06/11/2026")
+    (root / ss.CHROMO_TREE).write_text("((a,b);garbage(")
+    codes, err = ss.species_set("@chromo", root)
+    assert codes == [] and "not a newick tree" in err
+    assert len(ss.shipped_tips(root)) == 59

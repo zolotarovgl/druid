@@ -127,13 +127,22 @@ def _ticked_note(sps: list, most: int = 5) -> str:
     return f"{note} ({', '.join(sps)})" if len(sps) <= most else note
 
 
-def _species_filter(cands: list, text: str) -> tuple:
-    """(shown, not_found) for the Species filter. Two or more words separated by commas or spaces,
+def _species_filter(cands: list, text: str, root=None) -> tuple:
+    """(shown, not_found) for the Species filter. "@v3", "@chromo" or "@<file>": that species set
+    (setup_state.species_set; Grygoriy, 06/11/2026), its codes that are no candidate (or the one
+    error) as not_found. Two or more words separated by commas or spaces,
     at least one of them a candidate's prefix (case ignored): the list of prefixes, in the order
     typed, and the words that are no prefix (Grygoriy, 25/10/2026). Otherwise (one word, or a
     phrase such as "Metazoa, Ctenophora" or a Latin name): a substring of any column."""
-    words = [w for w in re.split(r"[,\s]+", text.strip()) if w]
     prefixes = {c.sp.lower() for c in cands}
+    if text.strip().startswith("@"):
+        codes, err = setup_state.species_set(text, root if root is not None else paths.project_root())
+        if err:
+            return [], [err]
+        shown = [c for w in dict.fromkeys(w.lower() for w in codes)
+                 for c in cands if c.sp.lower() == w]
+        return shown, [w for w in codes if w.lower() not in prefixes]
+    words = [w for w in re.split(r"[,\s]+", text.strip()) if w]
     if len(words) > 1 and any(w.lower() in prefixes for w in words):
         shown = [c for w in dict.fromkeys(w.lower() for w in words)
                  for c in cands if c.sp.lower() == w]
@@ -292,6 +301,8 @@ class SetupScreen(Screen):
                     yield Input(placeholder="filter (any column, or prefixes: Mlei, Hsap Nvec) · "
                                             "enter: tick all shown",
                                 id="sp-filter")
+                    yield Static("sets: @v3 (59) · @chromo (94) · @<file> (one code per line) · "
+                                 "dim: in no shipped tree", classes="note", markup=False)
                     yield DataTable(id="sp-table", cursor_type="row")
                     yield Static("", id="sp-count", markup=False)
                 with Vertical(id="sec-analyses"):
@@ -422,6 +433,7 @@ class SetupScreen(Screen):
         self._cands, self._rowless = self._try(
             "proteome sources", lambda: setup_state.candidates(self._srcs), ([], []))
         self._sel = self._try("species", lambda: setup_state.selected(raw), [])
+        self._shipped = self._try("shipped trees", lambda: setup_state.shipped_tips(root), set())
         self._ro_all = raw.get("prepare") == "locked"
         if self._ro_all:
             self._sp_reason = LOCKED_ALL
@@ -621,13 +633,20 @@ class SetupScreen(Screen):
         row = t.cursor_row
         t.clear()
         ticked = set(self._sel)
-        for c in self._shown:
-            t.add_row(_tick((c.sp, c.source) in ticked), c.sp, c.name, c.taxonomy, c.source)
+        dim = 0
+        for c in self._shown:                    # dim: in no shipped tree (Grygoriy, 06/11/2026)
+            style = "" if c.sp in self._shipped else "dim"
+            dim += bool(style)
+            tick = _tick((c.sp, c.source) in ticked)
+            tick.style = style
+            t.add_row(tick, *(Text(str(v), style=style) for v in (c.sp, c.name, c.taxonomy, c.source)))
         if self._shown:
             t.move_cursor(row=min(max(row, 0), len(self._shown) - 1))
         count = f"{len(self._sel)} ticked / {len(self._cands)}"
         if q:
             count += f" · {len(self._shown)} shown"
+        if dim:
+            count += f" · {dim} dim: in no shipped tree"
         if self._sp_unknown:
             count += " · not found: " + ", ".join(self._sp_unknown)
         self.query_one("#sp-count", Static).update(count)
