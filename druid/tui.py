@@ -519,6 +519,8 @@ KEYS = {
         ("Open", [("enter o", "open the group's Results"),
                   ("t", "trees open from a group's Results (o, then t)")]),
         ("Source", [("p", "possvm ↔ possvm_prev")]),
+        ("Counts", [("H", "counts heatmap: ALL → classes · category → its families · "
+                          "family → its HGs")]),
         ("Group & sort", [("c", "group by category"), ("f", "group by family"),
                           ("s", "sort by the column"), ("h", "hide rows with 0 in the column")]),
         ("Other", [("R", "re-read"), ("?", "this list"), (":q!", "quit druid")]),
@@ -540,7 +542,8 @@ KEYS = {
                   ("s", "sort (↑ on the first row: the header)")]),
         ("Look", [("/", "filter this pane"), ("p", "possvm ↔ possvm_prev"),
                   ("t", "gene tree: HG → whole tree · OG → its MRCA, members marked · "
-                        "member → its tip")]),
+                        "member → its tip"),
+                  ("H", "counts heatmap: the HG's OGs (on an OG or member: cursor on that OG)")]),
         ("Other", [("esc q", "clear filters, then back"), ("R", "refresh"), ("?", "this list"),
                    (":q!", "quit druid")]),
         ("Notes", [("⚠", "support 0 = GeneRax bug case; check possvm_prev")])]),
@@ -615,6 +618,7 @@ class PhyloApp(App):
         Binding("t", "open_tree", "tree"),
         Binding("p", "toggle_source", "possvm/prev"),
         Binding("slash", "member_filter", "filter members"),
+        Binding("H", "counts", "counts heatmap"),
         Binding("R", "refresh", "refresh"),
         Binding("question_mark", "keys", "keys"),
     ]   # q = esc and :q! quit: on_event, every screen; plain q is rewritten to escape there, so a
@@ -693,6 +697,9 @@ class PhyloApp(App):
         self._cluster_ogs: set = set()          # ids of cluster-only pseudo-OGs (no origin)
         self._res_small: set = set()            # cluster-only HGs outside the expected set
         self._cmd: "str | None" = None          # the `:` command typed so far; None = not in one
+        self._counts: "tuple | None" = None     # H: (family cols, HG cols, unreadable), per session
+        self._counts_note = ""                  # "reading counts k/n" while that read runs
+        self._counts_gen = 0
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -958,7 +965,9 @@ class PhyloApp(App):
         self._update_status()
 
     def _update_status(self) -> None:
-        if self.view == "results":
+        if self._counts_note:                    # H: the counts read, in any view
+            text = self._counts_note
+        elif self.view == "results":
             text = self._res_note if self._res_note.startswith("loading") else ""
         elif self.view == "hgs":
             text = "loading history…" if self._hist_loading else ""
@@ -1427,7 +1436,7 @@ class PhyloApp(App):
     def check_action(self, action: str, parameters: tuple) -> "bool | None":
         """Footer shows only the keys of the current view."""
         if action != "quit" and (isinstance(self.screen, (tv_widget.TreeScreen, KeysScreen))
-                                 or type(self.screen).__name__ == "SetupScreen"):
+                                 or type(self.screen).__name__ in ("SetupScreen", "CountsScreen")):
             return False                     # the tree / key list / Setup owns the keys; ctrl+q
             #                                  (Textual's quit; plain q is never bound) still quits
         f = self.focused
@@ -1449,7 +1458,7 @@ class PhyloApp(App):
             return self.view in ("hgs", "results")
         if action in ("open_results", "cycle_filter"):
             return self.view in ("overview", "hgs")
-        if action == "toggle_source":
+        if action in ("toggle_source", "counts"):
             return self.view == "results" or (self.view == "overview" and self.tab == "results")
         if action == "member_filter":
             return self.view == "results"
@@ -1943,30 +1952,38 @@ class PhyloApp(App):
         if self._tree_current(gen):
             self.notify(msg, severity="warning")
 
+    def _tree_model(self, hg: str, source: str) -> tuple:
+        """(TreeModel, newick path, notes) of an HG's gene tree in `source`: the newick, its
+        ortholog_groups.csv as metadata and species_info.tsv colours.  Raises FileNotFoundError
+        when there is no tree file; any other read / parse error propagates.  Reads only (runs in
+        workers); shared by Results' t and the Counts screen's t."""
+        from treeview import model as tvm      # vendored: core puts phylocli/vendor on sys.path
+        notes: list = []
+        files = model.hg_tree_files(self.cfg, hg, source)
+        if files is None:
+            raise FileNotFoundError(f"{hg}: no {source} output")
+        path, csv = files
+        if not path.is_file():
+            raise FileNotFoundError(f"{hg}: no tree {path.name} in {source}/")
+        tree = tvm.load(path)
+        try:
+            cols, meta = tvm.load_meta(csv)
+        except (OSError, ValueError) as e:
+            cols, meta = None, None
+            notes.append(f"{csv.name}: {e} (no metadata)")
+        try:
+            colours = tvm.load_colours(model.species_info_path(self.cfg))
+        except Exception:                      # colours are cosmetic: species hash colours
+            colours = {}
+        m = tvm.TreeModel(tree, sep="_", colours=colours, meta=meta, meta_cols=cols)
+        return m, path, notes
+
     @work(thread=True, exclusive=True, group="tree")
     def _load_tree(self, hg: str, source: str, og, gene: "str | None", gen: int) -> None:
         """Reads the newick, its ortholog_groups.csv (as metadata) and species_info.tsv (colours)
         off the UI thread.  Any failure is a warning; the TUI never crashes on a bad tree."""
-        notes = []
         try:
-            from treeview import model as tvm      # vendored: core puts phylocli/vendor on sys.path
-            files = model.hg_tree_files(self.cfg, hg, source)
-            if files is None:
-                raise FileNotFoundError(f"{hg}: no {source} output")
-            path, csv = files
-            if not path.is_file():
-                raise FileNotFoundError(f"{hg}: no tree {path.name} in {source}/")
-            tree = tvm.load(path)
-            try:
-                cols, meta = tvm.load_meta(csv)
-            except (OSError, ValueError) as e:
-                cols, meta = None, None
-                notes.append(f"{csv.name}: {e} (no metadata)")
-            try:
-                colours = tvm.load_colours(model.species_info_path(self.cfg))
-            except Exception:                  # colours are cosmetic: species hash colours
-                colours = {}
-            m = tvm.TreeModel(tree, sep="_", colours=colours, meta=meta, meta_cols=cols)
+            m, path, notes = self._tree_model(hg, source)
         except Exception as e:                 # missing file, bad newick, ...
             self.call_from_thread(self._tree_warn, gen, f"tree: {e}")
             return
@@ -2005,6 +2022,208 @@ class PhyloApp(App):
             return None
         key = self._key_at_cursor(self.query_one("#ogs", DataTable))
         return next((o for o in r.ogs if o.id == key), None)
+
+    # ---- H: the Counts heatmap (spec docs/superpowers/specs/2026-11-11-druid-counts-heatmap-design.md)
+    def _counts_opener(self) -> "tuple[str, str | None, str | None] | None":
+        """(level, scope, focus column) for the cursor, per the spec's "Opening (H)" table; None
+        (with a warning) when the cursor is on nothing."""
+        if self.view == "overview" and self.tab == "results":
+            key = self._key_at_cursor(self.query_one("#rtab", DataTable))
+            if key is None:
+                self.notify("nothing under the cursor", severity="warning")
+                return None
+            if key == "ALL":
+                return "class", None, None
+            return ("hg" if self.by == "family" else "family"), key, None
+        if self.view == "results":
+            r = self._cur_res() if self.res_source is not None else None
+            if r is None:
+                self.notify("no HG under the cursor", severity="warning")
+                return None
+            pane = getattr(self.focused, "id", None) or "res"
+            og = self._cur_og() if pane in ("ogs", "members") else None
+            return "og", r.hg, (og.id if og is not None else None)
+        return None
+
+    def _counts_families(self) -> list:
+        """core.family_ids when params.genefam_info is set, else every search/*.genes.list stem."""
+        fams: set = set()
+        if self.cfg.params.get("genefam_info"):
+            fams = core.family_ids(self.cfg, strict=False)
+        if not fams:
+            d = self.cfg.outdir / "search"
+            try:
+                fams = {p.name[:-len(".genes.list")] for p in d.iterdir()
+                        if p.name.endswith(".genes.list")}
+            except OSError:
+                fams = set()
+        return sorted(fams)
+
+    def _counts_read(self, progress=None) -> tuple:
+        """(family cols, HG cols, unreadable files): every family's genes.list and every expected
+        HG's cluster FASTA.  Reads only; runs in a worker (and in the screen's R worker)."""
+        from druid import counts
+        fams = self._counts_families()
+        hgs = sorted(self._ov_inputs[0], key=model.hg_sort_key)
+        n, k, step = len(fams) + len(hgs), 0, 50
+        fam_cols, hg_cols, bad = [], [], 0
+        for items, read, out in ((fams, counts.family_cols, fam_cols),
+                                 (hgs, counts.hg_cols, hg_cols)):
+            for i in range(0, len(items), step):
+                if progress is not None:
+                    progress(k, n)
+                cols, b = read(self.cfg, items[i:i + step])
+                out.extend(cols)
+                bad += b
+                k += len(items[i:i + step])
+        self._counts = (fam_cols, hg_cols, bad)    # session cache (a tuple: one assignment)
+        return self._counts
+
+    def action_counts(self) -> None:
+        """H: the Counts heatmap at the cursor's level.  The species tree is checked first (a
+        bad one opens nothing); the family / HG columns are read once per session in a worker."""
+        if self._counts_note:                    # a read is running: it opens the screen
+            return
+        opener = self._counts_opener()
+        if opener is None:
+            return
+        from druid import counts
+        try:
+            counts.load_species_model(self.cfg)
+        except (OSError, ValueError) as e:
+            self.notify(f"species tree unreadable: {e}", severity="warning", markup=False)
+            return
+        if self._counts is not None:
+            self._push_counts(opener)
+            return
+        self._counts_gen += 1
+        self._counts_note = "reading counts…"
+        self._update_status()
+        self._load_counts(opener, self._counts_gen)
+
+    @work(thread=True, exclusive=True, group="counts")
+    def _load_counts(self, opener: tuple, gen: int) -> None:
+        """Own worker group: the Results-tab read, load_bg and the Results window never cancel it."""
+        def progress(k: int, n: int) -> None:
+            self.call_from_thread(self._counts_progress, gen, k, n)
+        try:
+            self._counts_read(progress)
+            err = ""
+        except Exception as e:                   # never let a worker kill the app
+            err = f"counts: {type(e).__name__}: {e}"
+        self.call_from_thread(self._counts_loaded, gen, opener, err)
+
+    def _counts_progress(self, gen: int, k: int, n: int) -> None:
+        if gen == self._counts_gen and self._counts_note:
+            self._counts_note = f"reading counts {k}/{n}"
+            self._update_status()
+
+    def _counts_loaded(self, gen: int, opener: tuple, err: str) -> None:
+        if gen != self._counts_gen:
+            return
+        self._counts_note = ""
+        self._update_status()
+        if err:
+            self.notify(err, severity="warning", markup=False)
+            return
+        if self.screen is self.screen_stack[0]:  # the user did not open something else meanwhile
+            self._push_counts(opener)
+
+    def _push_counts(self, opener: tuple) -> None:
+        from druid import counts
+        from druid.counts_tui import CountsScreen
+        try:
+            m = counts.load_species_model(self.cfg)     # fresh: the screen collapses its clades
+        except (OSError, ValueError) as e:
+            self.notify(f"species tree unreadable: {e}", severity="warning", markup=False)
+            return
+        level, scope, focus = opener
+        fam_cols, hg_cols, bad = self._counts
+        self.push_screen(CountsScreen(
+            self.cfg, m, fam_cols, hg_cols, level, scope, unreadable=bad,
+            og_source=self._counts_og_source, open_tree=self._counts_open_tree,
+            og_search=self._counts_og_search, reload=self._counts_read, focus_col=focus))
+
+    def _counts_og_source(self, hg: str, source: str) -> "model.HGOgs | None":
+        """The HG's OGs in `source`: from the Results-tab cache when it holds that HG in that
+        source, else read (that one HG).  None when the HG has no such output."""
+        c = self._og_cache
+        if c is not None and hg in c["hgs"]:
+            r = c["rows"].get(hg)
+            if r is not None and r.source == source:
+                return r
+        try:
+            ogs = model.read_ogs(self.cfg, hg, source)
+        except (OSError, model.ModelError) as e:
+            return model.HGOgs(hg, [], str(e), source)
+        return None if ogs is None else model.HGOgs(hg, ogs, source=source)
+
+    def _counts_og_search(self, query: str) -> "list | None":
+        """[(hg, OG)] whose OG id / name, a gene id or the HG id holds `query` (any case), over
+        the Results-tab OG cache; None (and that read started) when there is no cache yet."""
+        c = self._og_cache
+        if c is None:
+            if not self._rt_loading():
+                self._reload_rtab()
+            return None
+        q = query.lower()
+        hits = []
+        for hg in sorted(c["rows"], key=model.hg_sort_key):
+            r = c["rows"][hg]
+            if r.source not in ("possvm", "possvm_prev"):    # cluster-only pseudo-OGs: no genes
+                continue
+            in_hg = q in hg.lower()
+            for og in r.ogs:
+                if (in_hg or q in og.id.lower() or q in og.name.lower()
+                        or any(q in mb.gene.lower() for mb in og.genes)):
+                    hits.append((hg, og))
+        return hits
+
+    def _counts_open_tree(self, hg: str, source: str, og, species: set) -> None:
+        """Counts' t: the HG's gene tree; og given -> its MRCA, its members marked; else the root,
+        every tip of a species in `species` marked."""
+        self._tree_gen += 1
+        self._load_counts_tree(hg, source, og, frozenset(species), self._tree_gen)
+
+    @work(thread=True, exclusive=True, group="tree")
+    def _load_counts_tree(self, hg: str, source: str, og, species: frozenset, gen: int) -> None:
+        try:
+            m, path, notes = self._tree_model(hg, source)
+        except FileNotFoundError:
+            self.call_from_thread(self._counts_tree_warn, gen, f"no tree for {hg}")
+            return
+        except Exception as e:                   # bad newick, ...
+            self.call_from_thread(self._counts_tree_warn, gen, f"tree: {e}")
+            return
+        focus, title = 0, f"{hg} · {source}"
+        if og is not None:
+            ids = [m.tip(g.gene) for g in og.genes]
+            hl = [i for i in ids if i is not None]
+            if len(hl) < len(ids):
+                notes.append(f"{len(ids) - len(hl)} of {len(ids)} members not in the tree")
+            focus = m.mrca(hl) if hl else 0
+            title += f" · {og.id}"
+        else:
+            hl = [i for i in range(len(m)) if m.is_tip(i)
+                  and model.species_of(m.name[i]) in species]
+        self.call_from_thread(self._push_counts_tree, gen, m, focus, hl, title, path, notes)
+
+    def _counts_tree_current(self, gen: int) -> bool:
+        from druid.counts_tui import CountsScreen
+        return gen == self._tree_gen and isinstance(self.screen, CountsScreen)
+
+    def _counts_tree_warn(self, gen: int, msg: str) -> None:
+        if self._counts_tree_current(gen):
+            self.notify(msg, severity="warning", markup=False)
+
+    def _push_counts_tree(self, gen: int, m, focus: int, hl: list, title: str, path,
+                          notes: list) -> None:
+        if not self._counts_tree_current(gen):
+            return
+        self.push_screen(DruidTreeScreen(m, title=title, path=path, focus=focus, highlight=hl,
+                                         write_guard=paths.writable))
+        for n in notes:
+            self.notify(n, severity="warning", markup=False)
 
     def _origins_on(self) -> bool:
         """params.origins (default on): off, ORIGIN_TREE is never read and no origin is shown."""

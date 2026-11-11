@@ -32,8 +32,6 @@ Open work, newest first. Dates dd/mm/yyyy.
   possvm_prev, generax and gxsup altogether instead of showing n/a rows.
 - **Sub-project 5: step 2 as one chain** (`druid chain`, driver job, own retries, no Nextflow) —
   spec `docs/superpowers/specs/2026-11-02-druid-sub5-step2-chain-design.md`, awaiting review.
-- **Sub-project 4: counts heatmap** (in progress 11/11/2026) — spec refreshed for druid:
-  `docs/superpowers/specs/2026-11-11-druid-counts-heatmap-design.md`.
 - **First real `druid run`** on a test project (`/no_backup/asebe/gzolotarov/druid-test-run`,
   prefix `drtest`) — Grygoriy's to run.
 - treeview: one pre-existing failing test.

@@ -379,6 +379,25 @@ The tree opens with branch lengths to scale and collapsed by orthogroup (14/10/2
 member it opens on stays expanded (`e` expands all, `l` drops the lengths). The tree's `w`
 (write) prompt is prefilled inside the project and refuses a path outside it.
 
+`H` (Results tab and Results window, 11/11/2026) opens the **Counts heatmap**: species rows (the
+tips of `params.SPECIES_TREE` as a compact cladogram, plus `(not on tree)` when non-zero and `Σ`)
+× numbered gene-count columns, with a `total` column and a one-line legend. Where it opens: on the
+Results tab `ALL` → classes, a category row → that class's families, a family row (`f`) → that
+family's HGs; in the Results window an HG → its OGs, an OG or member → its HG's OGs with the cursor
+on that OG. Families count `search/<family>.genes.list`, HGs the headers of
+`clusters/<hg>.fasta` (expected HGs only), OGs the POSSVM csv (from the Results-tab cache when it
+holds them). The family / HG files are read once per session in the background (`reading counts
+k/n`); an unreadable species tree opens nothing (`species tree unreadable: …`). Keys in the
+heatmap: arrows / `pgup` `pgdn` `home` `end` move · `enter` drills class → family → HG → OG ·
+`esc` goes up a level, and closes at the level it opened at · `t` gene tree (HG level: whole
+tree, the cursor row's species marked; OG / Custom: the OG's MRCA, members marked; `no tree for
+<hg>` when there is none) · `c` colour z-score ↔ absolute · `s` sort columns by the cursor row
+(again: default order) · `z` collapse the clade above the cursor row · `e` expand all · `p`
+possvm ↔ possvm_prev (OG / Custom) · `/` search OGs by id/name, gene id or HG id, `enter` adds the
+hits to a Custom view (`OGs still loading` and the Results-tab read is started when there is no
+OG cache yet) · `x` drop the cursor's Custom column · `R` re-read the counts · `?` keys · `:q!`
+quits. Read-only: it writes nothing.
+
 `?` lists every key, in druid and in the tree (`esc`, `?` or `q` closes it); the help line at
 the top of each is one line (`… · ? keys`).
 

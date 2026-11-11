@@ -4355,3 +4355,155 @@ def test_running_jobs_pane_lists_this_projects_jobs(cli, monkeypatch):
             await pilot.pause()
             assert not q.display
     _run(go())
+
+
+# ---- H: the Counts heatmap ------------------------------------------------------------------------
+def _counts_fixture():
+    """write_results + a genes.list for tfs.A and cluster FASTAs whose headers are real gene ids."""
+    cfg = _cfg()
+    write_results(cfg)
+    (cfg.outdir / "search").mkdir(exist_ok=True)
+    (cfg.outdir / "search/tfs.A.genes.list").write_text(
+        "Mlei_v05_G1\nMlei_v05_G2\nHsap_ENSP1\nHsap_ENSP2\nNvec_v1_g3\nBova_x1\nMlei_v05_G9\n")
+    (cfg.outdir / "clusters/tfs.A.HG1.fasta").write_text(
+        "".join(f">{g}\nAA\n" for g in ("Mlei_v05_G1", "Mlei_v05_G2", "Hsap_ENSP1",
+                                          "Hsap_ENSP2", "Nvec_v1_g3")))
+    (cfg.outdir / "clusters/tfs.A.HG11.fasta").write_text(">Bova_x1\nAA\n>Mlei_v05_G9\nAA\n")
+    return cfg
+
+
+async def _H(app, pilot):
+    await pilot.press("H")
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+    await pilot.pause()
+
+
+def _counts_screen(app):
+    from druid.counts_tui import CountsScreen
+    return app.screen if isinstance(app.screen, CountsScreen) else None
+
+
+def test_H_on_results_tab_all_opens_class_level(cli):
+    _counts_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _results_tab(app, pilot)
+            rt = app.query_one("#rtab")
+            rt.move_cursor(row=[r.group for r in app.rt_shown].index("ALL"))
+            await pilot.pause()
+            await _H(app, pilot)
+            s = _counts_screen(app)
+            assert s is not None and (s.level, s.scope) == ("class", None)
+            assert [c.id for c in s.cols] == ["tfs"] and s.cols[0].total == 7
+            assert app._counts is not None and app._counts_note == ""
+            await pilot.press("escape")                       # esc at the opening level closes
+            await pilot.pause()
+            assert _counts_screen(app) is None and app.tab == "results"
+    _run(go())
+
+
+def test_H_on_results_tab_category_row_opens_family_level(cli):
+    _counts_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _results_tab(app, pilot)
+            app.query_one("#rtab").move_cursor(row=[r.group for r in app.rt_shown].index("tfs"))
+            await pilot.pause()
+            await _H(app, pilot)
+            s = _counts_screen(app)
+            assert s is not None and (s.level, s.scope) == ("family", "tfs")
+            assert [c.id for c in s.cols] == ["tfs.A"]
+    _run(go())
+
+
+def test_H_in_results_window_opens_og_level(cli):
+    _counts_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG1"
+            t = app.query_one("#ogs")
+            t.focus()
+            t.move_cursor(row=1)
+            await pilot.pause()
+            await _H(app, pilot)
+            s = _counts_screen(app)
+            assert s is not None and (s.level, s.scope) == ("og", "tfs.A.HG1")
+            assert s.focus_col == "tfs.A.HG1.1"
+            assert {c.id for c in s.cols} == {"tfs.A.HG1.0", "tfs.A.HG1.1"}
+    _run(go())
+
+
+def test_H_with_bad_species_tree_warns(cli, monkeypatch):
+    cfg = _counts_fixture()
+    from pathlib import Path
+    Path(cfg.params["SPECIES_TREE"]).write_text("(((")
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        notes = []
+        orig = app.notify
+        monkeypatch.setattr(app, "notify",
+                            lambda msg, *a, **k: (notes.append(str(msg)), orig(msg, *a, **k)))
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _results_tab(app, pilot)
+            await _H(app, pilot)
+            assert _counts_screen(app) is None
+            assert any("species tree unreadable" in n for n in notes)
+    _run(go())
+
+
+def test_counts_t_opens_tree_screen(cli):
+    _counts_fixture()
+    _write_trees(_cfg())
+
+    async def go():
+        from treeview.widget import TreeScreen, TreeView
+        from druid.counts_tui import FIXED
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _key(pilot, "f", "tab")                     # Results tab, grouped by family
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            app.query_one("#rtab").move_cursor(row=[r.group for r in app.rt_shown].index("tfs.A"))
+            await pilot.pause()
+            await _H(app, pilot)
+            s = _counts_screen(app)
+            assert s is not None and (s.level, s.scope) == ("hg", "tfs.A")
+            j = [c.id for c in s.cols].index("tfs.A.HG1")
+            row = next(i for i, tips in enumerate(s._ax.tips) if tips == frozenset({"Mlei"}))
+            s.query_one("#counts").move_cursor(row=row, column=FIXED + j)
+            await pilot.pause()
+            await pilot.press("t")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.pause()
+            assert isinstance(app.screen, TreeScreen)
+            m = app.screen.query_one(TreeView).model
+            assert m.highlight == {m.tip("Mlei_v05_G1"), m.tip("Mlei_v05_G2")}
+            await pilot.press("escape", "escape")
+            await pilot.pause()
+            assert _counts_screen(app) is not None              # back on the heatmap
+    _run(go())
+
+
+def test_H_listed_in_key_tables():
+    from textual.binding import Binding
+    from treeview.keys import missing_keys
+    for view in ("overview_results", "results"):
+        keys = [k for _, rows in tui.KEYS[view][1] for k, _ in rows]
+        assert any("H" in k.split() for k in keys), view
+    groups = [g for _, gs in tui.KEYS.values() for g in gs]
+    bindings = [b if isinstance(b, Binding) else Binding(*b)
+                for b in tui.PhyloApp.BINDINGS + tui.SortTable.BINDINGS]
+    assert missing_keys(bindings, groups) == []
+    assert any(b.key == "H" and b.action == "counts" for b in tui.PhyloApp.BINDINGS)
