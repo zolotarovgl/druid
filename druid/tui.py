@@ -2452,10 +2452,12 @@ class ResubmitScreen(ModalScreen):
                 Binding("escape", "cancel", "cancel")]
     CSS = """
     ResubmitScreen { align: center middle; }
-    #box { width: 90%; height: auto; border: round $warning; background: $surface; padding: 1; }
-    Input { width: 14; }
-    ResubmitScreen #box Horizontal { height: auto; }
-    ResubmitScreen .lbl { height: 3; content-align: left middle; }
+    #box { width: 90%; height: auto; max-height: 90%; overflow-y: auto; border: round $warning;
+           background: $surface; padding: 0 1; }
+    ResubmitScreen Input { width: 12; height: 1; border: none; padding: 0 1; background: $boost; }
+    ResubmitScreen Input:focus { background: $accent 40%; }
+    ResubmitScreen #box Horizontal { height: 1; }
+    ResubmitScreen .lbl { height: 1; }
     """
 
     def __init__(self, cfg: core.Config, stage: "str | None", groups: "list | None",
@@ -2481,9 +2483,9 @@ class ResubmitScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with _Box(id="box"):
             yield Label(f"[b]resubmit · {self.stage}[/]  enter = dry run · y = submit · esc q = cancel")
-            # Labels are as tall as an Input (3 rows, border included) and vertically centred,
-            # and the leading text is padded to one width, so every row's Inputs line up with
-            # the text and with each other (Grygoriy 11/11/2026: fields misaligned).
+            # One screen row per job line: borderless 1-row Inputs (Grygoriy 11/11/2026: not all
+            # jobs fit); the leading text is padded to one width, so every row's Inputs line up
+            # with the text and with each other (Grygoriy 11/11/2026: fields misaligned).
             leads = [f"{st + ' · ' if self.multi else ''}{len(hgs)} {core.unit(st)}"
                      f" · {why or 'other'} · mem "
                      for st, (why, _res, hgs) in zip(self._row_stage, self.groups)]
