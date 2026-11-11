@@ -4507,3 +4507,50 @@ def test_H_listed_in_key_tables():
                 for b in tui.PhyloApp.BINDINGS + tui.SortTable.BINDINGS]
     assert missing_keys(bindings, groups) == []
     assert any(b.key == "H" and b.action == "counts" for b in tui.PhyloApp.BINDINGS)
+
+
+def test_H_from_possvm_prev_results_keeps_the_source(cli):
+    _counts_fixture()
+
+    async def go():
+        from druid.counts_tui import FIXED
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            await pilot.press("p")                            # possvm -> possvm_prev
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.res_source == "possvm_prev"
+            assert app._key_at_cursor(app.query_one("#res")) == "tfs.A.HG1"
+            t = app.query_one("#ogs")
+            t.focus()
+            t.move_cursor(row=0)
+            await pilot.pause()
+            og = app._cur_og()
+            assert og.id == "tfs.A.HG1.0" and og.name == "like:Tbx2/Tbx3"
+            await _H(app, pilot)
+            s = _counts_screen(app)
+            assert s is not None and s.source == "possvm_prev" and s.focus_col == og.id
+            assert [c.id for c in s.cols] == ["tfs.A.HG1.0"] and "Tbx2" in s.cols[0].label
+            j = s.query_one("#counts").cursor_coordinate.column - FIXED
+            assert s.cols[j].id == og.id
+    _run(go())
+
+
+def test_counts_og_source_memoises_misses(cli, monkeypatch):
+    _counts_fixture()
+    reads = []
+    real = tui.model.read_ogs
+    monkeypatch.setattr(tui.model, "read_ogs",
+                        lambda cfg, hg, src, *a, **k: (reads.append((hg, src)), real(cfg, hg, src, *a, **k))[1])
+    app = tui.PhyloApp(_cfg(), refresh_s=3600)
+    memo: dict = {}
+    a = app._counts_og_source("tfs.A.HG1", "possvm_prev", memo)
+    b = app._counts_og_source("tfs.A.HG1", "possvm_prev", memo)
+    none1 = app._counts_og_source("tfs.C_x.HG1", "possvm", memo)
+    none2 = app._counts_og_source("tfs.C_x.HG1", "possvm", memo)
+    assert a is b and a.ogs and none1 is None and none2 is None
+    assert reads == [("tfs.A.HG1", "possvm_prev"), ("tfs.C_x.HG1", "possvm")]
+    memo.clear()                                              # what R does
+    app._counts_og_source("tfs.A.HG1", "possvm_prev", memo)
+    assert len(reads) == 3

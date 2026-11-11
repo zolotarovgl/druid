@@ -2024,17 +2024,21 @@ class PhyloApp(App):
         return next((o for o in r.ogs if o.id == key), None)
 
     # ---- H: the Counts heatmap (spec docs/superpowers/specs/2026-11-11-druid-counts-heatmap-design.md)
-    def _counts_opener(self) -> "tuple[str, str | None, str | None] | None":
-        """(level, scope, focus column) for the cursor, per the spec's "Opening (H)" table; None
-        (with a warning) when the cursor is on nothing."""
+    def _counts_opener(self) -> "tuple[str, str | None, str | None, str] | None":
+        """(level, scope, focus column, source) for the cursor, per the spec's "Opening (H)"
+        table; None (with a warning) when the cursor is on nothing.  source = the opener's
+        effective POSSVM source, so a focus OG id is one of the screen's columns."""
+        def eff(src: "str | None") -> str:
+            return src if src in ("possvm", "possvm_prev") else "possvm"
         if self.view == "overview" and self.tab == "results":
             key = self._key_at_cursor(self.query_one("#rtab", DataTable))
             if key is None:
                 self.notify("nothing under the cursor", severity="warning")
                 return None
+            src = eff(self.rt_source)
             if key == "ALL":
-                return "class", None, None
-            return ("hg" if self.by == "family" else "family"), key, None
+                return "class", None, None, src
+            return ("hg" if self.by == "family" else "family"), key, None, src
         if self.view == "results":
             r = self._cur_res() if self.res_source is not None else None
             if r is None:
@@ -2042,7 +2046,8 @@ class PhyloApp(App):
                 return None
             pane = getattr(self.focused, "id", None) or "res"
             og = self._cur_og() if pane in ("ogs", "members") else None
-            return "og", r.hg, (og.id if og is not None else None)
+            src = eff(r.source if self.res_source == "auto" else self.res_source)
+            return "og", r.hg, (og.id if og is not None else None), src
         return None
 
     def _counts_families(self) -> list:
@@ -2137,26 +2142,41 @@ class PhyloApp(App):
         except (OSError, ValueError) as e:
             self.notify(f"species tree unreadable: {e}", severity="warning", markup=False)
             return
-        level, scope, focus = opener
+        level, scope, focus, source = opener
         fam_cols, hg_cols, bad = self._counts
+        memo: dict = {}                          # this screen's cache misses, dropped on R
+
+        def og_source(hg: str, src: str):
+            return self._counts_og_source(hg, src, memo)
+
+        def reload() -> tuple:
+            memo.clear()
+            return self._counts_read()
         self.push_screen(CountsScreen(
             self.cfg, m, fam_cols, hg_cols, level, scope, unreadable=bad,
-            og_source=self._counts_og_source, open_tree=self._counts_open_tree,
-            og_search=self._counts_og_search, reload=self._counts_read, focus_col=focus))
+            og_source=og_source, open_tree=self._counts_open_tree,
+            og_search=self._counts_og_search, reload=reload, focus_col=focus, source=source))
 
-    def _counts_og_source(self, hg: str, source: str) -> "model.HGOgs | None":
+    def _counts_og_source(self, hg: str, source: str,
+                          memo: "dict | None" = None) -> "model.HGOgs | None":
         """The HG's OGs in `source`: from the Results-tab cache when it holds that HG in that
-        source, else read (that one HG).  None when the HG has no such output."""
+        source, else read (that one HG) once and kept in `memo` (the screen's).  None when the
+        HG has no such output."""
         c = self._og_cache
         if c is not None and hg in c["hgs"]:
             r = c["rows"].get(hg)
             if r is not None and r.source == source:
                 return r
+        if memo is not None and (hg, source) in memo:
+            return memo[(hg, source)]
         try:
             ogs = model.read_ogs(self.cfg, hg, source)
+            out = None if ogs is None else model.HGOgs(hg, ogs, source=source)
         except (OSError, model.ModelError) as e:
-            return model.HGOgs(hg, [], str(e), source)
-        return None if ogs is None else model.HGOgs(hg, ogs, source=source)
+            out = model.HGOgs(hg, [], str(e), source)
+        if memo is not None:
+            memo[(hg, source)] = out
+        return out
 
     def _counts_og_search(self, query: str) -> "list | None":
         """[(hg, OG)] whose OG id / name, a gene id or the HG id holds `query` (any case), over

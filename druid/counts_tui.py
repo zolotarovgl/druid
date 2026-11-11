@@ -68,7 +68,7 @@ class CountsScreen(Screen):
                  open_tree: "Callable[[str, str, model.OG | None, set], None] | None" = None,
                  og_search: "Callable[[str], list] | None" = None,
                  reload: "Callable[[], tuple] | None" = None,
-                 focus_col: "str | None" = None, **kwargs):
+                 focus_col: "str | None" = None, source: str = "possvm", **kwargs):
         super().__init__(**kwargs)
         if level not in LEVELS + ("custom",):
             raise ValueError(f"unknown level {level!r}")
@@ -80,7 +80,9 @@ class CountsScreen(Screen):
         self.og_search, self.reload = og_search, reload
         self.focus_col = focus_col
         self.mode = "z"
-        self.source = "possvm"
+        if source not in ("possvm", "possvm_prev"):
+            raise ValueError(f"unknown source {source!r}")
+        self.source = source                 # the opener's source: focus_col is one of its OGs
         self.cols: "list[Col]" = []
         self.sort_row: "int | None" = None
         self._sort_by: "frozenset | None" = None

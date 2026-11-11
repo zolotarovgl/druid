@@ -321,3 +321,24 @@ def test_counts_breadcrumb_from_visited_levels(tmp_path):
     async def body2(app, pilot):
         assert _table(scr2).border_title == "Counts · tfs › tfs.A.b › HG1"
     _run(scr2, body2)
+
+
+def test_counts_focus_col_not_a_column_falls_back_to_first(tmp_path):
+    scr = _screen(tmp_path, level="og", scope="tfs.A.HG1", focus_col="tfs.A.HG1.99")
+
+    async def body(app, pilot):
+        assert _table(scr).cursor_coordinate.column == counts_tui.FIXED
+        assert [c.id for c in scr.cols] and scr.status
+    _run(scr, body)
+
+
+def test_counts_source_keyword(tmp_path):
+    calls = []
+    scr = _screen(tmp_path, level="og", scope="tfs.A.HG1", calls=calls, source="possvm_prev")
+
+    async def body(app, pilot):
+        assert scr.source == "possvm_prev" and ("og_source", "tfs.A.HG1", "possvm_prev") in calls
+        assert [c.id for c in scr.cols] == ["tfs.A.HG1.0"]
+    _run(scr, body)
+    with pytest.raises(ValueError):
+        _screen(tmp_path, level="og", scope="tfs.A.HG1", source="cluster")
