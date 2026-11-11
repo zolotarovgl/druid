@@ -1,8 +1,15 @@
-# phylocli — Counts heatmap in Results (design, 14/10/2026)
+# druid — Counts heatmap in Results (design, 14/10/2026; refreshed for druid 11/11/2026)
+
+Refresh (11/11/2026): written for phylocli before the rename; checked against druid `b83287f`.
+Changes: module paths `druid/counts.py` + `druid/counts_tui.py` (`tui.py` is 2,645 lines);
+HG members via `model.read_cluster_members`; Results tab = `#rtab`, Results window = view
+`results`; quit is `:q!`, not `q`; tests in `tests/` with the local `python3` full suite; docs in
+`docs/reference.md`; deploy = git push to the cluster clone. No T-box csv fixture exists in
+`tests/data/`: `og_cols` is tested on a small hand-written POSSVM csv.
 
 ## Intent (Grygoriy)
 
-Bring the step-2 HTML report's **Counts** tab into phylocli's TUI, reachable from the Results
+Bring the step-2 HTML report's **Counts** tab into druid's TUI, reachable from the Results
 section: a species × gene-group count heatmap with the species tree beside it, drilled down
 class → family → HG → OG, from which a gene tree opens. Asked for on 13/10/2026; decisions made
 in the brainstorm on 13–14/10/2026:
@@ -43,7 +50,7 @@ sequences, so a family's total need not equal the sum of its HGs.
 
 ## Data
 
-New module **`phylocli/counts.py`**, pure (no Textual; file reads only in the loaders).
+New module **`druid/counts.py`**, pure (no Textual; file reads only in the loaders).
 
 ```python
 @dataclass
@@ -56,13 +63,13 @@ class Col:
 ```
 
 Species code of a gene: `model.species_of` (the gene id up to the first `_`). The HTML splits
-on `_`, then on `.`; the two differ only for ids without `_` — phylocli's rule is kept so the
+on `_`, then on `.`; the two differ only for ids without `_` — druid's rule is kept so the
 heatmap agrees with the rest of the TUI.
 
 | function | reads | returns |
 |---|---|---|
 | `family_cols(cfg, fams) -> (list[Col], int)` | `cfg.outdir/search/<fam>.genes.list` for each `fam` in `fams` (blank and `#` lines skipped) | one Col per family with ≥ 1 gene; int = unreadable files |
-| `hg_cols(cfg, hgs) -> (list[Col], int)` | headers (`>` lines, first token) of `cfg.outdir/clusters/<hg>.fasta` | one Col per HG with ≥ 1 sequence; int = unreadable files |
+| `hg_cols(cfg, hgs) -> (list[Col], int)` | `model.read_cluster_members(cfg, hg)` (headers of `cfg.outdir/clusters/<hg>.fasta`) | one Col per HG with ≥ 1 sequence; int = unreadable files |
 | `class_cols(fam_cols) -> list[Col]` | — | sums of families by `id.split(".", 1)[0]` |
 | `og_cols(hgogs) -> list[Col]` | — (an `model.HGOgs`) | one Col per OG, label `<HG part>.<n>:<name>` |
 | `order_cols(cols, by=None) -> list[Col]` | — | `by=None`: total desc, then id; `by=set of species`: summed count of those species desc, ties in the default order |
@@ -97,8 +104,7 @@ A right-hand `total` column holds each row's total over the shown columns.
 
 ## Screen
 
-**`CountsScreen`** (new, in `phylocli/tui.py` or a new `phylocli/counts_tui.py` if `tui.py` grows
-past reason), a full-screen `Screen` holding a `DataTable` (cell cursor) with the cladogram and the
+**`CountsScreen`** (new, in `druid/counts_tui.py`), a full-screen `Screen` holding a `DataTable` (cell cursor) with the cladogram and the
 species label as **fixed** columns, the numbered columns, then `total`; a one-line legend under it;
 the app's status line as elsewhere. Border title = the breadcrumb: `Counts · tfs › tfs.T-box ›
 HG1`.
@@ -114,10 +120,10 @@ HG1`.
 
 | from | cursor on | opens at |
 |---|---|---|
-| Results tab (first screen) | ALL | class level |
+| Results tab (`#rtab`) | ALL | class level |
 | Results tab | a category row | family level of that class |
 | Results tab | a family row | HG level of that family |
-| Results window | an HG (res pane) | OG level of that HG |
+| Results window (view `results`) | an HG (res pane) | OG level of that HG |
 | Results window | an OG or a member | OG level of its HG, cursor on that OG's column |
 
 `H` is added to the app bindings (shown on the Results tab and in the Results window) and to the
@@ -140,7 +146,7 @@ HG1`.
 | x | Custom only: drop the cursor's column |
 | R | re-read the counts |
 | ? | the key list (`KeysScreen`, table checked with `missing_keys`) |
-| q | quit the app, as elsewhere |
+| :q! | quit druid, as elsewhere |
 
 ## Errors
 
@@ -153,12 +159,13 @@ HG1`.
 
 ## Tests
 
-pytest, `phylocli/tests/`, run on the mount with the py39 interpreter; a headless pilot smoke test
-on v3 on login1 in the `phylo` env (no pytest there).
+pytest, `tests/test_counts.py` (pure) and pilot tests in `tests/test_tui.py` style; the full suite
+(`python3 -m pytest -q -p no:cacheprovider -rf`) must pass before each commit. A headless pilot smoke
+test on v3 on login1 after deploy.
 
 - `counts.py` on small fixture dirs: family / HG / class sums, unreadable files counted, empty
   files dropped, `fams` / `hgs` filters honoured.
-- `og_cols` on the vendored T-box HG1 csv fixture: 17 OGs, totals sum to 488.
+- `og_cols` on a hand-written POSSVM csv fixture (3 OGs): labels and totals.
 - `order_cols` default and by-species, ties stable; `zscores` against hand values, SD 0 → 1, a
   single row; `cell_colour` ends of both scales and the luminance switch.
 - Collapse: a collapsed clade's row equals the sum of its tips; `(not on tree)` row shown only
@@ -169,5 +176,5 @@ on v3 on login1 in the `phylo` env (no pytest there).
 
 ## Docs
 
-`phylocli/README.md`: the `H` key and the screen's keys. Deployed to v3 by the per-file
-deploy with a backup, as for the treeview work.
+`docs/reference.md`: the `H` key and the screen's keys. Deployed by git push to
+`login1:projects/druid`.

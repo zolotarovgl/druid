@@ -304,7 +304,7 @@ YEATS	YEATS	1.1	3	GA	chromatin	chr
 YL1	YL1	1.1	3	GA	TF	tfs
 YTH	YTH	1.1	3	GA	RBP	rbp
 zf-BED	zf-BED	1.1	3	GA	TF	tfs
-zf-C2H2	FLYWCH,MYT1,WT1,zf-C2H2,zf-C2H2_11,zf-C2H2_2,zf-C2H2_4,zf-C2H2_6,zf-C2HC,Zfx_Zfy_act	1.2	3	GA	TF	tfs
+zf-C2H2	FLYWCH,MYT1,WT1,zf-C2H2,zf-C2H2_11,zf-C2H2_2,zf-C2H2_4,zf-C2H2_6,zf-C2HC,Zfx_Zfy_act	1.2	3	1e-5	TF	tfs
 zf-C4_Nuclear_receptors	zf-C4	1.1	3	GA	TF	tfs
 zf-CCCH	zf-CCCH,zf-CCCH_2,zf-CCCH_3,zf-CCCH_4,Torus	1.2	3	GA	RBP	rbp
 zf-CCHH	zf-CCHH	1.1	3	GA	chromatin	chr
