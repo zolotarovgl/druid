@@ -1964,3 +1964,26 @@ def test_tree_picker_read_only_when_species_locked(proj):
             assert "read-only" in str(pick.query_one("#status").render())
     _run(go())
     assert paths.config_file().read_bytes() == before
+
+
+def test_shift_u_unticks_species_not_on_the_tree(proj):
+    """U in Species: untick every ticked species not on the base tree nor placed (11/11/2026)."""
+    root, _prot, _mine = proj
+    _tree(root, "(Aaa:1,Ccc:1)R;")                                    # Bbb: not on the tree
+    yamledit.update_config({("species",): ["Aaa", "Bbb"]})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            scr.query_one("#sp-table").focus()
+            await pilot.press("U")
+            await pilot.pause()
+            assert _raw()["species"] == ["Aaa"]
+            assert "-1 unticked, not on the tree (Bbb)" in _text(scr, "#blockers")
+            await pilot.press("U")
+            await pilot.pause()
+            assert _raw()["species"] == ["Aaa"]
+            assert "no ticked species is off the tree" in _text(scr, "#blockers")
+    _run(go())

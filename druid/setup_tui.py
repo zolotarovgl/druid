@@ -273,6 +273,7 @@ class SetupScreen(Screen):
         Binding("e", "edit_family", "edit row"),     # Families; enter ticks (Grygoriy, 23/10/2026)
         Binding("t", "tree_pick", "species tree"),   # Species / Tree (Grygoriy, 11/11/2026)
         Binding("u", "toggle_unplaced", "unplaced"),
+        Binding("U", "untick_unplaced", "untick unplaced"),
         Binding("P", "prepare", "prepare"),
         Binding("S", "run_step1", "run step 1"),
         Binding("w", "toggle_warnings", "warnings"),
@@ -350,7 +351,8 @@ class SetupScreen(Screen):
                                             "enter: tick all shown",
                                 id="sp-filter")
                     yield Static("sets: @v3 (59) · @chromo (94) · @<file> (one code per line) · "
-                                 "t: pick on the tree · u: species not on the tree",
+                                 "t: pick on the tree · u: species not on the tree · "
+                                 "U: untick those",
                                  classes="note", markup=False)
                     yield DataTable(id="sp-table", cursor_type="row")
                     yield Static("", id="sp-count", markup=False)
@@ -944,7 +946,7 @@ class SetupScreen(Screen):
             return self.current == "Families"
         if action == "tree_pick":
             return self.current in ("Species", "Tree")
-        if action == "toggle_unplaced":
+        if action in ("toggle_unplaced", "untick_unplaced"):
             return self.current == "Species"
         if action == "switch_move":              # else ↑↓ go on to the focused widget's parents
             return isinstance(self.focused, Switch)
@@ -1110,6 +1112,24 @@ class SetupScreen(Screen):
                      else "hiding species not on the tree")
         self._fill_species()
         self._fill_blockers()
+
+    def action_untick_unplaced(self) -> None:
+        """U: untick every ticked species not on the base tree nor placed, one write
+        (Grygoriy, 11/11/2026)."""
+        if not self._species_editable():
+            return
+        if self._on_tree is None:
+            self._refuse(f"ERROR: {self._tree_err or 'species tree unreadable'}")
+            return
+        off = [s for s in self._sel if s[0] not in self._on_tree]
+        if not off:
+            self._msg = "-0 unticked: no ticked species is off the tree"
+            self._fill_blockers()
+            return
+        names = list(dict.fromkeys(sp for sp, _src in off))
+        shown = ", ".join(names) if len(names) <= 8 else f"{len(names)} species"
+        self._write({("species",): setup_state.species_value([s for s in self._sel if s not in off])},
+                    done=f"-{len(off)} unticked, not on the tree ({shown})")
 
     def action_tree_pick(self) -> None:
         """t: the base tree, placements grafted, with a tick column; x ticks there (PickScreen)."""

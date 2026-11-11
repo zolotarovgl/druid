@@ -24,7 +24,7 @@ In **Setup** (`tab` moves between panes, `enter` selects, `esc` / `q` back, `:q!
    Sets: `@v3` (59), `@chromo` (94) or `@<file>` (codes, one per line or comma-separated, `#`
    comments; absolute or project-relative) in the filter show those species; `enter` ticks them.
    Species not on the base tree (Setup › Tree) nor placed are hidden; `u` shows them, dim (a
-   ticked or named one is always shown). `t` (Species or Tree) opens the base tree with the
+   ticked or named one is always shown); `U` unticks every ticked one of them. `t` (Species or Tree) opens the base tree with the
    placements grafted and a tick column: `x` ticks the tip or clade under the cursor (its tips
    with a proteome), `x` again unticks; `—` = no proteome (11/11/2026).
 3. **Analyses**: GeneRax / origins on or off (both off: no species tree needed).
