@@ -2207,6 +2207,8 @@ class ResubmitScreen(ModalScreen):
     ResubmitScreen { align: center middle; }
     #box { width: 90%; height: auto; border: round $warning; background: $surface; padding: 1; }
     Input { width: 14; }
+    ResubmitScreen #box Horizontal { height: auto; }
+    ResubmitScreen .lbl { height: 3; content-align: left middle; }
     """
 
     def __init__(self, cfg: core.Config, stage: "str | None", groups: "list | None",
@@ -2232,14 +2234,19 @@ class ResubmitScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with _Box(id="box"):
             yield Label(f"[b]resubmit · {self.stage}[/]  enter = dry run · y = submit · esc q = cancel")
+            # Labels are as tall as an Input (3 rows, border included) and vertically centred,
+            # and the leading text is padded to one width, so every row's Inputs line up with
+            # the text and with each other (Grygoriy 11/11/2026: fields misaligned).
+            leads = [f"{st + ' · ' if self.multi else ''}{len(hgs)} {core.unit(st)}"
+                     f" · {why or 'other'} · mem "
+                     for st, (why, _res, hgs) in zip(self._row_stage, self.groups)]
+            w = max((len(x) for x in leads), default=0)
             for i, (why, res, hgs) in enumerate(self.groups):
-                st = self._row_stage[i]
                 with Horizontal():
-                    yield Label(f"{st + ' · ' if self.multi else ''}{len(hgs)} {core.unit(st)}"
-                                f" · {why or 'other'} · mem ")
+                    yield Label(escape(leads[i].rjust(w)), classes="lbl")
                     yield Input(fmt_mem(res.mem_mb).replace(" ", "").replace("GB", "G")
                                 .replace("MB", "M"), id=f"mem-{i}")
-                    yield Label(" time ")
+                    yield Label(" time ", classes="lbl")
                     yield Input(fmt_time(res.time_min), id=f"time-{i}")
             yield Static("", id="out")
 
