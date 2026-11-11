@@ -83,3 +83,56 @@ def test_cell_colour_ends_and_luminance():
 
 def test_fmt_count():
     assert [counts.fmt_count(v) for v in (0, 7, 99, 100)] == ["·", "7", "99", "99+"]
+
+
+# ---- species axis
+from treeview import layout as _layout          # noqa: E402
+from tests.test_model import SP4                 # noqa: E402
+
+
+def _sp_model():
+    from treeview import model as tvm
+    return tvm.TreeModel(tvm.load(SP4), sep="_")
+
+
+def test_axis_rows_in_tree_order():
+    m = _sp_model()
+    ax = counts.axis(m)
+    want = [m.name[i] for i in _layout.clado_order(m) if m.shown_as_leaf(i)]
+    assert ax.labels == want and sorted(want) == ["Bova", "Hsap", "Mlei", "Nvec"]
+    assert len(ax.clado) == 4
+
+
+def test_collapse_sums_clade():
+    m = _sp_model()
+    cols = [Col("c", "c", {"Mlei": 2, "Bova": 1, "Hsap": 4})]
+    assert counts.collapse_up(m, m.tip("Mlei")) is None
+    ax = counts.axis(m)
+    assert len(ax.leaves) == 3 and len(ax.clado) == 3
+    k = next(i for i, t in enumerate(ax.tips) if "Mlei" in t)
+    assert ax.tips[k] == frozenset({"Mlei", "Bova"}) and "(2 spp.)" in ax.labels[k]
+    assert counts.grid(cols, ax).rows[k] == [3]
+    assert counts.collapse_up(m, ax.leaves[k]) == "whole tree"
+    assert len(counts.axis(m).leaves) == 3
+
+
+def test_grid_off_tree_and_sums():
+    ax = counts.axis(_sp_model())
+    g = counts.grid([Col("c", "c", {"Mlei": 2, "Zzz": 3})], ax)
+    assert g.off_tree == [3] and g.off_codes == {"Zzz": 3} and g.sums == [5]
+    assert g.rows[ax.labels.index("Mlei")] == [2] and g.row_totals[ax.labels.index("Mlei")] == 2
+
+
+def test_load_species_model_errors(tmp_path):
+    ns = types.SimpleNamespace
+    with pytest.raises((OSError, ValueError), match="SPECIES_TREE"):
+        counts.load_species_model(ns(params={}))
+    with pytest.raises(OSError, match="species tree"):
+        counts.load_species_model(ns(params={"SPECIES_TREE": str(tmp_path / "no.nwk")}))
+    bad = tmp_path / "bad.nwk"
+    bad.write_text("(((")
+    with pytest.raises(ValueError, match="parse"):
+        counts.load_species_model(ns(params={"SPECIES_TREE": str(bad)}))
+    ok = tmp_path / "ok.nwk"
+    ok.write_text(SP4)
+    assert counts.load_species_model(ns(params={"SPECIES_TREE": str(ok)})).ntips[0] == 4

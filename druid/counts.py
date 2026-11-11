@@ -5,7 +5,9 @@ import math
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from . import model
+from . import core, model  # noqa: F401  (core puts druid/vendor on sys.path)
+
+from treeview import layout, model as tvm
 
 
 @dataclass
@@ -148,3 +150,78 @@ def cell_colour(v: int, z: float, mode: str, zmax: float, vmax: int) -> "tuple[s
 
 def fmt_count(v: int) -> str:
     return "·" if v == 0 else "99+" if v > 99 else str(v)
+
+
+# ---------------------------------------------------------------- species axis
+
+def load_species_model(cfg) -> "tvm.TreeModel":
+    """TreeModel of params.SPECIES_TREE; OSError / ValueError with a message when unset, missing or bad."""
+    path = (getattr(cfg, "params", None) or {}).get("SPECIES_TREE")
+    if not path:
+        raise ValueError("SPECIES_TREE is not set")
+    try:
+        tree = tvm.load(path)
+    except OSError as e:
+        raise OSError(f"species tree {path}: {e}") from e
+    except Exception as e:
+        raise ValueError(f"species tree {path}: cannot parse ({e})") from e
+    if len(tree.get_leaves()) < 2:
+        raise ValueError(f"species tree {path}: fewer than 2 tips")
+    return tvm.TreeModel(tree, sep="_")
+
+
+@dataclass
+class Axis:
+    leaves: list      # node id per shown leaf, drawing order
+    labels: list      # tip name, or "<first tip>… (k spp.)"
+    tips: list        # frozenset of tip names per row
+    clado: list       # clado_rows(m, gap=-1) Text per row
+
+
+def _tip_names(m, i: int) -> list:
+    return [m.name[j] for j in range(i, i + m.size[i]) if m.is_tip(j)]
+
+
+def axis(m) -> Axis:
+    leaves = [i for i in layout.clado_order(m) if m.shown_as_leaf(i)]
+    labels, tips = [], []
+    for i in leaves:
+        names = _tip_names(m, i)
+        tips.append(frozenset(names))
+        labels.append(names[0] if m.is_tip(i) else f"{names[0]}… ({len(names)} spp.)")
+    clado = [t for t, _ in layout.clado_rows(m, gap=-1)]
+    return Axis(leaves, labels, tips, clado)
+
+
+@dataclass
+class Grid:
+    rows: list          # rows[i][j] = count of column j over ax.tips[i]
+    off_tree: list      # per column: genes of species in no tip
+    off_codes: dict     # species code -> count, over all columns
+    sums: list          # per column: all genes
+    row_totals: list    # per row: total over the columns
+
+
+def grid(cols: list, ax: Axis) -> Grid:
+    on = set().union(*ax.tips) if ax.tips else set()
+    rows = [[sum(c.counts.get(sp, 0) for sp in t) for c in cols] for t in ax.tips]
+    off_tree, off_codes = [], {}
+    for c in cols:
+        n = 0
+        for sp, k in c.counts.items():
+            if sp not in on:
+                n += k
+                off_codes[sp] = off_codes.get(sp, 0) + k
+        off_tree.append(n)
+    return Grid(rows, off_tree, off_codes, [c.total for c in cols], [sum(r) for r in rows])
+
+
+def collapse_up(m, leaf: int) -> "str | None":
+    """z: collapse the parent of a shown leaf (a collapsed clade is expanded first).  The root is
+    never collapsed: returns "whole tree" and changes nothing; None on success."""
+    p = m.parent[leaf]
+    if p <= 0:
+        return "whole tree"
+    m.collapsed.discard(leaf)
+    m.collapsed.add(p)
+    return None
