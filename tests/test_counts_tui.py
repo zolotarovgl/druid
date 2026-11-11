@@ -13,7 +13,7 @@ from textual.widgets import DataTable  # noqa: E402
 
 from druid import counts_tui, model  # noqa: E402
 from druid.counts import Col  # noqa: E402
-from tests.test_model import POSSVM_HG1, PREV_HG1, SP4, og_csv  # noqa: E402
+from tests.test_model import POSSVM_HG1, POSSVM_HG11, PREV_HG1, SP4, og_csv  # noqa: E402
 from treeview import model as tvm  # noqa: E402
 from treeview.keys import KeysScreen, missing_keys  # noqa: E402
 
@@ -28,6 +28,8 @@ def _cfg(tmp_path):
         (tmp_path / d).mkdir(exist_ok=True)
     (tmp_path / "possvm/tfs.A.HG1.generax.support.tree.ortholog_groups.csv").write_text(og_csv(POSSVM_HG1))
     (tmp_path / "possvm_prev/tfs.A.HG1.treefile.ortholog_groups.csv").write_text(og_csv(PREV_HG1))
+    (tmp_path / "possvm/tfs.A.HG11.generax.support.tree.ortholog_groups.csv").write_text(
+        og_csv(POSSVM_HG11))                     # no possvm_prev csv for HG11
     return types.SimpleNamespace(outdir=tmp_path)
 
 
@@ -273,3 +275,49 @@ def test_counts_R_rereads(tmp_path):
         assert [c.id for c in scr.cols] == ["tfs.C"]
         assert scr.status == "counts re-read · 2 files unreadable"
     _run(scr, body)
+
+
+def test_counts_p_at_custom_keeps_and_restores(tmp_path):
+    cfg = _cfg(tmp_path)
+    hits = ([("tfs.A.HG1", o) for o in model.read_ogs(cfg, "tfs.A.HG1", "possvm")]
+            + [("tfs.A.HG11", o) for o in model.read_ogs(cfg, "tfs.A.HG11", "possvm")])
+    scr = _screen(tmp_path, og_search=lambda q: hits)
+
+    async def body(app, pilot):
+        await pilot.press("slash", *"Tbx", "enter")
+        await pilot.pause()
+        orig = list(scr.custom)
+        assert scr.level == "custom" and len(orig) == 3
+        await pilot.press("p")
+        assert scr.source == "possvm_prev"
+        # HG1.0 -> prev HG1.0 (shares Mlei_v05_G1); HG1.1 shares no gene; HG11 has no prev csv
+        assert [og.id for _, og in scr.custom] == ["tfs.A.HG1.0"]
+        assert scr.custom[0][1].name == "like:Tbx2/Tbx3"
+        assert scr.status == "possvm_prev: 2 of 3 OGs have no counterpart"
+        await pilot.press("p")
+        assert scr.source == "possvm" and scr.custom == orig
+        assert scr.status == "source: possvm" and len(scr.cols) == 3
+    _run(scr, body)
+
+
+def test_counts_breadcrumb_from_visited_levels(tmp_path):
+    fams = [Col("tfs.A.b", "tfs.A.b", {"Mlei": 1})]
+    hgs = [Col("tfs.A.b.HG1", "tfs.A.b.HG1", {"Mlei": 1})]
+    empty = dict(og_source=lambda hg, s: model.HGOgs(hg, []))
+    scr = _screen(tmp_path, fams=fams, hgs=hgs, **empty)
+
+    async def body(app, pilot):
+        assert _table(scr).border_title == "Counts"
+        for want in ("Counts · tfs", "Counts · tfs › tfs.A.b", "Counts · tfs › tfs.A.b › HG1"):
+            await pilot.press("enter")
+            await pilot.pause()
+            assert _table(scr).border_title == want
+        await pilot.press("escape")
+        await pilot.pause()
+        assert _table(scr).border_title == "Counts · tfs › tfs.A.b"
+    _run(scr, body)
+    scr2 = _screen(tmp_path, level="og", scope="tfs.A.b.HG1", fams=fams, hgs=hgs, **empty)
+
+    async def body2(app, pilot):
+        assert _table(scr2).border_title == "Counts · tfs › tfs.A.b › HG1"
+    _run(scr2, body2)

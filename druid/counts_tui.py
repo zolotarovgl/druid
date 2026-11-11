@@ -86,7 +86,9 @@ class CountsScreen(Screen):
         self._sort_by: "frozenset | None" = None
         self.custom: "list[tuple[str, model.OG]]" = []
         self.status = ""
-        self._stack: list = []               # (level, scope, column id) to go back to
+        self._stack: list = []               # (level, scope, column id, crumbs) to go back to
+        self._crumbs: "list[str]" = [] if level == "custom" else self._opening_crumbs(level, scope)
+        self._custom_base: "tuple[str, list]" = (self.source, [])   # Custom as built, its source
         self._og_error = ""
         self._ax = None
         self._grid = None
@@ -115,18 +117,23 @@ class CountsScreen(Screen):
         self.status = text
         self.query_one("#cstatus", Static).update(Text(text))
 
+    @staticmethod
+    def _opening_crumbs(level: str, scope: "str | None") -> "list[str]":
+        """The crumbs above the level the screen opens at: a class id has no '.', an HG id is
+        <family>.HG<n>, so the family is the HG id up to its last '.' (a family id may hold dots)."""
+        if level == "family":
+            return [scope]
+        if level == "hg":
+            return [scope.split(".", 1)[0], scope]
+        if level == "og":
+            fam = scope.rsplit(".", 1)[0]
+            return [scope.split(".", 1)[0], fam, scope[len(fam) + 1:]]
+        return []
+
     def _breadcrumb(self) -> str:
         if self.level == "custom":
             return f"Counts · Custom ({len(self.custom)})"
-        if self.level == "class" or not self.scope:
-            return "Counts"
-        parts = self.scope.split(".")
-        crumbs = [parts[0]]
-        if len(parts) >= 2:
-            crumbs.append(".".join(parts[:2]))
-        if len(parts) >= 3:
-            crumbs.append(".".join(parts[2:]))
-        return "Counts · " + " › ".join(crumbs)
+        return " · ".join(["Counts"] + ([" › ".join(self._crumbs)] if self._crumbs else []))
 
     # ---------------------------------------------------------------- columns of a level
 
@@ -282,7 +289,9 @@ class CountsScreen(Screen):
             self._say("enter: on a group column")
             return
         cid = self.cols[j].id
-        self._stack.append((self.level, self.scope, cid))
+        self._stack.append((self.level, self.scope, cid, list(self._crumbs)))
+        # an HG crumb is shown without its family: the family is the crumb before it
+        self._crumbs.append(cid[len(self.scope) + 1:] if self.level == "hg" else cid)
         self.level = LEVELS[LEVELS.index(self.level) + 1]
         self.scope = cid
         self._sort_by = None
@@ -299,7 +308,7 @@ class CountsScreen(Screen):
         if not self._stack:
             self.app.pop_screen()
             return
-        self.level, self.scope, cid = self._stack.pop()
+        self.level, self.scope, cid, self._crumbs = self._stack.pop()
         self._sort_by = None
         self._redraw(focus=cid)
 
@@ -384,26 +393,36 @@ class CountsScreen(Screen):
             self._say("p: OG level only")
             return
         self.source = "possvm_prev" if self.source == "possvm" else "possvm"
+        msg = f"source: {self.source}"
         if self.level == "custom":
-            self.custom = self._custom_in(self.source)
+            base_src, base = self._custom_base
+            if self.source == base_src:
+                self.custom = list(base)             # back to the list as built, exactly
+            else:
+                self.custom, none = self._custom_in(base, self.source)
+                if none:
+                    msg = f"{self.source}: {none} of {len(base)} OGs have no counterpart"
         self._sort_by = None
         self._redraw()
         if not self._og_error:
-            self._say(f"source: {self.source}")
+            self._say(msg)
 
-    def _custom_in(self, source: str) -> "list[tuple[str, model.OG]]":
-        """The Custom list in the other source: per OG, the OGs of its HG there that share a gene."""
-        out, seen, cache = [], set(), {}
-        for hg, og in self.custom:
+    def _custom_in(self, base: list, source: str) -> "tuple[list, int]":
+        """Custom in the other source: per OG of `base`, the OGs of its HG there that share a gene;
+        int = OGs of `base` with no such OG (csv missing / unreadable, or no gene shared)."""
+        out, seen, cache, none = [], set(), {}, 0
+        for hg, og in base:
             if hg not in cache:
                 h = self.og_source(hg, source)
                 cache[hg] = [] if h is None or h.error else h.ogs
             genes = {mb.gene for mb in og.genes}
-            for o in cache[hg]:
-                if (hg, o.id) not in seen and genes & {mb.gene for mb in o.genes}:
+            hits = [o for o in cache[hg] if genes & {mb.gene for mb in o.genes}]
+            none += not hits
+            for o in hits:
+                if (hg, o.id) not in seen:
                     seen.add((hg, o.id))
                     out.append((hg, o))
-        return out
+        return out, none
 
     def action_search(self) -> None:
         if self.og_search is None:
@@ -433,8 +452,9 @@ class CountsScreen(Screen):
         new = [(hg, og) for hg, og in hits if (hg, og.id) not in have]
         self.custom.extend(new)
         if self.level != "custom":
-            self._stack.append((self.level, self.scope, None))
+            self._stack.append((self.level, self.scope, None, list(self._crumbs)))
             self.level, self.scope = "custom", None
+        self._custom_base = (self.source, list(self.custom))
         self._sort_by = None
         self._redraw()
         self._say(f"{len(new)} OGs added to Custom ({len(self.custom)})")
@@ -449,6 +469,7 @@ class CountsScreen(Screen):
             return
         cid = self.cols[j].id
         self.custom = [(hg, og) for hg, og in self.custom if og.id != cid]
+        self._custom_base = (self.source, list(self.custom))   # an edit rebases Custom here
         self._redraw()
         self._say(f"dropped {cid}")
 
