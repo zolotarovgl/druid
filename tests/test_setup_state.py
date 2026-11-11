@@ -271,7 +271,6 @@ def test_species_set_from_the_shipped_trees(tmp_path):
     assert err == "" and len(v3) == 59 and v3[0] == "Mbre" and len(set(v3)) == 59
     chromo, err = ss.species_set("@CHROMO", root)
     assert err == "" and len(chromo) == 94
-    assert ss.shipped_tips(root) == set(v3) | set(chromo)
 
 
 def test_species_set_from_a_text_file(tmp_path):
@@ -290,12 +289,6 @@ def test_species_set_errors(tmp_path):
     assert codes == [] and "@v3" in err
 
 
-def test_shipped_tips_survives_a_missing_tree(tmp_path):
-    root = tmp_path / "p"
-    project.init(root, "06/11/2026")
-    (root / ss.CHROMO_TREE).unlink()
-    assert len(ss.shipped_tips(root)) == 59
-
 
 def test_species_set_broken_tree_is_an_error_not_a_crash(tmp_path):
     root = tmp_path / "p"
@@ -303,4 +296,3 @@ def test_species_set_broken_tree_is_an_error_not_a_crash(tmp_path):
     (root / ss.CHROMO_TREE).write_text("((a,b);garbage(")
     codes, err = ss.species_set("@chromo", root)
     assert codes == [] and "not a newick tree" in err
-    assert len(ss.shipped_tips(root)) == 59

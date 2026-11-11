@@ -152,6 +152,15 @@ def _species_filter(cands: list, text: str, root=None) -> tuple:
             any(q in str(v).lower() for v in (c.sp, c.name, c.taxonomy, c.source))], []
 
 
+def _named_list(cands: list, text: str) -> bool:
+    """The filter names species (an @set, or a list of prefixes) rather than searching."""
+    text = text.strip()
+    if text.startswith("@"):
+        return True
+    words = [w.lower() for w in re.split(r"[,\s]+", text) if w]
+    return len(words) > 1 and bool(set(words) & {c.sp.lower() for c in cands})
+
+
 def _tick(ticked: bool) -> Text:
     """The tick cell as plain text: a str "[x]" is Rich markup to a DataTable and shows nothing."""
     return Text("[x]" if ticked else "[ ]")
@@ -172,6 +181,41 @@ class PlaceScreen(DruidTreeScreen):
     def action_place(self) -> None:
         m, i = self.model, self.tree.cursor
         self.dismiss(frozenset(m.name[j] for j in range(i, i + m.size[i]) if m.is_tip(j)))
+
+
+class PickScreen(DruidTreeScreen):
+    """t in Species / Tree (Grygoriy, 11/11/2026): the base tree with the placements grafted and a
+    tick column ([x] / [ ] / — no proteome); x ticks the tips with a proteome under the cursor
+    (a tip, or a whole clade), or unticks them when all are ticked. Each x writes druid.yaml
+    through `toggle(names) -> message`; `ticked()` is the ticked species after it."""
+    BINDINGS = [Binding("x", "tick", "tick tip / clade")]
+
+    def __init__(self, model, toggle, ticked, **kwargs):
+        super().__init__(model, **kwargs)
+        self._toggle, self._ticked = toggle, ticked
+        if self.n_grouped:                       # the tick column is no grouping: all open
+            model.expand_all()
+            self.n_grouped = 0
+
+    def on_mount(self) -> None:
+        self.tree.gap = 0
+        self.tree.show_meta = True
+        self.tree.rebuild()
+
+    def action_tick(self) -> None:
+        m, i = self.model, self.tree.cursor
+        names = [m.name[j] for j in range(i, i + m.size[i])
+                 if m.is_tip(j) and m.meta_value(j, "tick") != "—"]
+        if not names:
+            self._status("no species with a proteome here")
+            return
+        note = self._toggle(names)
+        ticked = self._ticked()
+        for j, row in m.meta.items():
+            if row[0] != "—":
+                row[0] = "[x]" if m.name[j] in ticked else "[ ]"
+        self.tree.rebuild()
+        self._status(note)
 
 
 class SetupScreen(Screen):
@@ -227,6 +271,8 @@ class SetupScreen(Screen):
         Binding("a", "tick_all", "tick shown"),
         Binding("A", "untick_all", "untick shown"),
         Binding("e", "edit_family", "edit row"),     # Families; enter ticks (Grygoriy, 23/10/2026)
+        Binding("t", "tree_pick", "species tree"),   # Species / Tree (Grygoriy, 11/11/2026)
+        Binding("u", "toggle_unplaced", "unplaced"),
         Binding("P", "prepare", "prepare"),
         Binding("S", "run_step1", "run step 1"),
         Binding("w", "toggle_warnings", "warnings"),
@@ -249,6 +295,8 @@ class SetupScreen(Screen):
         self._rowless: list = []
         self._sel: list = []                     # [(sp, source)], the species: order
         self._shown: list = []                   # candidates passing the filter, as in #sp-table
+        self._show_unplaced = False              # u: species not on the base tree (11/11/2026)
+        self._placed = None                      # base tree tips + placed species; None: unknown
         self._sp_unknown: list = []              # filter words that are no prefix (a list typed)
         self._blockers: list = []
         self._warnings: list = []                # core.family_warnings: shown, never blocking
@@ -302,7 +350,8 @@ class SetupScreen(Screen):
                                             "enter: tick all shown",
                                 id="sp-filter")
                     yield Static("sets: @v3 (59) · @chromo (94) · @<file> (one code per line) · "
-                                 "dim: in no shipped tree", classes="note", markup=False)
+                                 "t: pick on the tree · u: species not on the tree",
+                                 classes="note", markup=False)
                     yield DataTable(id="sp-table", cursor_type="row")
                     yield Static("", id="sp-count", markup=False)
                 with Vertical(id="sec-analyses"):
@@ -433,7 +482,6 @@ class SetupScreen(Screen):
         self._cands, self._rowless = self._try(
             "proteome sources", lambda: setup_state.candidates(self._srcs), ([], []))
         self._sel = self._try("species", lambda: setup_state.selected(raw), [])
-        self._shipped = self._try("shipped trees", lambda: setup_state.shipped_tips(root), set())
         self._ro_all = raw.get("prepare") == "locked"
         if self._ro_all:
             self._sp_reason = LOCKED_ALL
@@ -466,7 +514,13 @@ class SetupScreen(Screen):
             self._tree_file = setup_state.base_tree_files(raw, root)[0]
         except Exception as e:                   # tree_source: ~nouser/... (expanduser), ...
             self._tree_file, self._tree_err = None, f"tree_source unusable: {type(e).__name__}: {e}"
+            self._placed = None
             return
+        try:                                     # Species hides the rest (Grygoriy, 11/11/2026)
+            pl = sptree.read_placements(root / "data" / sptree.PLACEMENTS)
+            self._placed = sptree.tips(self._tree_file.read_text()) | {x.sp for x in pl}
+        except Exception:                        # unreadable tree: hide nothing
+            self._placed = None
         if not self._tree_on:
             return
         species = list(dict.fromkeys(sp for sp, _src in self._sel))
@@ -629,13 +683,20 @@ class SetupScreen(Screen):
     def _fill_species(self) -> None:
         q = self.query_one("#sp-filter", Input).value.strip()
         self._shown, self._sp_unknown = _species_filter(self._cands, q)
+        ticked = set(self._sel)
+        # not on the base tree nor placed (Grygoriy, 11/11/2026): hidden unless u, ticked, or
+        # named in a list (@set, prefixes); shown ones are dim
+        placed = self._placed if self._placed is not None else {c.sp for c in self._cands}
+        hidden = 0
+        if not self._show_unplaced and not _named_list(self._cands, q):
+            keep = [c for c in self._shown if c.sp in placed or (c.sp, c.source) in ticked]
+            hidden, self._shown = len(self._shown) - len(keep), keep
         t = self.query_one("#sp-table", DataTable)
         row = t.cursor_row
         t.clear()
-        ticked = set(self._sel)
         dim = 0
-        for c in self._shown:                    # dim: in no shipped tree (Grygoriy, 06/11/2026)
-            style = "" if c.sp in self._shipped else "dim"
+        for c in self._shown:
+            style = "" if c.sp in placed else "dim"
             dim += bool(style)
             tick = _tick((c.sp, c.source) in ticked)
             tick.style = style
@@ -645,8 +706,10 @@ class SetupScreen(Screen):
         count = f"{len(self._sel)} ticked / {len(self._cands)}"
         if q:
             count += f" · {len(self._shown)} shown"
+        if hidden:
+            count += f" · {hidden} hidden: not on the tree (u: show)"
         if dim:
-            count += f" · {dim} dim: in no shipped tree"
+            count += f" · {dim} dim: not on the tree"
         if self._sp_unknown:
             count += " · not found: " + ", ".join(self._sp_unknown)
         self.query_one("#sp-count", Static).update(count)
@@ -879,6 +942,10 @@ class SetupScreen(Screen):
             return self.current in ("Species", "Families")
         if action == "edit_family":
             return self.current == "Families"
+        if action == "tree_pick":
+            return self.current in ("Species", "Tree")
+        if action == "toggle_unplaced":
+            return self.current == "Species"
         if action == "switch_move":              # else ↑↓ go on to the focused widget's parents
             return isinstance(self.focused, Switch)
         return True
@@ -1035,6 +1102,62 @@ class SetupScreen(Screen):
             self._fill_blockers()
             return
         self._write({("species",): setup_state.species_value(sel)}, done=f"-{n} unticked")
+
+    def action_toggle_unplaced(self) -> None:
+        """u: show / hide the species not on the base tree nor placed (Grygoriy, 11/11/2026)."""
+        self._show_unplaced = not self._show_unplaced
+        self._msg = ("showing species not on the tree (dim)" if self._show_unplaced
+                     else "hiding species not on the tree")
+        self._fill_species()
+        self._fill_blockers()
+
+    def action_tree_pick(self) -> None:
+        """t: the base tree, placements grafted, with a tick column; x ticks there (PickScreen)."""
+        self._reload()
+        if self._tree_file is None or self._placed is None:
+            self._refuse(f"ERROR: {self._tree_err or 'species tree unreadable'}")
+            return
+        try:
+            pl = sptree.read_placements(paths.project_root() / "data" / sptree.PLACEMENTS)
+            newick = sptree.full_tree(self._tree_file.read_text().strip(), pl)
+            tree = Tree(newick, format=1)
+        except Exception as e:                   # unparsable newick, a bad placements file, ...
+            self._refuse(f"ERROR: species tree unreadable ({self._tree_file}): {e}")
+            return
+        first = {}
+        for c in self._cands:
+            first.setdefault(c.sp, c)
+        ticked = {sp for sp, _src in self._sel}
+        meta = {n.name: (["[x]" if n.name in ticked else "[ ]", first[n.name].name]
+                         if n.name in first else ["—", "no proteome"])
+                for n in tree.iter_leaves()}
+        m = tvm.TreeModel(tree, sep="_", meta=meta, meta_cols=["tick", "name"])
+        ro = f" · {self._sp_reason}" if self._sp_reason else ""
+        self.app.push_screen(PickScreen(
+            m, self._pick_toggle, lambda: {sp for sp, _src in self._sel},
+            title=f"species tree ({self._tree_file.name}): x ticks the tip / clade · esc: back{ro}",
+            write_guard=paths.writable), callback=lambda _r: self._refresh())
+
+    def _pick_toggle(self, names: list) -> str:
+        """x in PickScreen: tick `names` (each species' first source), or untick them all when
+        every one is ticked already; the message for its status line."""
+        if not self._species_editable():
+            return self._sp_reason
+        sel = list(self._sel)
+        have = {sp for sp, _src in sel}
+        if all(n in have for n in names):
+            drop = set(names)
+            new = [s for s in sel if s[0] not in drop]
+            done = f"-{len(sel) - len(new)} unticked"
+        else:
+            first = {}
+            for c in self._cands:
+                first.setdefault(c.sp, c)
+            add = [(n, first[n].source) for n in names if n not in have and n in first]
+            new = sel + add
+            done = _ticked_note([sp for sp, _src in add])
+        self._write({("species",): setup_state.species_value(new)}, done=done)
+        return self._msg or done
 
     def _tick_filtered(self) -> None:
         """enter in the filter (Grygoriy, 23/10/2026): tick every species shown (adds only), one

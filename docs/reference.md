@@ -21,6 +21,12 @@ In **Setup** (`tab` moves between panes, `enter` selects, `esc` / `q` back, `:q!
 1. **Project**: type a `job_prefix` (e.g. `chromo`), `enter`. Jobs are named `chromo-search`, ….
 2. **Species**: type prefixes (`Mlei, Hsap Nvec`) or any filter, `enter` ticks all shown.
    In the list: `space` one, `a` ticks all shown, `A` unticks all shown (same in Families).
+   Sets: `@v3` (59), `@chromo` (94) or `@<file>` (codes, one per line or comma-separated, `#`
+   comments; absolute or project-relative) in the filter show those species; `enter` ticks them.
+   Species not on the base tree (Setup › Tree) nor placed are hidden; `u` shows them, dim (a
+   ticked or named one is always shown). `t` (Species or Tree) opens the base tree with the
+   placements grafted and a tick column: `x` ticks the tip or clade under the cursor (its tips
+   with a proteome), `x` again unticks; `—` = no proteome (11/11/2026).
 3. **Analyses**: GeneRax / origins on or off (both off: no species tree needed).
 4. **Tree** (only if a switch is on): place ticked species missing from the tree.
 5. **Families**: filter, `a` ticks all shown (`space` / `enter` one at a time).

@@ -113,3 +113,10 @@ def test_blocker_tree_missing_and_polytomy(proj, tmp_path):  # noqa: F811
     out = ss.blockers({**raw, "species": ["Aaa", "Ccc"], "params": p,
                        "tree_source": "data/my.newick"}, cfg, root)
     assert out == ["1 ticked species not on the tree: Ccc"]
+
+
+def test_full_tree_grafts_every_usable_placement():
+    from druid import sptree as st
+    pl = [st.Placement("D", frozenset({"A"})), st.Placement("E", frozenset({"Q"}))]   # E: no sister
+    out = st.full_tree("((A:1,B:1):1,C:1)R;", pl)
+    assert st.tips(out) == {"A", "B", "C", "D"}

@@ -30,9 +30,6 @@ Open work, newest first. Dates dd/mm/yyyy.
   Also: `druid status` footer says "done = possvm_prev" when possvm_prev is n/a.
   GeneRax off (Grygoriy, 02/11/2026): `druid status`, the TUI overview columns and pane 1 omit
   possvm_prev, generax and gxsup altogether instead of showing n/a rows.
-- **Species tree viewer in Setup** (Grygoriy, 02/11/2026): show the project's species tree
-  (Tree section's `SPECIES_TREE` / `ORIGIN_TREE`) during setup, e.g. with the vendored treeview
-  widget, so the picked species and tree can be checked before `P`.
 - **Sub-project 5: step 2 as one chain** (`druid chain`, driver job, own retries, no Nextflow) —
   spec `docs/superpowers/specs/2026-11-02-druid-sub5-step2-chain-design.md`, awaiting review.
 - **Sub-project 4: counts heatmap** — spec `docs/superpowers/specs/2026-10-14-phylocli-counts-heatmap-design.md`.

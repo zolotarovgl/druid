@@ -211,17 +211,6 @@ def species_set(spec: str, root: Path) -> tuple:
     return (codes, "") if codes else ([], f"{p}: no species codes")
 
 
-def shipped_tips(root: Path) -> set:
-    """Every tip of the project's shipped trees (v3, chromo); a missing or broken tree adds none."""
-    out = set()
-    for rel in SPECIES_SETS.values():
-        try:
-            out |= set(_tree_tips(Path(root) / rel))
-        except (OSError, UnicodeDecodeError, ValueError):
-            pass
-    return out
-
-
 def base_tree_files(raw: dict, root: Path):
     """(binary, origin) newick paths: raw["tree_source"] (one user tree for both) if set, else the
     project's data/base_tree.binary.newick and data/base_tree.newick."""

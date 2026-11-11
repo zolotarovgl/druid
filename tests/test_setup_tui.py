@@ -1839,10 +1839,15 @@ def test_S_refused_while_prepare_runs(proj, monkeypatch):
     _run(go())
 
 
-def test_species_sets_and_dim_rows(proj):
-    """@v3 / @<file> in the Species filter; species in no shipped tree are dim (06/11/2026)."""
+def _names(t):
+    return [str(t.get_row_at(i)[1]) for i in range(t.row_count)]
+
+
+def test_species_sets_and_unplaced_rows(proj):
+    """@v3 / @<file> in the Species filter (06/11/2026); species not on the base tree (nor
+    placed) are hidden, u shows them dim (11/11/2026); a named list shows them, dim."""
     root, _prot, _mine = proj
-    (root / "data" / "base_tree.newick").write_text("(Aaa:1,Ccc:1)R;")   # Bbb: in no shipped tree
+    _tree(root, "(Aaa:1,Ccc:1)R;")                                    # Bbb: not on the tree
     (root / "data" / "my.txt").write_text("# mine\nBbb\nQqq, Aaa\n")
 
     async def go():
@@ -1851,9 +1856,25 @@ def test_species_sets_and_dim_rows(proj):
             scr = await _setup(app, pilot)
             await _section(pilot, scr, "Species")
             t = scr.query_one("#sp-table")
+            assert _names(t) == ["Aaa"]
+            assert "1 hidden: not on the tree (u: show)" in _text(scr, "#sp-count")
+            t.focus()
+            await pilot.press("u")
+            await pilot.pause()
             rows = {str(t.get_row_at(i)[1]): t.get_row_at(i)[1] for i in range(t.row_count)}
             assert rows["Bbb"].style == "dim" and rows["Aaa"].style == ""
-            assert "1 dim: in no shipped tree" in _text(scr, "#sp-count")
+            assert "1 dim: not on the tree" in _text(scr, "#sp-count")
+            t.move_cursor(row=_names(t).index("Bbb"))
+            await pilot.press("space")                                # tick the unplaced one
+            await pilot.pause()
+            await pilot.press("u")                                    # hide again: a ticked one stays
+            await pilot.pause()
+            assert _names(t) == ["Aaa", "Bbb"] and _raw()["species"] == ["Bbb"]
+            assert "hidden" not in _text(scr, "#sp-count")
+            t.move_cursor(row=1)
+            await pilot.press("space")                                # untick: hidden again
+            await pilot.pause()
+            assert _raw().get("species") in ([], None) and _names(t) == ["Aaa"]
             scr.query_one("#sp-filter").value = "@v3"
             await pilot.pause()
             assert [str(t.get_row_at(i)[1]) for i in range(t.row_count)] == ["Aaa"]
@@ -1873,3 +1894,73 @@ def test_species_sets_and_dim_rows(proj):
             await pilot.pause()
             assert t.row_count == 0 and "nope.txt: file not found" in _text(scr, "#sp-count")
     _run(go())
+
+
+def test_tree_picker_ticks_tips_and_clades(proj):
+    """t in Species / Tree: the base tree (placements grafted) with a tick column; x ticks the tip
+    or the clade under the cursor (its tips with a proteome), x again unticks (11/11/2026)."""
+    root, _prot, mine = proj
+    _tree(root, "((Aaa:1,Bbb:1):1,Xxx:1)R;")                         # Xxx: no proteome
+    yamledit.update_config(_mine(mine))
+    (root / "data" / sptree.PLACEMENTS).write_text("Ccc\tXxx\n")     # Ccc (mine) placed
+
+    async def go():
+        app = _app()
+        async with app.run_test(size=(160, 50)) as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            scr.query_one("#sp-table").focus()
+            await pilot.press("t")
+            await pilot.pause()
+            pick = app.screen
+            assert isinstance(pick, setup_tui.PickScreen)
+            m = pick.model
+            assert {m.name[i] for i in range(len(m)) if m.is_tip(i)} == {"Aaa", "Bbb", "Xxx", "Ccc"}
+            assert m.meta_value(m.tip("Xxx"), "tick") == "—"            # no proteome: not tickable
+            assert pick.tree.show_meta
+            pick.tree.goto(m.tip("Bbb"))
+            await pilot.pause()
+            await pilot.press("x")
+            await pilot.pause()
+            assert setup_state.selected(_raw()) == [("Bbb", "default")]
+            assert m.meta_value(m.tip("Bbb"), "tick") == "[x]"
+            pick.tree.goto(0)                                            # the root: the whole tree
+            await pilot.pause()
+            await pilot.press("x")
+            await pilot.pause()
+            assert setup_state.selected(_raw()) == [("Bbb", "default"), ("Aaa", "default"),
+                                                    ("Ccc", "mine")]
+            await pilot.press("x")                                       # all ticked: untick all
+            await pilot.pause()
+            assert setup_state.selected(_raw()) == []
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.screen is scr
+            await _section(pilot, scr, "Tree")
+            await pilot.press("t")
+            await pilot.pause()
+            assert isinstance(app.screen, setup_tui.PickScreen)
+    _run(go())
+
+
+def test_tree_picker_read_only_when_species_locked(proj):
+    root, _prot, _mine = proj
+    yamledit.update_config({("species",): ["Aaa"], ("species_locked",): True})
+    before = paths.config_file().read_bytes()
+
+    async def go():
+        app = _app()
+        async with app.run_test(size=(160, 50)) as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            scr.query_one("#sp-table").focus()
+            await pilot.press("t")
+            await pilot.pause()
+            pick = app.screen
+            assert isinstance(pick, setup_tui.PickScreen)
+            pick.tree.goto(pick.model.tip("Bbb"))
+            await pilot.press("x")
+            await pilot.pause()
+            assert "read-only" in str(pick.query_one("#status").render())
+    _run(go())
+    assert paths.config_file().read_bytes() == before

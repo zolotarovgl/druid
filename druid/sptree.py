@@ -153,6 +153,12 @@ def build_trees(base_binary: str, base_origin: str, species: List[str],
     return binary, origin, notes
 
 
+def full_tree(base_binary: str, pl: List[Placement]) -> str:
+    """The whole base tree with every usable placement grafted (the Setup tree picker)."""
+    return build_trees(base_binary, base_binary, list(tip_list(base_binary)) + [x.sp for x in pl],
+                       pl)[0]
+
+
 def missing(base_binary: str, species: List[str], pl: List[Placement]) -> List[str]:
     built = tips(build_trees(base_binary, base_binary, species, pl)[0])
     return [s for s in species if s not in built]
