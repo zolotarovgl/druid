@@ -2161,7 +2161,8 @@ class PhyloApp(App):
                           memo: "dict | None" = None) -> "model.HGOgs | None":
         """The HG's OGs in `source`: from the Results-tab cache when it holds that HG in that
         source, else read (that one HG) once and kept in `memo` (the screen's).  None when the
-        HG has no such output."""
+        HG has no such output.  With a memo, each source directory is listed once (memo key
+        (None, source)), so a miss never re-lists possvm*/ on the UI thread."""
         c = self._og_cache
         if c is not None and hg in c["hgs"]:
             r = c["rows"].get(hg)
@@ -2170,7 +2171,13 @@ class PhyloApp(App):
         if memo is not None and (hg, source) in memo:
             return memo[(hg, source)]
         try:
-            ogs = model.read_ogs(self.cfg, hg, source)
+            names = None
+            if memo is not None:                 # one directory listing per source per screen
+                key = (None, source)
+                if key not in memo:
+                    memo[key] = core.report_status.nonempty_files(str(self.cfg.outdir / source))
+                names = memo[key]
+            ogs = model.read_ogs(self.cfg, hg, source, names=names)
             out = None if ogs is None else model.HGOgs(hg, ogs, source=source)
         except (OSError, model.ModelError) as e:
             out = model.HGOgs(hg, [], str(e), source)
@@ -2179,8 +2186,9 @@ class PhyloApp(App):
         return out
 
     def _counts_og_search(self, query: str) -> "list | None":
-        """[(hg, OG)] whose OG id / name, a gene id or the HG id holds `query` (any case), over
-        the Results-tab OG cache; None (and that read started) when there is no cache yet."""
+        """[(hg, OG, source)] whose OG id / name, a gene id or the HG id holds `query` (any case),
+        over the Results-tab OG cache (source = the cache row's own source); None (and that read
+        started) when there is no cache yet."""
         c = self._og_cache
         if c is None:
             if not self._rt_loading():
@@ -2196,7 +2204,7 @@ class PhyloApp(App):
             for og in r.ogs:
                 if (in_hg or q in og.id.lower() or q in og.name.lower()
                         or any(q in mb.gene.lower() for mb in og.genes)):
-                    hits.append((hg, og))
+                    hits.append((hg, og, r.source))
         return hits
 
     def _counts_open_tree(self, hg: str, source: str, og, species: set) -> None:

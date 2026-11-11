@@ -210,7 +210,7 @@ def test_counts_p_and_custom(tmp_path):
     cfg = _cfg(tmp_path)
     ogs = model.read_ogs(cfg, "tfs.A.HG1", "possvm")
     scr = _screen(tmp_path, level="og", scope="tfs.A.HG1", calls=calls,
-                  og_search=lambda q: [("tfs.A.HG1", o) for o in ogs])
+                  og_search=lambda q: [("tfs.A.HG1", o, "possvm") for o in ogs])
 
     async def body(app, pilot):
         await pilot.press("p")
@@ -279,8 +279,8 @@ def test_counts_R_rereads(tmp_path):
 
 def test_counts_p_at_custom_keeps_and_restores(tmp_path):
     cfg = _cfg(tmp_path)
-    hits = ([("tfs.A.HG1", o) for o in model.read_ogs(cfg, "tfs.A.HG1", "possvm")]
-            + [("tfs.A.HG11", o) for o in model.read_ogs(cfg, "tfs.A.HG11", "possvm")])
+    hits = ([("tfs.A.HG1", o, "possvm") for o in model.read_ogs(cfg, "tfs.A.HG1", "possvm")]
+            + [("tfs.A.HG11", o, "possvm") for o in model.read_ogs(cfg, "tfs.A.HG11", "possvm")])
     scr = _screen(tmp_path, og_search=lambda q: hits)
 
     async def body(app, pilot):
@@ -291,8 +291,8 @@ def test_counts_p_at_custom_keeps_and_restores(tmp_path):
         await pilot.press("p")
         assert scr.source == "possvm_prev"
         # HG1.0 -> prev HG1.0 (shares Mlei_v05_G1); HG1.1 shares no gene; HG11 has no prev csv
-        assert [og.id for _, og in scr.custom] == ["tfs.A.HG1.0"]
-        assert scr.custom[0][1].name == "like:Tbx2/Tbx3"
+        assert [og.id for _, og, _ in scr.custom] == ["tfs.A.HG1.0"]
+        assert scr.custom[0][1].name == "like:Tbx2/Tbx3" and scr.custom[0][2] == "possvm_prev"
         assert scr.status == "possvm_prev: 2 of 3 OGs have no counterpart"
         await pilot.press("p")
         assert scr.source == "possvm" and scr.custom == orig
@@ -342,3 +342,70 @@ def test_counts_source_keyword(tmp_path):
     _run(scr, body)
     with pytest.raises(ValueError):
         _screen(tmp_path, level="og", scope="tfs.A.HG1", source="cluster")
+
+
+def test_counts_species_name_once_per_row(tmp_path):
+    scr = _screen(tmp_path)
+
+    async def body(app, pilot):
+        t = _table(scr)
+        for i in range(len(scr._ax.labels)):
+            clado, lab = (str(x) for x in t.get_row_at(i)[:2])
+            assert (clado + " " + lab).count(lab) == 1
+    _run(scr, body)
+
+
+def test_counts_search_needs_3_characters(tmp_path):
+    asked = []
+    scr = _screen(tmp_path, og_search=lambda q: asked.append(q) or [])
+
+    async def body(app, pilot):
+        await pilot.press("slash", *"HG", "enter")
+        await pilot.pause()
+        assert scr.status == "type at least 3 characters" and asked == []
+        assert scr.level == "class"
+    _run(scr, body)
+
+
+def test_counts_search_adds_at_most_200(tmp_path):
+    many = [("tfs.A.HG1", model.OG(f"tfs.A.HG1.{k}", "x",
+                                   [model.Member("Mlei_v05_G1", "Mlei", "NA", "NA")], None,
+                                   "NA", "NA"), "possvm") for k in range(250)]
+    scr = _screen(tmp_path, og_search=lambda q: many)
+
+    async def body(app, pilot):
+        await pilot.press("slash", *"HG1", "enter")
+        await pilot.pause()
+        assert len(scr.custom) == 200 and len(scr.cols) == 200
+        assert scr.status == "200 of 250 hits shown"
+    _run(scr, body)
+
+
+def test_counts_custom_entries_keep_their_source(tmp_path):
+    cfg = _cfg(tmp_path)
+    cur = model.read_ogs(cfg, "tfs.A.HG1", "possvm")
+    prev = model.read_ogs(cfg, "tfs.A.HG1", "possvm_prev")
+    trees = []
+    scr = _screen(tmp_path, og_search=lambda q: [("tfs.A.HG1", cur[0], "possvm"),
+                                                 ("tfs.A.HG1", prev[0], "possvm_prev")],
+                  open_tree=lambda hg, src, og, sp: trees.append((hg, src, og.id)))
+
+    async def body(app, pilot):
+        await pilot.press("slash", *"Tbx", "enter")
+        await pilot.pause()
+        assert scr.source == "possvm" and len(scr.cols) == 2
+        assert _table(scr).border_title == "Counts · Custom (2) · mixed"
+        assert {c.id for c in scr.cols} == {"tfs.A.HG1.0@possvm", "tfs.A.HG1.0@possvm_prev"}
+        for j, c in enumerate(scr.cols):
+            _table(scr).move_cursor(row=0, column=counts_tui.FIXED + j)
+            await pilot.pause()
+            await pilot.press("t")
+            assert trees[-1] == ("tfs.A.HG1", c.id.split("@")[1], "tfs.A.HG1.0")
+        await pilot.press("p")                    # each entry to the other of ITS source
+        got = sorted((og.id, og.name, src) for _, og, src in scr.custom)
+        assert got == [("tfs.A.HG1.0", "T/Tbx19", "possvm"),
+                       ("tfs.A.HG1.0", "like:Tbx2/Tbx3", "possvm_prev")]
+        await pilot.press("p")
+        assert [(og.name, src) for _, og, src in scr.custom] == [
+            ("T/Tbx19", "possvm"), ("like:Tbx2/Tbx3", "possvm_prev")]
+    _run(scr, body)

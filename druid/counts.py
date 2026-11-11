@@ -31,13 +31,16 @@ def _tally(genes: Iterable[str]) -> dict:
 
 def family_cols(cfg, fams: Iterable[str]) -> "tuple[list[Col], int]":
     """One Col per family with >= 1 gene in <outdir>/search/<fam>.genes.list (blank and '#'
-    lines skipped); the int counts unreadable (absent) files.  An empty list is dropped silently."""
+    lines skipped); the int counts files that exist but cannot be read.  An absent list (the
+    family is not searched yet) and an empty one are dropped silently."""
     cols: list[Col] = []
     bad = 0
     for fam in fams:
         try:
             with open(cfg.outdir / "search" / f"{fam}.genes.list", errors="replace") as fh:
                 genes = [ln.strip() for ln in fh]
+        except FileNotFoundError:
+            continue
         except OSError:
             bad += 1
             continue
@@ -175,7 +178,7 @@ class Axis:
     leaves: list      # node id per shown leaf, drawing order
     labels: list      # tip name, or "<first tip>… (k spp.)"
     tips: list        # frozenset of tip names per row
-    clado: list       # clado_rows(m, gap=-1) Text per row
+    clado: list       # clado_rows(m, gap=-1) branches only (no tip name), per row
 
 
 def _tip_names(m, i: int) -> list:
@@ -189,8 +192,22 @@ def axis(m) -> Axis:
         names = _tip_names(m, i)
         tips.append(frozenset(names))
         labels.append(names[0] if m.is_tip(i) else f"{names[0]}… ({len(names)} spp.)")
-    clado = [t for t, _ in layout.clado_rows(m, gap=-1)]
+    # the label column shows the name: keep only the branches, at most CLADO_WIDTH columns
+    clado = [_branches(t) for t, _ in layout.clado_rows(m, width=CLADO_WIDTH, gap=-1)]
     return Axis(leaves, labels, tips, clado)
+
+
+CLADO_WIDTH = 24
+_BOX_CHARS = frozenset(layout._BOX.values())
+
+
+def _branches(t):
+    """The cladogram row up to its last box-drawing cell (the tip label after it dropped)."""
+    s = t.plain
+    k = 0
+    while k < len(s) and s[k] in _BOX_CHARS:
+        k += 1
+    return t[:len(s[:k].rstrip())]
 
 
 @dataclass

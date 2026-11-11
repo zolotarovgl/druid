@@ -393,9 +393,11 @@ heatmap: arrows / `pgup` `pgdn` `home` `end` move · `enter` drills class → fa
 tree, the cursor row's species marked; OG / Custom: the OG's MRCA, members marked; `no tree for
 <hg>` when there is none) · `c` colour z-score ↔ absolute · `s` sort columns by the cursor row
 (again: default order) · `z` collapse the clade above the cursor row · `e` expand all · `p`
-possvm ↔ possvm_prev (OG / Custom) · `/` search OGs by id/name, gene id or HG id, `enter` adds the
-hits to a Custom view (`OGs still loading` and the Results-tab read is started when there is no
-OG cache yet) · `x` drop the cursor's Custom column · `R` re-read the counts · `?` keys · `:q!`
+possvm ↔ possvm_prev (OG / Custom; in Custom each OG moves to the other of its own source) · `/`
+search OGs by id/name, gene id or HG id (at least 3 characters), `enter` adds up to 200 hits to a
+Custom view (`200 of N hits shown` when capped; `OGs still loading` and the Results-tab read is
+started when there is no OG cache yet). Each Custom OG keeps the source it was found in (`t` opens
+that source's tree; the title says `mixed` when they differ) · `x` drop the cursor's Custom column · `R` re-read the counts · `?` keys · `:q!`
 quits. Read-only: it writes nothing.
 
 `?` lists every key, in druid and in the tree (`esc`, `?` or `q` closes it); the help line at

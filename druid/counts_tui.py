@@ -21,6 +21,8 @@ from treeview.keys import KeysScreen
 LEVELS = ("class", "family", "hg", "og")
 NA = "not available here"
 FIXED = 2                                   # cladogram, species label
+MIN_QUERY = 3                               # / : shortest query searched
+MAX_HITS = 200                              # / : most OGs one search adds to Custom
 
 COUNTS_KEYS = [
     ("Move", [("↑ ↓ ← →", "move the cell cursor"), ("pgup pgdn home end", "page / ends")]),
@@ -32,7 +34,8 @@ COUNTS_KEYS = [
               ("e", "expand every collapsed clade")]),
     ("Trees & OGs", [("t", "gene tree: HG → whole tree, the row's species marked · OG → its MRCA"),
                      ("p", "possvm ↔ possvm_prev (OG and Custom levels)"),
-                     ("/", "search OGs (id/name, gene, HG); enter adds the hits to Custom"),
+                     ("/", "search OGs (id/name, gene, HG; ≥ 3 characters); enter adds up to "
+                           "200 hits to Custom"),
                      ("x", "Custom: drop the cursor's column")]),
     ("Other", [("R", "re-read the counts"), ("?", "this list"), (":q!", "quit druid")]),
     ("Notes", [("", "rows: species tree tips; (not on tree) and Σ are not coloured"),
@@ -86,11 +89,13 @@ class CountsScreen(Screen):
         self.cols: "list[Col]" = []
         self.sort_row: "int | None" = None
         self._sort_by: "frozenset | None" = None
-        self.custom: "list[tuple[str, model.OG]]" = []
+        self.custom: "list[tuple[str, model.OG, str]]" = []    # (hg, OG, its own source)
         self.status = ""
         self._stack: list = []               # (level, scope, column id, crumbs) to go back to
         self._crumbs: "list[str]" = [] if level == "custom" else self._opening_crumbs(level, scope)
-        self._custom_base: "tuple[str, list]" = (self.source, [])   # Custom as built, its source
+        self._custom_base: list = []         # Custom as built (each entry keeps its source)
+        self._custom_flipped = False         # p at Custom: every entry in its other source
+        self._custom_at: dict = {}           # Custom column id -> its entry
         self._og_error = ""
         self._ax = None
         self._grid = None
@@ -134,7 +139,9 @@ class CountsScreen(Screen):
 
     def _breadcrumb(self) -> str:
         if self.level == "custom":
-            return f"Counts · Custom ({len(self.custom)})"
+            srcs = {src for _, _, src in self.custom}
+            tail = f" · {srcs.pop()}" if len(srcs) == 1 else " · mixed" if srcs else ""
+            return f"Counts · Custom ({len(self.custom)}){tail}"
         return " · ".join(["Counts"] + ([" › ".join(self._crumbs)] if self._crumbs else []))
 
     # ---------------------------------------------------------------- columns of a level
@@ -155,7 +162,17 @@ class CountsScreen(Screen):
             if hgogs.error:
                 self._og_error = f"{self.scope}: {hgogs.error}"
             return counts.og_cols(hgogs)
-        return [c for hg, og in self.custom for c in counts.og_cols(model.HGOgs(hg, [og]))]
+        # an OG id in two sources at once gets '@<source>' so every column id is unique
+        ids = [og.id for _, og, _ in self.custom]
+        self._custom_at, out = {}, []
+        for e in self.custom:
+            hg, og, src = e
+            c = counts.og_cols(model.HGOgs(hg, [og]))[0]
+            if ids.count(og.id) > 1:
+                c.id = f"{og.id}@{src}"
+            self._custom_at[c.id] = e
+            out.append(c)
+        return out
 
     def _redraw(self, focus: "str | None" = None, row: "int | None" = None) -> None:
         """Rebuild the table; the cursor goes to column `focus` (an id) or stays where it was."""
@@ -377,53 +394,65 @@ class CountsScreen(Screen):
         if j is None:
             self._say("t: on an OG column")
             return
-        hg, og = self._og_at(self.cols[j].id)
+        hg, og, src = self._og_at(self.cols[j].id)
         if og is None:
             self._say(f"t: {self.cols[j].id} not found")
             return
-        self.open_tree(hg, self.source, og, sp)
+        self.open_tree(hg, src, og, sp)
 
-    def _og_at(self, og_id: str) -> "tuple[str, model.OG | None]":
+    def _og_at(self, col_id: str) -> "tuple[str, model.OG | None, str]":
+        """(hg, OG, its source) of a column; Custom: the entry's own source."""
         if self.level == "custom":
-            return next(((hg, og) for hg, og in self.custom if og.id == og_id), ("", None))
+            return self._custom_at.get(col_id, ("", None, self.source))
         hgogs = self.og_source(self.scope, self.source)
         ogs = [] if hgogs is None else hgogs.ogs
-        return self.scope, next((og for og in ogs if og.id == og_id), None)
+        return self.scope, next((og for og in ogs if og.id == col_id), None), self.source
+
+    @staticmethod
+    def _other(src: str) -> str:
+        return "possvm_prev" if src == "possvm" else "possvm"
+
+    def _custom_label(self) -> str:
+        srcs = {src for _, _, src in self.custom}
+        return srcs.pop() if len(srcs) == 1 else "mixed" if srcs else self.source
 
     def action_source(self) -> None:
         if self.level not in ("og", "custom"):
             self._say("p: OG level only")
             return
-        self.source = "possvm_prev" if self.source == "possvm" else "possvm"
+        self.source = self._other(self.source)
         msg = f"source: {self.source}"
         if self.level == "custom":
-            base_src, base = self._custom_base
-            if self.source == base_src:
-                self.custom = list(base)             # back to the list as built, exactly
+            base, none = self._custom_base, 0
+            self._custom_flipped = not self._custom_flipped
+            if self._custom_flipped:
+                self.custom, none = self._custom_in(base)
             else:
-                self.custom, none = self._custom_in(base, self.source)
-                if none:
-                    msg = f"{self.source}: {none} of {len(base)} OGs have no counterpart"
+                self.custom = list(base)             # back to the list as built, exactly
+            msg = (f"{self._custom_label()}: {none} of {len(base)} OGs have no counterpart"
+                   if none else f"source: {self._custom_label()}")
         self._sort_by = None
         self._redraw()
         if not self._og_error:
             self._say(msg)
 
-    def _custom_in(self, base: list, source: str) -> "tuple[list, int]":
-        """Custom in the other source: per OG of `base`, the OGs of its HG there that share a gene;
-        int = OGs of `base` with no such OG (csv missing / unreadable, or no gene shared)."""
+    def _custom_in(self, base: list) -> "tuple[list, int]":
+        """Custom with every entry in the other source of its own: per OG of `base`, the OGs of
+        its HG there that share a gene; int = OGs of `base` with no such OG (csv missing /
+        unreadable, or no gene shared)."""
         out, seen, cache, none = [], set(), {}, 0
-        for hg, og in base:
-            if hg not in cache:
-                h = self.og_source(hg, source)
-                cache[hg] = [] if h is None or h.error else h.ogs
+        for hg, og, src in base:
+            tgt = self._other(src)
+            if (hg, tgt) not in cache:
+                h = self.og_source(hg, tgt)
+                cache[(hg, tgt)] = [] if h is None or h.error else h.ogs
             genes = {mb.gene for mb in og.genes}
-            hits = [o for o in cache[hg] if genes & {mb.gene for mb in o.genes}]
+            hits = [o for o in cache[(hg, tgt)] if genes & {mb.gene for mb in o.genes}]
             none += not hits
             for o in hits:
-                if (hg, o.id) not in seen:
-                    seen.add((hg, o.id))
-                    out.append((hg, o))
+                if (hg, o.id, tgt) not in seen:
+                    seen.add((hg, o.id, tgt))
+                    out.append((hg, o, tgt))
         return out, none
 
     def action_search(self) -> None:
@@ -443,6 +472,9 @@ class CountsScreen(Screen):
         q = event.value.strip()
         if not q:
             return
+        if len(q) < MIN_QUERY:
+            self._say(f"type at least {MIN_QUERY} characters")
+            return
         hits = self.og_search(q)
         if hits is None:
             self._say("OGs still loading")
@@ -450,16 +482,22 @@ class CountsScreen(Screen):
         if not hits:
             self._say(f"no OGs match {q}")
             return
-        have = {(hg, og.id) for hg, og in self.custom}
-        new = [(hg, og) for hg, og in hits if (hg, og.id) not in have]
+        hits = [h if len(h) == 3 else (*h, self.source) for h in hits]   # (hg, OG[, source])
+        have = {(hg, og.id, src) for hg, og, src in self.custom}
+        new = [h for h in hits if (h[0], h[1].id, h[2]) not in have]
+        n_new = len(new)
+        new = new[:MAX_HITS]
         self.custom.extend(new)
         if self.level != "custom":
             self._stack.append((self.level, self.scope, None, list(self._crumbs)))
             self.level, self.scope = "custom", None
-        self._custom_base = (self.source, list(self.custom))
+        self._custom_base, self._custom_flipped = list(self.custom), False
         self._sort_by = None
         self._redraw()
-        self._say(f"{len(new)} OGs added to Custom ({len(self.custom)})")
+        if n_new > MAX_HITS:
+            self._say(f"{MAX_HITS} of {n_new} hits shown")
+        else:
+            self._say(f"{len(new)} OGs added to Custom ({len(self.custom)})")
 
     def action_drop(self) -> None:
         if self.level != "custom":
@@ -470,8 +508,9 @@ class CountsScreen(Screen):
             self._say("x: on a column")
             return
         cid = self.cols[j].id
-        self.custom = [(hg, og) for hg, og in self.custom if og.id != cid]
-        self._custom_base = (self.source, list(self.custom))   # an edit rebases Custom here
+        e = self._custom_at.get(cid)
+        self.custom = [x for x in self.custom if x is not e]
+        self._custom_base, self._custom_flipped = list(self.custom), False   # an edit rebases Custom here
         self._redraw()
         self._say(f"dropped {cid}")
 

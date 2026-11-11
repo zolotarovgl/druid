@@ -20,9 +20,11 @@ def test_family_cols_counts_species_and_skips(tmp_path):
     cfg = _cfg(tmp_path)
     (tmp_path / "search/tfs.A.genes.list").write_text("Mlei_g1\nMlei_g2\n\n# c\nHsap_x\n")
     (tmp_path / "search/tfs.B.genes.list").write_text("")
-    cols, bad = counts.family_cols(cfg, ["tfs.A", "tfs.B", "tfs.C"])
+    (tmp_path / "search/tfs.D.genes.list").mkdir()          # exists, cannot be read as a file
+    cols, bad = counts.family_cols(cfg, ["tfs.A", "tfs.B", "tfs.C", "tfs.D"])
     assert cols == [Col("tfs.A", "tfs.A", {"Mlei": 2, "Hsap": 1})]
-    assert bad == 1
+    assert bad == 1                     # tfs.D only: an absent list (tfs.C) is "not searched yet"
+    assert counts.family_cols(cfg, ["tfs.C"]) == ([], 0)
 
 
 def test_hg_cols_reads_fasta_headers(tmp_path):
@@ -101,6 +103,19 @@ def test_axis_rows_in_tree_order():
     want = [m.name[i] for i in _layout.clado_order(m) if m.shown_as_leaf(i)]
     assert ax.labels == want and sorted(want) == ["Bova", "Hsap", "Mlei", "Nvec"]
     assert len(ax.clado) == 4
+
+
+def test_axis_clado_has_no_tip_names_and_is_capped():
+    import os
+    from treeview import model as tvm
+    for m in (_sp_model(), tvm.TreeModel(tvm.load(os.path.join(os.path.dirname(__file__),
+                                                             "data/species_tree.v3.newick")),
+                                         sep="_")):
+        ax = counts.axis(m)
+        for clado, lab in zip(ax.clado, ax.labels):
+            assert lab not in clado.plain and clado.plain.strip()
+            assert clado.cell_len <= counts.CLADO_WIDTH
+            assert (clado.plain + " " + lab).count(lab) == 1   # the name appears once per row
 
 
 def test_collapse_sums_clade():

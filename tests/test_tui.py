@@ -4554,3 +4554,66 @@ def test_counts_og_source_memoises_misses(cli, monkeypatch):
     memo.clear()                                              # what R does
     app._counts_og_source("tfs.A.HG1", "possvm_prev", memo)
     assert len(reads) == 3
+
+
+def test_counts_lists_each_source_once_per_screen(cli, monkeypatch):
+    _counts_fixture()
+    seen = []
+    real = core.report_status.nonempty_files
+
+    def counted(d):
+        seen.append(os.path.basename(str(d)))
+        return real(d)
+
+    async def go():
+        from druid.counts_tui import FIXED
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            app.load_now()
+            await pilot.pause()
+            await _key(pilot, "f", "tab")                     # Results tab, grouped by family
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            app.query_one("#rtab").move_cursor(row=[r.group for r in app.rt_shown].index("tfs.A"))
+            await pilot.pause()
+            await _H(app, pilot)
+            s = _counts_screen(app)
+            assert s is not None and (s.level, s.scope) == ("hg", "tfs.A")
+            app._og_cache = None                              # every OG read is a cache miss
+            monkeypatch.setattr(core.report_status, "nonempty_files", counted)
+            for hg in ("tfs.A.HG1", "tfs.A.HG11", "tfs.A.HG1"):   # drills, p presses
+                await pilot.pause()
+                j = [c.id for c in s.cols].index(hg)
+                s.query_one("#counts").move_cursor(row=0, column=FIXED + j)
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+                assert (s.level, s.scope) == ("og", hg)
+                await pilot.press("p", "p", "p")
+                await pilot.press("escape")
+                await pilot.pause()
+            assert sorted(x for x in seen if x.startswith("possvm")) == ["possvm", "possvm_prev"]
+    _run(go())
+
+
+def test_counts_search_without_og_cache(cli):
+    _counts_fixture()
+
+    async def go():
+        app = tui.PhyloApp(_cfg(), refresh_s=3600)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _open_results(app, pilot, "tfs")
+            assert app._og_cache is None
+            await _H(app, pilot)
+            s = _counts_screen(app)
+            await pilot.press("slash")
+            await pilot.pause()
+            for ch in "HG1":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert s.status == "OGs still loading" and app._og_cache is not None
+            assert _counts_screen(app) is s
+    _run(go())
