@@ -296,7 +296,7 @@ class SetupScreen(Screen):
         self._sel: list = []                     # [(sp, source)], the species: order
         self._shown: list = []                   # candidates passing the filter, as in #sp-table
         self._show_unplaced = False              # u: species not on the base tree (11/11/2026)
-        self._placed = None                      # base tree tips + placed species; None: unknown
+        self._on_tree = None                     # base tree tips + placed species; None: unknown
         self._sp_unknown: list = []              # filter words that are no prefix (a list typed)
         self._blockers: list = []
         self._warnings: list = []                # core.family_warnings: shown, never blocking
@@ -514,13 +514,13 @@ class SetupScreen(Screen):
             self._tree_file = setup_state.base_tree_files(raw, root)[0]
         except Exception as e:                   # tree_source: ~nouser/... (expanduser), ...
             self._tree_file, self._tree_err = None, f"tree_source unusable: {type(e).__name__}: {e}"
-            self._placed = None
+            self._on_tree = None
             return
         try:                                     # Species hides the rest (Grygoriy, 11/11/2026)
             pl = sptree.read_placements(root / "data" / sptree.PLACEMENTS)
-            self._placed = sptree.tips(self._tree_file.read_text()) | {x.sp for x in pl}
+            self._on_tree = sptree.tips(self._tree_file.read_text()) | {x.sp for x in pl}
         except Exception:                        # unreadable tree: hide nothing
-            self._placed = None
+            self._on_tree = None
         if not self._tree_on:
             return
         species = list(dict.fromkeys(sp for sp, _src in self._sel))
@@ -686,7 +686,7 @@ class SetupScreen(Screen):
         ticked = set(self._sel)
         # not on the base tree nor placed (Grygoriy, 11/11/2026): hidden unless u, ticked, or
         # named in a list (@set, prefixes); shown ones are dim
-        placed = self._placed if self._placed is not None else {c.sp for c in self._cands}
+        placed = self._on_tree if self._on_tree is not None else {c.sp for c in self._cands}
         hidden = 0
         if not self._show_unplaced and not _named_list(self._cands, q):
             keep = [c for c in self._shown if c.sp in placed or (c.sp, c.source) in ticked]
@@ -1114,7 +1114,7 @@ class SetupScreen(Screen):
     def action_tree_pick(self) -> None:
         """t: the base tree, placements grafted, with a tick column; x ticks there (PickScreen)."""
         self._reload()
-        if self._tree_file is None or self._placed is None:
+        if self._tree_file is None or self._on_tree is None:
             self._refuse(f"ERROR: {self._tree_err or 'species tree unreadable'}")
             return
         try:
