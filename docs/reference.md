@@ -381,7 +381,9 @@ member it opens on stays expanded (`e` expands all, `l` drops the lengths). The 
 
 `H` (Results tab and Results window, 11/11/2026) opens the **Counts heatmap**: species rows (the
 tips of `params.SPECIES_TREE` as a compact cladogram, plus `(not on tree)` when non-zero and `Σ`)
-× numbered gene-count columns, with a `total` column and a one-line legend. Where it opens: on the
+× gene-count columns named top-down in the header (the part the breadcrumb already gives dropped:
+`A` not `tfs.A`, `HG1` not `tfs.A.HG1`, `0:T/Tbx19` not `HG1.0:T/Tbx19`; at most 12 lines, `…`
+when cut; the full name is in the status line), with a `total` column. Where it opens: on the
 Results tab `ALL` → classes, a category row → that class's families, a family row (`f`) → that
 family's HGs; in the Results window an HG → its OGs, an OG or member → its HG's OGs with the cursor
 on that OG. Families count `search/<family>.genes.list`, HGs the headers of

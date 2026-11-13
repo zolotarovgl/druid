@@ -23,6 +23,7 @@ NA = "not available here"
 FIXED = 2                                   # cladogram, species label
 MIN_QUERY = 3                               # / : shortest query searched
 MAX_HITS = 200                              # / : most OGs one search adds to Custom
+MAX_HEAD = 12                               # most lines of a vertical column name
 
 COUNTS_KEYS = [
     ("Move", [("↑ ↓ ← →", "move the cell cursor"), ("pgup pgdn home end", "page / ends")]),
@@ -46,7 +47,6 @@ COUNTS_KEYS = [
 class CountsScreen(Screen):
     DEFAULT_CSS = """
     CountsScreen #counts { height: 1fr; border: round $primary; }
-    CountsScreen #legend { height: 1; }
     CountsScreen #cstatus { height: 1; }
     CountsScreen #csearch { display: none; }
     CountsScreen #csearch.on { display: block; }
@@ -109,7 +109,6 @@ class CountsScreen(Screen):
         t = DataTable(id="counts", cursor_type="cell", zebra_stripes=False)
         t.fixed_columns = FIXED
         yield t
-        yield Static("", id="legend")
         yield Input(placeholder="search OGs: id, name, gene or HG · enter adds to Custom",
                     id="csearch")
         yield Static("", id="cstatus")
@@ -192,7 +191,6 @@ class CountsScreen(Screen):
             self._grid = None
             t.add_column("", key="nodata")
             t.add_row("no data")
-            self.query_one("#legend", Static).update("")
             if self._og_error:
                 self._say(self._og_error)
             return
@@ -200,11 +198,12 @@ class CountsScreen(Screen):
         self._z = counts.zscores(g.rows)
         zmax = max((abs(v) for r in self._z for v in r), default=0.0) or 1.0
         vmax = max((v for r in g.rows for v in r), default=0)
-        w = max(3, len(str(len(self.cols))))
+        heads = [self._head(c) for c in self.cols]
+        t.header_height = max(h.count("\n") + 1 for h in heads)
         t.add_column("", key="clado")
         t.add_column("species", key="species")
-        for j in range(len(self.cols)):
-            t.add_column(Text(str(j + 1), justify="right"), width=w, key=f"c{j}")
+        for j, h in enumerate(heads):
+            t.add_column(Text(h, justify="right"), width=3, key=f"c{j}")
         t.add_column(Text("total", justify="right"), key="total")
         for i, vals in enumerate(g.rows):
             cells = []
@@ -231,7 +230,7 @@ class CountsScreen(Screen):
         t.move_cursor(row=max(0, min(r, t.row_count - 1)), column=col)
         self._show_cell()
 
-    # ---------------------------------------------------------------- cursor -> legend, status
+    # ---------------------------------------------------------------- cursor -> status
 
     def _cursor(self) -> "tuple[int, int | None]":
         """(row, column index into self.cols or None)."""
@@ -258,7 +257,6 @@ class CountsScreen(Screen):
         if self._grid is None:
             return
         i, j = self._cursor()
-        self._legend(j)
         ax, g = self._ax, self._grid
         ntree = len(ax.tips)
         if i < ntree:
@@ -281,17 +279,17 @@ class CountsScreen(Screen):
         else:
             self._say(f"{c.label} · {who} · {g.off_tree[j]} genes")
 
-    def _legend(self, j: "int | None") -> None:
-        width = max(10, self.size.width)
-        t = Text()
-        for k in range(j or 0, len(self.cols)):
-            piece = f"{k + 1} {self.cols[k].label}"
-            sep = "  " if t.plain else ""
-            if t.plain and len(t.plain) + len(sep) + len(piece) > width:
-                break
-            t.append(sep)
-            t.append(piece, style="bold" if k == j else "")
-        self.query_one("#legend", Static).update(t)
+    def _head(self, c: "Col") -> str:
+        """The column name written top-down, one character per line, at most MAX_HEAD lines (the
+        last one '…' when cut); the part the breadcrumb already says is dropped."""
+        name = c.label
+        if self.level in ("family", "hg") and c.id.startswith(self.scope + "."):
+            name = c.id[len(self.scope) + 1:]
+        elif self.level == "og":
+            name = c.label.split(".", 1)[-1]
+        if len(name) > MAX_HEAD:
+            name = name[:MAX_HEAD - 1] + "…"
+        return "\n".join(name)
 
     # ---------------------------------------------------------------- drill
 

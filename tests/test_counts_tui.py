@@ -409,3 +409,31 @@ def test_counts_custom_entries_keep_their_source(tmp_path):
         assert [(og.name, src) for _, og, src in scr.custom] == [
             ("T/Tbx19", "possvm"), ("like:Tbx2/Tbx3", "possvm_prev")]
     _run(scr, body)
+
+
+def _heads(scr):
+    return [c.label.plain for c in _table(scr).ordered_columns][2:-1]
+
+
+def test_counts_header_shows_vertical_short_names(tmp_path):
+    scr = _screen(tmp_path)
+
+    async def body(app, pilot):
+        t = _table(scr)
+        assert _heads(scr) == ["t\nf\ns", "s\nl\nc"]                   # class level: the class id
+        assert t.header_height == 3
+        await pilot.press("enter")
+        await pilot.pause()
+        assert _heads(scr) == ["A", "B"]                               # family: class prefix dropped
+        await pilot.press("enter")
+        await pilot.pause()
+        assert _heads(scr) == ["H\nG\n1", "H\nG\n1\n1"]               # HG: family prefix dropped
+        assert t.header_height == 4
+        await pilot.press("enter")
+        await pilot.pause()
+        # OG: HG part dropped; capped at counts_tui.MAX_HEAD lines, last one an ellipsis
+        h = _heads(scr)[1].split("\n")
+        assert len(h) == counts_tui.MAX_HEAD and h[-1] == "…"
+        assert "".join(h[:-1]) == "1:like:Eomes/Tbr1"[:counts_tui.MAX_HEAD - 1]
+        assert t.header_height == counts_tui.MAX_HEAD
+    _run(scr, body)
