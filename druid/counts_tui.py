@@ -26,7 +26,8 @@ MAX_HITS = 200                              # / : most OGs one search adds to Cu
 MAX_HEAD = 12                               # most lines of a vertical column name
 
 COUNTS_KEYS = [
-    ("Move", [("↑ ↓ ← →", "move the cell cursor"), ("pgup pgdn home end", "page / ends")]),
+    ("Move", [("↑ ↓ ← →", "move the cell cursor"), ("pgup pgdn home end", "page / ends"),
+              ("↑ on the first row", "column names: ← → pick one, enter opens it, t its tree, ↓ back")]),
     ("Drill", [("enter", "into the column: class → family → HG → OG"),
                ("esc", "up one level; at the level it was opened at: close")]),
     ("Look", [("c", "colour: z-score ↔ absolute"),
@@ -39,9 +40,79 @@ COUNTS_KEYS = [
                            "200 hits to Custom"),
                      ("x", "Custom: drop the cursor's column")]),
     ("Other", [("R", "re-read the counts"), ("?", "this list"), (":q!", "quit druid")]),
-    ("Notes", [("", "rows: species tree tips; (not on tree) and Σ are not coloured"),
+    ("Notes", [("", "rows: species tree tips; (not on tree) and Σ are not coloured; 0 is blank"),
                ("", "colour z: per column over the tree rows, RdBu; absolute: Blues")]),
 ]
+
+
+class CountsTable(DataTable):
+    """The heatmap's DataTable with a header cursor (Grygoriy, 16/11/2026): ↑ on the first row
+    enters the header (the cursor's column name reversed, the cell cursor hidden), ←/→ move
+    along the count columns, ↓ returns to the first row.  enter and t act on the header column
+    as on a cell of it (the screen reads cursor_column); a relabel goes through the public
+    notify_style_update(), as SortTable does in tui.py."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.header = False
+        self.ncols = 0                          # count columns, after the FIXED ones
+
+    def relabel(self) -> None:
+        for k, col in enumerate(self.ordered_columns):
+            if FIXED <= k < FIXED + self.ncols:
+                col.label = Text(col.label.plain, justify="right",
+                                 style="reverse" if self.header and k == self.cursor_column else "")
+        self.notify_style_update()
+
+    def enter_header(self) -> None:
+        self.header, self.show_cursor = True, False
+        if not FIXED <= self.cursor_column < FIXED + self.ncols:
+            self.move_cursor(column=FIXED)
+        self.relabel()
+
+    def leave_header(self) -> None:
+        self.header, self.show_cursor = False, True
+        self.relabel()
+
+    def action_cursor_up(self) -> None:
+        if self.header:
+            return
+        if self.cursor_row <= 0 and self.ncols:
+            self.enter_header()
+            self.screen._show_cell()
+            return
+        super().action_cursor_up()
+
+    def action_cursor_down(self) -> None:
+        if self.header:
+            self.leave_header()
+            self.screen._show_cell()
+            return
+        super().action_cursor_down()
+
+    def _step(self, d: int) -> None:
+        c = self.cursor_column + d
+        if FIXED <= c < FIXED + self.ncols:
+            self.move_cursor(column=c)
+            self.relabel()
+
+    def action_select_cursor(self) -> None:
+        if self.header:                          # the cell cursor is hidden: no CellSelected
+            self.screen.action_drill()
+            return
+        super().action_select_cursor()
+
+    def action_cursor_left(self) -> None:
+        if self.header:
+            self._step(-1)
+            return
+        super().action_cursor_left()
+
+    def action_cursor_right(self) -> None:
+        if self.header:
+            self._step(1)
+            return
+        super().action_cursor_right()
 
 
 class CountsScreen(Screen):
@@ -106,7 +177,7 @@ class CountsScreen(Screen):
     # ---------------------------------------------------------------- layout
 
     def compose(self) -> ComposeResult:
-        t = DataTable(id="counts", cursor_type="cell", zebra_stripes=False)
+        t = CountsTable(id="counts", cursor_type="cell", zebra_stripes=False)
         t.fixed_columns = FIXED
         yield t
         yield Input(placeholder="search OGs: id, name, gene or HG · enter adds to Custom",
@@ -187,8 +258,11 @@ class CountsScreen(Screen):
         self.cols = counts.order_cols(cols, by=set(self._sort_by) if self._sort_by else None)
         t.border_title = self._breadcrumb()
         t.clear(columns=True)
+        t.ncols = len(self.cols)
         if not self.cols:
             self._grid = None
+            if t.header:
+                t.leave_header()
             t.add_column("", key="nodata")
             t.add_row("no data")
             if self._og_error:
@@ -208,6 +282,9 @@ class CountsScreen(Screen):
         for i, vals in enumerate(g.rows):
             cells = []
             for j, v in enumerate(vals):
+                if v == 0:                       # zero: an empty cell on the table background
+                    cells.append(Text(""))
+                    continue
                 bg, fg = counts.cell_colour(v, self._z[i][j], self.mode, zmax, vmax)
                 cells.append(Text(counts.fmt_count(v), style=f"{fg} on {bg}", justify="right"))
             t.add_row(self._ax.clado[i], self._ax.labels[i], *cells,
@@ -228,6 +305,8 @@ class CountsScreen(Screen):
             col = min(old.column, FIXED + len(self.cols))
         r = old.row if row is None else row
         t.move_cursor(row=max(0, min(r, t.row_count - 1)), column=col)
+        if t.header:
+            t.relabel()
         self._show_cell()
 
     # ---------------------------------------------------------------- cursor -> status
@@ -258,6 +337,12 @@ class CountsScreen(Screen):
             return
         i, j = self._cursor()
         ax, g = self._ax, self._grid
+        if self.query_one("#counts", CountsTable).header:
+            if j is not None:
+                act = "t tree" if self.level in ("og", "custom") else (
+                    "enter opens · t tree" if self.level == "hg" else "enter opens")
+                self._say(f"{self.cols[j].label} · {g.sums[j]} genes · {act} · ↓ back to the rows")
+            return
         ntree = len(ax.tips)
         if i < ntree:
             who = ax.labels[i]
@@ -306,6 +391,9 @@ class CountsScreen(Screen):
             self._say("enter: on a group column")
             return
         cid = self.cols[j].id
+        t = self.query_one("#counts", CountsTable)
+        if t.header:
+            t.leave_header()
         self._stack.append((self.level, self.scope, cid, list(self._crumbs)))
         # an HG crumb is shown without its family: the family is the crumb before it
         self._crumbs.append(cid[len(self.scope) + 1:] if self.level == "hg" else cid)
@@ -337,6 +425,9 @@ class CountsScreen(Screen):
         self._say("colour: absolute" if self.mode == "abs" else "colour: z-score")
 
     def action_sort_row(self) -> None:
+        if self.query_one("#counts", CountsTable).header:
+            self._say("header: enter, t, or ↓ back to the rows")
+            return
         if self._grid is None:
             return
         i, _ = self._cursor()
@@ -350,6 +441,9 @@ class CountsScreen(Screen):
         self._say(f"sorted by {self._ax.labels[i]}" if self._sort_by else "default order")
 
     def action_collapse(self) -> None:
+        if self.query_one("#counts", CountsTable).header:
+            self._say("header: enter, t, or ↓ back to the rows")
+            return
         ax = self._ax
         i, _ = self._cursor()
         if self._grid is None or i >= len(ax.leaves):
@@ -382,7 +476,7 @@ class CountsScreen(Screen):
             self._say("no data")
             return
         i, j = self._cursor()
-        sp = self._row_species(i)
+        sp = set() if self.query_one("#counts", CountsTable).header else self._row_species(i)
         if self.level == "hg":
             if j is None:
                 self._say("t: on an HG column")

@@ -152,7 +152,7 @@ def cell_colour(v: int, z: float, mode: str, zmax: float, vmax: int) -> "tuple[s
 
 
 def fmt_count(v: int) -> str:
-    return "·" if v == 0 else "99+" if v > 99 else str(v)
+    return "" if v == 0 else "99+" if v > 99 else str(v)
 
 
 # ---------------------------------------------------------------- species axis

@@ -84,7 +84,7 @@ def test_cell_colour_ends_and_luminance():
 
 
 def test_fmt_count():
-    assert [counts.fmt_count(v) for v in (0, 7, 99, 100)] == ["·", "7", "99", "99+"]
+    assert [counts.fmt_count(v) for v in (0, 7, 99, 100)] == ["", "7", "99", "99+"]
 
 
 # ---- species axis

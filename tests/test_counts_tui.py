@@ -437,3 +437,57 @@ def test_counts_header_shows_vertical_short_names(tmp_path):
         assert "".join(h[:-1]) == "1:like:Eomes/Tbr1"[:counts_tui.MAX_HEAD - 1]
         assert t.header_height == counts_tui.MAX_HEAD
     _run(scr, body)
+
+
+def test_counts_zero_cells_are_empty_and_uncoloured(tmp_path):
+    scr = _screen(tmp_path)
+
+    async def body(app, pilot):
+        t = _table(scr)
+        for mode_key in ("", "c"):                                     # z-score, then absolute
+            if mode_key:
+                await pilot.press(mode_key)
+                await pilot.pause()
+            for i in range(len(scr._ax.tips)):
+                row = t.get_row_at(i)
+                for j, v in enumerate(scr._grid.rows[i]):
+                    cell = row[2 + j]
+                    if v == 0:
+                        assert cell.plain == "" and not cell.style and not cell.spans
+                    else:
+                        assert cell.plain == str(v) and " on #" in str(cell.style)
+    _run(scr, body)
+
+
+def test_counts_header_cursor_drills_and_opens_the_focal_og(tmp_path):
+    opened = []
+    scr = _screen(tmp_path, level="hg", scope="tfs.A",
+                  open_tree=lambda hg, src, og, sp: opened.append((hg, src, og and og.id, sp)))
+
+    async def body(app, pilot):
+        t = _table(scr)
+        _to_row(scr, scr._ax.labels[1])
+        await pilot.press("up", "up")                                  # row 1 -> row 0 -> header
+        await pilot.pause()
+        assert t.header and not t.show_cursor and t.cursor_column == counts_tui.FIXED
+        assert "reverse" in str(t.ordered_columns[counts_tui.FIXED].label.style)
+        assert scr.status.startswith("tfs.A.HG1 · ") and "enter opens · t tree" in scr.status
+        await pilot.press("right")
+        await pilot.pause()
+        assert t.cursor_column == counts_tui.FIXED + 1 and scr.status.startswith("tfs.A.HG11")
+        await pilot.press("right")                                     # no further than the last count column
+        assert t.cursor_column == counts_tui.FIXED + 1
+        await pilot.press("s")
+        assert scr.status.startswith("header:")                        # row-only keys refuse
+        await pilot.press("t")                                         # HG header: whole tree, nothing marked
+        assert opened[-1] == ("tfs.A.HG11", "possvm", None, set())
+        await pilot.press("left", "enter")                             # into HG1's OGs
+        await pilot.pause()
+        assert (scr.level, scr.scope) == ("og", "tfs.A.HG1") and not t.header
+        await pilot.press("up", "right", "t")                          # OG header: that OG focal
+        await pilot.pause()
+        hg, src, og, sp = opened[-1]
+        assert (hg, src, og, sp) == ("tfs.A.HG1", "possvm", scr.cols[1].id, set())
+        await pilot.press("down")
+        assert not t.header and t.show_cursor and t.cursor_row == 0
+    _run(scr, body)
