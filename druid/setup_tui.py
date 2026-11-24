@@ -1,5 +1,5 @@
 """The TUI Setup tab (sub-project 2, 23/10/2026): proteome sources, the species picker, the analyses
-switches, the base species tree (v3 curated / chromo / custom) and the placement of ticked species
+switches, the base species tree (default / chromo / custom) and the placement of ticked species
 missing from it, the search type, the families and the stage parameters (params_form: lists for
 discrete settings, typed numbers), with the blockers `prepare` would report on the bottom line;
 `P` runs prepare, `S` then step 1 (the Jobs tab's run box). Config writes go through
@@ -40,8 +40,8 @@ EDIT_COLS = {"inflation": "inflation (per family; overrides the default params.s
              "pref2": "pref2 (id prefix: the family id is <pref2>.<class_name>; pref1 when empty)"}
 TREE_OFF = "placement not needed: GeneRax and origins are off (prepare reads and writes no species tree)"
 # radio id -> setup_state.tree_base; the base tree the Tree section shows as
-TREE_BASES = {"rb-tree-v3": "v3", "rb-tree-chromo": "chromo", "rb-tree-custom": "custom"}
-TREE_LABELS = {"v3": "v3 curated, 59 tips", "chromo": "chromo, 94 tips", "custom": "tree_source"}
+TREE_BASES = {"rb-tree-default": "default", "rb-tree-chromo": "chromo", "rb-tree-custom": "custom"}
+TREE_LABELS = {"default": "default, 205 tips", "chromo": "chromo, 94 tips", "custom": "tree_source"}
 LOCKED_ALL = "read-only: adopted project (prepare: locked); druid never changes its druid.yaml here"
 RUN_HINT = "S: run step 1 (search → cluster)"    # after a good prepare: the next step
 OPTION_KEYS = "↑↓ move · space/enter toggle"     # Analyses switches, Tree / Search radio sets
@@ -128,7 +128,7 @@ def _ticked_note(sps: list, most: int = 5) -> str:
 
 
 def _species_filter(cands: list, text: str, root=None) -> tuple:
-    """(shown, not_found) for the Species filter. "@v3", "@chromo" or "@<file>": that species set
+    """(shown, not_found) for the Species filter. "@all", "@chromo" or "@<file>": that species set
     (setup_state.species_set; Grygoriy, 06/11/2026), its codes that are no candidate (or the one
     error) as not_found. Two or more words separated by commas or spaces,
     at least one of them a candidate's prefix (case ignored): the list of prefixes, in the order
@@ -350,7 +350,7 @@ class SetupScreen(Screen):
                     yield Input(placeholder="filter (any column, or prefixes: Mlei, Hsap Nvec) · "
                                             "enter: tick all shown",
                                 id="sp-filter")
-                    yield Static("sets: @v3 (59) · @chromo (94) · @<file> (one code per line) · "
+                    yield Static("sets: @all (205) · @chromo (94) · @<file> (one code per line) · "
                                  "t: pick on the tree · u: species not on the tree · "
                                  "U: untick those",
                                  classes="note", markup=False)
@@ -370,11 +370,11 @@ class SetupScreen(Screen):
                     yield Static("", id="tree-info", classes="note", markup=False)
                     yield Static(OPTION_KEYS, classes="note", markup=False)
                     with RadioSet(id="tree-base"):
-                        yield RadioButton("v3 curated (59)", id="rb-tree-v3", value=True)
+                        yield RadioButton("default (205)", id="rb-tree-default", value=True)
                         yield RadioButton("chromo (94)", id="rb-tree-chromo")
                         yield RadioButton("custom", id="rb-tree-custom")
                     yield Static("custom: one species tree of your own, used for both trees "
-                                 "(tree_source; empty: the v3 curated tree)",
+                                 "(tree_source; empty: the default tree)",
                                  id="tree-source-note", classes="note")
                     yield Input(placeholder="tree_source (newick)", id="tree-source")
                     yield DataTable(id="tree-missing", cursor_type="row")
@@ -1306,10 +1306,10 @@ class SetupScreen(Screen):
             return
         self._tree_custom = False
         self._write({("tree_source",): value or None},
-                    done=f"tree_source = {value}" if value else "tree_source cleared: the v3 curated tree")
+                    done=f"tree_source = {value}" if value else "tree_source cleared: the default tree")
 
     def _set_tree_base(self, kind: str) -> None:
-        """A base chosen in the radio set: v3 unsets tree_source, chromo sets it to CHROMO_TREE
+        """A base chosen in the radio set: default unsets tree_source, chromo sets it to CHROMO_TREE
         (one tree for both), custom waits for a tree_source to be entered. Placements whose sister
         tips are not on the new base are skipped with a note (sptree.build_trees)."""
         if kind == self._tree_base():            # showing the current value: not a choice
@@ -1324,9 +1324,9 @@ class SetupScreen(Screen):
             self.query_one("#tree-source").focus()
             return
         self._tree_custom = False
-        if kind == "v3":
+        if kind == "default":
             if self._raw.get("tree_source"):
-                self._write({("tree_source",): None}, done="species tree: v3 curated (59 tips)")
+                self._write({("tree_source",): None}, done="species tree: default (205 tips)")
             else:                                # custom was chosen, nothing entered
                 self._msg = ""
                 self._refresh()

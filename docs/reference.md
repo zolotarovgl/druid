@@ -21,7 +21,7 @@ In **Setup** (`tab` moves between panes, `enter` selects, `esc` / `q` back, `:q!
 1. **Project**: type a `job_prefix` (e.g. `chromo`), `enter`. Jobs are named `chromo-search`, ….
 2. **Species**: type prefixes (`Mlei, Hsap Nvec`) or any filter, `enter` ticks all shown.
    In the list: `space` one, `a` ticks all shown, `A` unticks all shown (same in Families).
-   Sets: `@v3` (59), `@chromo` (94) or `@<file>` (codes, one per line or comma-separated, `#`
+   Sets: `@all` (205), `@chromo` (94) or `@<file>` (codes, one per line or comma-separated, `#`
    comments; absolute or project-relative) in the filter show those species; `enter` ticks them.
    Species not on the base tree (Setup › Tree) nor placed are hidden; `u` shows them, dim (a
    ticked or named one is always shown); `U` unticks every ticked one of them. `t` (Species or Tree) opens the base tree with the

@@ -263,12 +263,12 @@ def test_refnames_missing_is_a_blocker(proj):
     assert not any(b.startswith("REFNAMES") for b in ss.blockers(raw, cfg, root))
 
 
-# ---- species sets: @v3 / @chromo / @<file> (Grygoriy, 06/11/2026) ---------------------------------
+# ---- species sets: @all / @chromo / @<file> (Grygoriy, 06/11/2026) ---------------------------------
 def test_species_set_from_the_shipped_trees(tmp_path):
     root = tmp_path / "p"
     project.init(root, "06/11/2026")
-    v3, err = ss.species_set("@v3", root)
-    assert err == "" and len(v3) == 205 and v3[0] == "Clim" and len(set(v3)) == 205   # consensus tree, was 59
+    codes, err = ss.species_set("@all", root)
+    assert err == "" and len(codes) == 205 == len(set(codes)) and codes[0] == "Clim"
     chromo, err = ss.species_set("@CHROMO", root)
     assert err == "" and len(chromo) == 94
 
@@ -286,7 +286,19 @@ def test_species_set_errors(tmp_path):
     (tmp_path / "empty.txt").write_text("# nothing\n\n")
     assert ss.species_set("@empty.txt", tmp_path) == ([], f"{tmp_path / 'empty.txt'}: no species codes")
     codes, err = ss.species_set("@", tmp_path)
-    assert codes == [] and "@v3" in err
+    assert codes == [] and "@all" in err
+
+
+def test_species_set_v3_points_to_all(tmp_path):
+    codes, err = ss.species_set("@V3", tmp_path)          # before any file lookup: no project needed
+    assert codes == [] and "@all" in err and "@v3 is now @all" in err
+
+
+def test_tree_labels_match_shipped_tip_count():
+    from pathlib import Path
+    from druid import setup_tui, sptree
+    n = len(sptree.tip_list((Path(__file__).resolve().parent.parent / "druid/data/species_tree.newick").read_text()))
+    assert f"{n} tips" in setup_tui.TREE_LABELS["default"]
 
 
 

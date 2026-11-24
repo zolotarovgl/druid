@@ -797,12 +797,12 @@ def test_tree_base_refused_on_locked_project(cli):
                 scr._msg = ""
                 scr.query_one(rid).value = True
                 await pilot.pause()
-                assert scr.query_one("#rb-tree-v3").value and "prepare: locked" in _text(scr, "#blockers")
+                assert scr.query_one("#rb-tree-default").value and "prepare: locked" in _text(scr, "#blockers")
             for kind in ("chromo", "custom"):
                 scr._set_tree_base(kind)
             scr._set_tree_source(setup_state.CHROMO_TREE)
             await pilot.pause()
-            assert scr.query_one("#rb-tree-v3").value and not scr._tree_custom
+            assert scr.query_one("#rb-tree-default").value and not scr._tree_custom
     _run(go())
     assert f.read_bytes() == before
     assert {p: p.read_bytes() for p in paths.project_root().rglob("*")
@@ -810,7 +810,7 @@ def test_tree_base_refused_on_locked_project(cli):
 
 
 def test_tree_base_choice(proj):
-    """v3 curated (tree_source unset) / chromo (94) / custom; the missing list follows the base."""
+    """default (tree_source unset) / chromo (94) / custom; the missing list follows the base."""
     root, prot, _mine_ = proj
     (prot / "Mlei_long.pep.fasta").write_text(">x\nM\n")
     (root / "data" / "tax.tsv").write_text(TAX + "Mlei\tMnemiopsis leidyi\t1\t1\t1\tMetazoa\tsrc\t1\tMT\tNA\n")
@@ -827,7 +827,7 @@ def test_tree_base_choice(proj):
         async with app.run_test() as pilot:
             scr = await _setup(app, pilot)
             await _section(pilot, scr, "Tree")
-            assert scr.query_one("#rb-tree-v3").value and missing(scr) == ["Mlei"]
+            assert scr.query_one("#rb-tree-default").value and missing(scr) == ["Mlei"]
             scr.query_one("#rb-tree-chromo").value = True
             await pilot.pause()
             assert _raw()["tree_source"] == setup_state.CHROMO_TREE
@@ -837,10 +837,10 @@ def test_tree_base_choice(proj):
             await pilot.pause()
             assert _raw()["tree_source"] == setup_state.CHROMO_TREE
             assert scr.focused is scr.query_one("#tree-source") and scr.query_one("#rb-tree-custom").value
-            scr.query_one("#rb-tree-v3").value = True
+            scr.query_one("#rb-tree-default").value = True
             await pilot.pause()
             assert not _raw().get("tree_source") and missing(scr) == ["Mlei"]
-            assert scr.query_one("#rb-tree-v3").value
+            assert scr.query_one("#rb-tree-default").value
     _run(go())
     yamledit.update_config({("species_locked",): True})
     before = paths.config_file().read_bytes()
@@ -853,7 +853,7 @@ def test_tree_base_choice(proj):
             assert scr.query_one("#tree-base").disabled
             scr.query_one("#rb-tree-chromo").value = True                 # behind the UI: refused
             await pilot.pause()
-            assert scr.query_one("#rb-tree-v3").value and "read-only" in _text(scr, "#blockers")
+            assert scr.query_one("#rb-tree-default").value and "read-only" in _text(scr, "#blockers")
     _run(locked())
     assert paths.config_file().read_bytes() == before
 
@@ -1573,9 +1573,9 @@ def test_tree_and_search_radios_up_down_space_enter(proj):
             await pilot.pause()
             assert _raw()["tree_source"] == setup_state.CHROMO_TREE
             scr.query_one("#tree-base").focus()
-            await pilot.press("up", "enter")                              # back to v3
+            await pilot.press("up", "enter")                              # back to default
             await pilot.pause()
-            assert not _raw().get("tree_source") and scr.query_one("#rb-tree-v3").value
+            assert not _raw().get("tree_source") and scr.query_one("#rb-tree-default").value
             await _section(pilot, scr, "Search")
             assert scr.focused is scr.query_one("#se-type")
             await pilot.press("down", "enter")                            # custom HMMs
@@ -1875,7 +1875,7 @@ def test_species_sets_and_unplaced_rows(proj):
             await pilot.press("space")                                # untick: hidden again
             await pilot.pause()
             assert _raw().get("species") in ([], None) and _names(t) == ["Aaa"]
-            scr.query_one("#sp-filter").value = "@v3"
+            scr.query_one("#sp-filter").value = "@all"
             await pilot.pause()
             assert [str(t.get_row_at(i)[1]) for i in range(t.row_count)] == ["Aaa"]
             assert "not found: Ccc" in _text(scr, "#sp-count")

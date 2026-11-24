@@ -3,7 +3,7 @@ taxonomy table and the 2026_chromo species tree (23/10/2026), plus the two conse
 built 24/11/2026: 7 files in all, each approved by Grygoriy.
 V3 = ~/ant/gzolotarov/projects/2022_scRNAseq_Mlei/Phylogenies_v3/data
 
-file                        v3 path                                  md5                               date
+file                        source path                               md5                               date
 species_tree.binary.newick  built by tools/build_species_tree.py (see below)  453502cb88f4a13b64ded66a1de2dd84  24/11/2026
 species_tree.newick         built by tools/build_species_tree.py (see below)  a9948f9239005556569d71381226777e  24/11/2026
 species_info.tsv            $V3/species_info.tsv                     22b73c915ff12ca93bdeed181ac4a780  14/10/2026
@@ -24,7 +24,7 @@ species_tree.newick, species_tree.binary.newick = 205-tip consensus pair, built 
     planarians.tsv          1e2bdba98d620e70526bee5c7019119e
     species_tree.chromo94.newick  5a8e45f5fc151b31897b525c3ba74a4c  (this directory)
   Ctenophore branching follows Whelan et al. 2017, Nat Ecol Evol 1:1737-1746,
-  doi:10.1038/s41559-017-0331-3, Fig. 3. The binary file has 7 polytomies resolved.
+  doi:10.1038/s41559-017-0331-3, Fig. 3. The binary file has 7 polytomies resolved (8 zero-length edges).
   Regenerate/verify: python3 tools/build_species_tree.py --out-dir druid/data  (or --check druid/data).
   The v3 originals are kept as tools/species_tree/inputs/v3_origin.newick (origin) and
   tests/data/species_tree.v3.newick (test fixture).
