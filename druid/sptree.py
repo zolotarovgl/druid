@@ -41,12 +41,17 @@ def has_polytomy(newick: str) -> bool:
 
 
 def prune(newick: str, keep: set) -> str:
-    """Drop the tips not in `keep`; internal names and branch lengths survive. "" if none remain."""
+    """Drop the tips not in `keep`; internal names and branch lengths survive. "" if none remain.
+    The root takes the name of the kept tips' MRCA ("" if unnamed): ete3 keeps the old root object,
+    whose name ("Holozoa") would otherwise label a smaller clade (final review, 24/11/2026)."""
     t = _load(newick)
     kept = [n for n in t.iter_leaves() if n.name in keep]
     if not kept:
         return ""                                   # nothing of the tree is ticked
+    mrca = t.get_common_ancestor(kept).name if len(kept) >= 2 else None
     t.prune(kept, preserve_branch_length=True)
+    if mrca is not None:
+        t.name = mrca
     return _dump(t)
 
 

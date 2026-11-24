@@ -25,6 +25,18 @@ def test_prune_keeps_internal_names_and_lengths():
     assert (t & "C").dist == 3                       # D gone: C absorbs CD's length 2 + its own 1
 
 
+def test_prune_root_takes_the_kept_tips_mrca_name():
+    # ete3 keeps the old root object: its name must follow the true MRCA (final review #1,
+    # 24/11/2026: pruning latest's "Holozoa" root to Mlei/Hsap/Mbre must give Choanozoa)
+    nw = "(((A:1,B:1)AB:1,C:1)ABC:1,D:1)R;"
+    assert _t(sp.prune(nw, {"A", "C"})).name == "ABC"
+    assert _t(sp.prune(nw, {"A", "B"})).name == "AB"
+    assert _t(sp.prune(nw, {"A", "D"})).name == "R"
+    assert _t(sp.prune("(((A:1,B:1)AB:1,C:1):1,D:1)R;", {"A", "C"})).name == ""   # MRCA unnamed
+    hol = "(((Hsap:1,Mlei:1)Metazoa:1,Mbre:1)Choanozoa:1,Sros:1)Holozoa;"
+    assert _t(sp.prune(hol, {"Mlei", "Hsap", "Mbre"})).name == "Choanozoa"
+
+
 def test_add_sister_of_tip():
     t = _t(sp.add_sister(NW, frozenset({"A"}), "X"))
     a, x = t & "A", t & "X"
