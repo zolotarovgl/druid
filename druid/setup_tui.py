@@ -41,7 +41,28 @@ EDIT_COLS = {"inflation": "inflation (per family; overrides the default params.s
 TREE_OFF = "placement not needed: GeneRax and origins are off (prepare reads and writes no species tree)"
 # radio id -> setup_state.tree_base; the base tree the Tree section shows as
 TREE_BASES = {"rb-tree-default": "default", "rb-tree-chromo": "chromo", "rb-tree-custom": "custom"}
-TREE_LABELS = {"default": "default, 205 tips", "chromo": "chromo, 94 tips", "custom": "tree_source"}
+TREE_SETS = {"default": "all", "chromo": "chromo"}   # base -> its setup_state.SPECIES_SETS name
+
+
+def _count(sizes: dict, base: str) -> str:
+    """" (205)" for a base whose project tree reads (setup_state.species_set_sizes), else ""."""
+    n = sizes.get(TREE_SETS.get(base, ""))
+    return "" if n is None else f" ({n})"
+
+
+def tree_label(base: str, sizes: dict) -> str:
+    """The Tree section's name for a base: "default, 205 tips" with the project's own count (none
+    when its tree cannot be read; final review #3, 24/11/2026), "tree_source" for custom."""
+    if base not in TREE_SETS:
+        return "tree_source"
+    n = sizes.get(TREE_SETS[base])
+    return base if n is None else f"{base}, {n} tips"
+
+
+def _sets_hint(sizes: dict) -> str:
+    return (f"sets: @all{_count(sizes, 'default')} · @chromo{_count(sizes, 'chromo')} · "
+            "@<file> (one code per line) · t: pick on the tree · u: species not on the tree · "
+            "U: untick those")
 LOCKED_ALL = "read-only: adopted project (prepare: locked); druid never changes its druid.yaml here"
 RUN_HINT = "S: run step 1 (search → cluster)"    # after a good prepare: the next step
 OPTION_KEYS = "↑↓ move · space/enter toggle"     # Analyses switches, Tree / Search radio sets
@@ -305,6 +326,7 @@ class SetupScreen(Screen):
         self._sp_reason = ""                     # why Species / Tree are read-only ("" = editable)
         self._tree_on = True                     # GeneRax or origins on: a species tree is needed
         self._tree_file = None                   # the base binary tree (setup_state.base_tree_files)
+        self._sizes: dict = {}                   # setup_state.species_set_sizes: the labels' counts
         self._tree_err = ""                      # why the tree cannot be read ("" = fine)
         self._built = ""                         # the binary tree as built now (newick)
         self._missing: list = []                 # ticked species not on it
@@ -350,10 +372,7 @@ class SetupScreen(Screen):
                     yield Input(placeholder="filter (any column, or prefixes: Mlei, Hsap Nvec) · "
                                             "enter: tick all shown",
                                 id="sp-filter")
-                    yield Static("sets: @all (205) · @chromo (94) · @<file> (one code per line) · "
-                                 "t: pick on the tree · u: species not on the tree · "
-                                 "U: untick those",
-                                 classes="note", markup=False)
+                    yield Static(_sets_hint(self._sizes), id="sp-sets", classes="note", markup=False)
                     yield DataTable(id="sp-table", cursor_type="row")
                     yield Static("", id="sp-count", markup=False)
                 with Vertical(id="sec-analyses"):
@@ -370,8 +389,9 @@ class SetupScreen(Screen):
                     yield Static("", id="tree-info", classes="note", markup=False)
                     yield Static(OPTION_KEYS, classes="note", markup=False)
                     with RadioSet(id="tree-base"):
-                        yield RadioButton("default (205)", id="rb-tree-default", value=True)
-                        yield RadioButton("chromo (94)", id="rb-tree-chromo")
+                        yield RadioButton("default" + _count(self._sizes, "default"),
+                                          id="rb-tree-default", value=True)
+                        yield RadioButton("chromo" + _count(self._sizes, "chromo"), id="rb-tree-chromo")
                         yield RadioButton("custom", id="rb-tree-custom")
                     yield Static("custom: one species tree of your own, used for both trees "
                                  "(tree_source; empty: the default tree)",
@@ -512,6 +532,7 @@ class SetupScreen(Screen):
         switches off: only the base's path, nothing is read (Ruling K)."""
         self._tree_on = setup_state.trees_needed(params)
         self._tree_err, self._built, self._missing, self._placements = "", "", [], []
+        self._sizes = setup_state.species_set_sizes(root)
         try:
             self._tree_file = setup_state.base_tree_files(raw, root)[0]
         except Exception as e:                   # tree_source: ~nouser/... (expanduser), ...
@@ -716,6 +737,7 @@ class SetupScreen(Screen):
             count += " · not found: " + ", ".join(self._sp_unknown)
         self.query_one("#sp-count", Static).update(count)
         self.query_one("#sp-reason", Static).update(self._sp_reason)
+        self.query_one("#sp-sets", Static).update(_sets_hint(self._sizes))
 
     def _fill_analyses(self) -> None:
         params = self._raw.get("params")
@@ -746,6 +768,9 @@ class SetupScreen(Screen):
             rb = self.query_one(f"#{rid}", RadioButton)
             if kind == base and not rb.value:
                 rb.value = True
+            label = kind + _count(self._sizes, kind)
+            if str(rb.label) != label:           # the project's own counts (final review #3)
+                rb.label = label
         self.query_one("#tree-base", RadioSet).disabled = ro
         ts = self._raw.get("tree_source")
         inp = self.query_one("#tree-source", Input)
@@ -756,7 +781,7 @@ class SetupScreen(Screen):
         t.display = self._tree_on
         t.disabled = ro
         lines = [self._sp_reason] if self._sp_reason else []
-        lines.append(f"species tree: {self._tree_file} ({TREE_LABELS[base]})")
+        lines.append(f"species tree: {self._tree_file} ({tree_label(base, self._sizes)})")
         if not self._tree_on:
             t.clear()
             lines.append(TREE_OFF)
@@ -1324,9 +1349,11 @@ class SetupScreen(Screen):
             self.query_one("#tree-source").focus()
             return
         self._tree_custom = False
+        n = self._sizes.get(TREE_SETS[kind])     # the project's own count, none if unreadable
         if kind == "default":
             if self._raw.get("tree_source"):
-                self._write({("tree_source",): None}, done="species tree: default (205 tips)")
+                self._write({("tree_source",): None},
+                            done="species tree: default" + ("" if n is None else f" ({n} tips)"))
             else:                                # custom was chosen, nothing entered
                 self._msg = ""
                 self._refresh()
@@ -1338,7 +1365,7 @@ class SetupScreen(Screen):
             self._fill_tree()
             return
         self._write({("tree_source",): setup_state.CHROMO_TREE},
-                    done=f"species tree: chromo (94 tips, {setup_state.CHROMO_TREE})")
+                    done=f"species tree: chromo ({'' if n is None else f'{n} tips, '}{setup_state.CHROMO_TREE})")
 
     # ---- Search -----------------------------------------------------------------------------
     def _fam_editable(self) -> bool:

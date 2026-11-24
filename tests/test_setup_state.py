@@ -294,11 +294,27 @@ def test_species_set_v3_points_to_all(tmp_path):
     assert codes == [] and "@all" in err and "@v3 is now @all" in err
 
 
-def test_tree_labels_match_shipped_tip_count():
+def test_tree_labels_match_shipped_tip_count(tmp_path):
+    # final review #3 (24/11/2026): the count is the project's own copy (the file @all / @chromo
+    # reads), not a constant: a project made before 24/11/2026 has a 59-tip data/base_tree.newick
     from pathlib import Path
     from druid import setup_tui, sptree
-    n = len(sptree.tip_list((Path(__file__).resolve().parent.parent / "druid/data/species_tree.newick").read_text()))
-    assert f"{n} tips" in setup_tui.TREE_LABELS["default"]
+    here = Path(__file__).resolve().parent
+    n = len(sptree.tip_list((here.parent / "druid/data/species_tree.newick").read_text()))
+    root = tmp_path / "p"
+    project.init(root, "24/11/2026")
+    sizes = ss.species_set_sizes(root)
+    assert sizes == {"all": n, "chromo": 94}
+    assert setup_tui.tree_label("default", sizes) == f"default, {n} tips"
+    assert setup_tui.tree_label("chromo", sizes) == "chromo, 94 tips"
+    assert setup_tui.tree_label("custom", sizes) == "tree_source"
+    (root / "data" / "base_tree.newick").write_text((here / "data" / "species_tree.v3.newick").read_text())
+    assert setup_tui.tree_label("default", ss.species_set_sizes(root)) == "default, 59 tips"
+    (root / "data" / "base_tree.newick").unlink()                   # missing / unreadable: no number
+    (root / ss.CHROMO_TREE).write_text("((a,b);garbage(")
+    sizes = ss.species_set_sizes(root)
+    assert sizes == {"all": None, "chromo": None}
+    assert setup_tui.tree_label("default", sizes) == "default" and setup_tui.tree_label("chromo", sizes) == "chromo"
 
 
 

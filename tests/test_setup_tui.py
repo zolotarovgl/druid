@@ -828,11 +828,18 @@ def test_tree_base_choice(proj):
             scr = await _setup(app, pilot)
             await _section(pilot, scr, "Tree")
             assert scr.query_one("#rb-tree-default").value and missing(scr) == ["Mlei"]
+            # the counts are the project's own trees (fixture base: 3 tips), not the shipped 205
+            # (final review #3, 24/11/2026)
+            assert "default, 3 tips" in _text(scr, "#tree-info")
+            assert str(scr.query_one("#rb-tree-default").label) == "default (3)"
+            assert str(scr.query_one("#rb-tree-chromo").label) == "chromo (94)"
+            assert "sets: @all (3) · @chromo (94) · @<file>" in _text(scr, "#sp-sets")
             scr.query_one("#rb-tree-chromo").value = True
             await pilot.pause()
             assert _raw()["tree_source"] == setup_state.CHROMO_TREE
             assert missing(scr) == ["Aaa"] and "chromo, 94 tips" in _text(scr, "#tree-info")
             assert "1 ticked species not on the tree: Aaa" in _text(scr, "#blockers")
+            assert f"species tree: chromo (94 tips, {setup_state.CHROMO_TREE})" in _text(scr, "#blockers")
             scr.query_one("#rb-tree-custom").value = True                 # nothing written yet
             await pilot.pause()
             assert _raw()["tree_source"] == setup_state.CHROMO_TREE
@@ -841,6 +848,7 @@ def test_tree_base_choice(proj):
             await pilot.pause()
             assert not _raw().get("tree_source") and missing(scr) == ["Mlei"]
             assert scr.query_one("#rb-tree-default").value
+            assert "species tree: default (3 tips)" in _text(scr, "#blockers")
     _run(go())
     yamledit.update_config({("species_locked",): True})
     before = paths.config_file().read_bytes()
@@ -1844,7 +1852,7 @@ def _names(t):
 
 
 def test_species_sets_and_unplaced_rows(proj):
-    """@v3 / @<file> in the Species filter (06/11/2026); species not on the base tree (nor
+    """@all / @<file> in the Species filter (06/11/2026); species not on the base tree (nor
     placed) are hidden, u shows them dim (11/11/2026); a named list shows them, dim."""
     root, _prot, _mine = proj
     _tree(root, "(Aaa:1,Ccc:1)R;")                                    # Bbb: not on the tree

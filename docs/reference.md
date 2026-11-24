@@ -28,7 +28,11 @@ In **Setup** (`tab` moves between panes, `enter` selects, `esc` / `q` back, `:q!
    placements grafted and a tick column: `x` ticks the tip or clade under the cursor (its tips
    with a proteome), `x` again unticks; `—` = no proteome (11/11/2026).
 3. **Analyses**: GeneRax / origins on or off (both off: no species tree needed).
-4. **Tree** (only if a switch is on): place ticked species missing from the tree.
+4. **Tree** (only if a switch is on): place ticked species missing from the tree. The counts shown
+   (`default (205)`, `@all (205)`) are read from the project's own `data/base_tree.newick`: a
+   project made before 24/11/2026 keeps its 59-tip tree. To adopt the 205-tip tree there, copy
+   `druid/data/species_tree.newick` / `species_tree.binary.newick` over its
+   `data/base_tree.newick` / `data/base_tree.binary.newick`, before its first prepare.
 5. **Families**: filter, `a` ticks all shown (`space` / `enter` one at a time).
 6. **Parameters** (optional; the defaults run): the stage settings, grouped by stage. Clustering
    (MCL inflation default, recluster size, domain expand, cpus), Alignment (MAFFT: linsi · einsi ·

@@ -213,6 +213,21 @@ def species_set(spec: str, root: Path) -> tuple:
     return (codes, "") if codes else ([], f"{p}: no species codes")
 
 
+def species_set_sizes(root: Path) -> dict:
+    """{"all": n, "chromo": n}: the species in the project's copy of each shipped tree (the file
+    "@all" / "@chromo" reads), None when it is missing or unreadable. The Setup labels show these,
+    never a constant: a project made before 24/11/2026 has a 59-tip data/base_tree.newick (final
+    review #3, 24/11/2026)."""
+    out = {}
+    for name in SPECIES_SETS:
+        try:
+            codes, err = species_set(f"@{name}", root)
+        except Exception:                           # a label must never crash the Setup screen
+            codes, err = [], "unreadable"
+        out[name] = None if err else len(codes)
+    return out
+
+
 def base_tree_files(raw: dict, root: Path):
     """(binary, origin) newick paths: raw["tree_source"] (one user tree for both) if set, else the
     project's data/base_tree.binary.newick and data/base_tree.newick."""
