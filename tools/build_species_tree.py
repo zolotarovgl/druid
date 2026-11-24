@@ -195,8 +195,8 @@ def species_report(tips: list, taxonomy_tsv: Path, extra_names: dict) -> List[st
 
 def build(latest: str, v3: str, chromo: str) -> Tuple[str, str, List[str]]:
     cur = _swap_ctenophores(latest, v3)
+    cur = _add_missing(cur, chromo)                     # chromo94 first: richer sponge context than v3
     cur = _add_missing(cur, v3)
-    cur = _add_missing(cur, chromo)
     cur, tname = _planarians(cur)
     cur, notes = _name_nodes(cur, [v3, latest, chromo], tname)
     t = _load(cur)

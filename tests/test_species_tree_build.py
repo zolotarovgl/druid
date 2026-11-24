@@ -74,8 +74,8 @@ def test_latest_kept_outside_ctenophores():
 
 def test_no_conflict_with_chromo94_outside_ctenophores():
     o, _, _ = build(LATEST, V3, CHROMO)
-    C = tips(CHROMO) & tips(LATEST)      # tips beside v3-only tips (Aphvas -> Aphrbe) follow v3, not chromo
-    cten = tips_under(LATEST, "Eupdun", "Mlei")
+    C = tips(CHROMO)
+    cten = tips_under(CHROMO, "Mlei", "Vmul")
     mine, theirs = clades(o, C), clades(CHROMO, C)
     for c in mine:
         if c < cten:
