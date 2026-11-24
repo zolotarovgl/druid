@@ -268,7 +268,7 @@ def test_species_set_from_the_shipped_trees(tmp_path):
     root = tmp_path / "p"
     project.init(root, "06/11/2026")
     v3, err = ss.species_set("@v3", root)
-    assert err == "" and len(v3) == 59 and v3[0] == "Mbre" and len(set(v3)) == 59
+    assert err == "" and len(v3) == 205 and v3[0] == "Clim" and len(set(v3)) == 205   # consensus tree, was 59
     chromo, err = ss.species_set("@CHROMO", root)
     assert err == "" and len(chromo) == 94
 

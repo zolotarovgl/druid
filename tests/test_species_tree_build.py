@@ -142,3 +142,9 @@ def test_cli_check(tmp_path):
     (tmp_path / "species_tree.newick").write_text("(A,B);")
     bad = subprocess.run([sys.executable, script, "--check", str(tmp_path)], capture_output=True, text=True)
     assert bad.returncode == 1
+
+
+def test_shipped_matches_rebuild():
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "build_species_tree.py"), "--check",
+                        str(ROOT / "druid" / "data")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
