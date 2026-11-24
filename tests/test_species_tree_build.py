@@ -9,7 +9,7 @@ from ete3 import Tree
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-from build_species_tree import build, clades  # noqa: E402
+from build_species_tree import _add_missing, build, clades, species_report  # noqa: E402
 from druid.sptree import has_polytomy, tip_list, tips  # noqa: E402
 
 INPUTS = ROOT / "tools" / "species_tree" / "inputs"
@@ -130,6 +130,84 @@ def test_species_report_lists_duplicates():
     assert "Djap" in txt and "Dugjap" in txt and "Bflo" in txt and "Bflz" in txt
     for code in ("Avas", "Braflo", "Clad", "Halduj"):
         assert code in txt
+
+
+def _all_clades(newick):
+    return {frozenset(x.name for x in n.iter_leaves()) for n in Tree(newick, format=1).traverse()
+            if not n.is_leaf()}
+
+
+def test_no_one_child_nodes():
+    # final review #2: latest's 5 one-child nodes made GeneRax fail ("Cannot parse species tree")
+    o, b, rep = build(LATEST, V3, CHROMO)
+    assert all(len(n.children) == 2 for n in Tree(b, format=1).traverse() if not n.is_leaf())
+    assert all(len(n.children) >= 2 for n in Tree(o, format=1).traverse() if not n.is_leaf())
+    assert "one-child nodes collapsed: 5" in rep
+
+
+def test_graft_joins_the_highest_node_with_the_same_source_tips():
+    # final review #4: B is backbone-only, so the source's (A,X) says nothing about B: (A,B,X)
+    out, notes = _add_missing("((A:1,B:1):1,C:1);", "((A,X),C);", "src")
+    c = _all_clades(out)
+    assert frozenset("ABX") in c and frozenset("AX") not in c and frozenset("AB") not in c
+    assert any(n.startswith("polytomy graft: X ") for n in notes)
+
+
+def test_graft_exact_source_clade_stays_a_clade():
+    out, notes = _add_missing("((A:1,B:1):1,C:1);", "(((A,B),X),C);", "src")
+    c = _all_clades(out)
+    assert frozenset("AB") in c and frozenset("ABX") in c and frozenset("ABCX") in c
+    assert not notes
+
+
+def test_graft_conflict_with_the_backbone_is_reported():
+    # final review #7: the source has X sister of (A,B); the backbone puts C (a source tip) inside
+    out, notes = _add_missing("((A:1,C:1):1,B:1);", "(((A,B),X),C);", "src")
+    assert frozenset("AC") in _all_clades(out)                   # the backbone wins
+    assert [n for n in notes if n.startswith("conflict: X ")] and "C" in notes[0] and "src" in notes[0]
+
+
+def test_sponge_grafts_make_no_unsupported_split():
+    # final review #4: the 7 measured cases (sister in the source; the backbone relative it lacks)
+    o, _, rep = build(LATEST, V3, CHROMO)
+    c = clades(o, tips(o))
+    for new, sis, other in (("Cliori", "Tetwil", "Stycar"), ("Halpan", "Tetwil", "Stycar"),
+                            ("Theswi", "Tetwil", "Stycar"), ("Xesmut", "Aque", "Halamb"),
+                            ("Dysava", "Choren", "Plespi"), ("Corcan", "Ocar", "Plajan"),
+                            ("Aphvas", "Oopmin", "Avas"), ("Aphrbe", "Oopmin", "Avas")):
+        assert all(other in x for x in c if {new, sis} <= x), (new, sis, other)
+    # chromo94 ((Aphvas,Aphrbe),Oopmin); latest ((Avas,Oopmin),Clad), Avas and Clad not in chromo94:
+    # ((Avas,Oopmin),Clad,(Aphvas,Aphrbe)), each input's clades kept, nothing more
+    assert {frozenset({"Aphvas", "Aphrbe"}), frozenset({"Avas", "Oopmin"}),
+            frozenset({"Avas", "Oopmin", "Clad", "Aphvas", "Aphrbe"})} <= c
+    assert frozenset({"Oopmin", "Aphvas", "Aphrbe"}) not in c
+    assert {"Cliori", "Xesmut", "Dysava", "Corcan", "Aphvas"} <= {x.split()[2] for x in rep
+                                                                if x.startswith("polytomy graft: ")}
+
+
+def test_report_lists_names_not_placed():
+    o, _, rep = build(LATEST, V3, CHROMO)
+    have = {n.name for n in Tree(o, format=1).traverse() if not n.is_leaf() and n.name}
+    assert "name not placed: Crinoidea (latest, one-tip clade)" in rep
+    for label, src in (("latest", LATEST), ("v3", V3), ("chromo94", CHROMO)):
+        for n in Tree(src, format=1).traverse():
+            if not n.is_leaf() and n.name and n.name not in have:
+                assert [x for x in rep if x.startswith(f"name not placed: {n.name} ({label}, ")], n.name
+    for x in rep:
+        if x.startswith("name not placed: "):
+            assert x.split()[3] not in have, x
+
+
+def test_species_report_compares_sp_names_in_full(tmp_path):
+    # final review #8: "Hoilungia sp. H4" / "Hoilungia sp. H11" are two species
+    tax = tmp_path / "tax.tsv"
+    tax.write_text("HoiH04\tHoilungia sp. H4\nHoiH11\tHoilungia sp. H11\nBflo\tBranchiostoma floridae, S238N-H82\n"
+                   "Bflz\tBranchiostoma floridae, bjbf\nXa\tGenus sp A\nXb\tGenus sp. A\n")
+    rep = species_report(["HoiH04", "HoiH11", "Bflo", "Bflz", "Xa", "Xb"], tax, {})
+    assert not [x for x in rep if "HoiH" in x]
+    assert [x for x in rep if "Bflo" in x and "Bflz" in x] and [x for x in rep if "Xa" in x and "Xb" in x]
+    _, _, real = build(LATEST, V3, CHROMO)
+    assert not [x for x in real if "HoiH" in x]
 
 
 def test_cli_check(tmp_path):
