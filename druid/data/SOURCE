@@ -27,6 +27,9 @@ species_tree.newick, species_tree.binary.newick = 205-tip consensus pair, built 
   doi:10.1038/s41559-017-0331-3, Fig. 3. latest's 5 one-child nodes are collapsed (GeneRax cannot
   parse them). A grafted tip whose source lacks backbone relatives of its sister joins the highest
   node holding the same source tips as one more child (5 such grafts, listed by the build).
+  Known limitation (24/11/2026): when the sister set's MRCA is itself a backbone polytomy, the tip
+  becomes its sister, a split no input makes: Halpan and the ((Diaery,Cracra),Lychyp) group sit
+  outside a clade with Stycar.
   The binary file has 12 polytomies resolved (13 zero-length edges); no one-child nodes.
   The binary tree's polytomy resolutions are arbitrary (zero-length) and differ from the old v3
   binary (e.g. Medusozoa, Anthoathecata), so GeneRax on v3's species is not comparable to Phylogenies_v3.

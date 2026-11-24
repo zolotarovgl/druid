@@ -54,11 +54,15 @@ v3's cydippid polytomy (unresolved). Both trees carry the same 16 ctenophore tip
 
 1. Backbone `latest`; its ctenophore subtree (MRCA of `Eupdun`, `Mlei`) replaced by v3's origin
    ctenophore subtree.
-2. Graft the tips missing from the backbone — v3-only, then chromo-only — each beside its sister
-   in its source tree: the sister node's tips restricted to tips already placed; an exact clade →
-   new sister (`sptree.add_sister` semantics); otherwise one more child of the smallest node
-   containing them (`sptree.carry_to_origin` semantics). A tip whose sister set is still empty
-   waits for the next pass; no progress in a pass is an error.
+2. Graft the tips missing from the backbone — chromo94's first, then the remaining v3-only ones
+   (revised 24/11/2026: v3-first split the glass sponges) — each beside its sister set S in its
+   source tree (the sister node's tips restricted to tips already placed). Conservative rule
+   (revised 24/11/2026 after the final review: the first rule made 7 sponge splits no input
+   supports): M = MRCA of S; H = the highest ancestor of M whose tips restricted to the source's
+   tips still equal S; H ≠ M → one more child of H; H = M → new sister of M. A source polytomy →
+   one more child of MRCA(S). Two new tips forming a cherry: the first goes beside the nearest
+   source ancestor's placed tips. Known residual: when M is itself a backbone polytomy, "sister of
+   M" still adds one split (Halpan and the Diaery group outside Stycar).
 3. `(Smed,Dugjap)` → `((((Smed,Spol),(Djap,Dugjap)),Gtig),Pnig)`, keeping the old node's name
    (`Tricladida`). `Dugjap` beside `Djap` is Claude's call (same species, see Non-goals).
 4. Internal names: v3's name where the node's tips restricted to v3's tips equal a v3 clade,
