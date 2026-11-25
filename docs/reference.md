@@ -315,7 +315,13 @@ It reads `proteomes/<code>.pep`; `proteomes/taxonomy.tsv` (same format as any ta
 its rows, and a code with no row there falls back to the default source's table. When the default
 source has the same code, the default source's proteome is used and the `project` file is not
 offered; Setup › Source lists it as `<code>: default source used`. Any other entry in `proteomes/`
-is listed there as ignored. The name `project` is reserved, so Setup refuses it for a new source
+is listed there as ignored. A taxonomy row is one tab-separated line with at least 6 columns
+(column 1 the code, column 2 the Latin name, column 6 the lineage; shorter rows are skipped), e.g.
+`Spol<TAB>Schmidtea polychroa<TAB>.<TAB>.<TAB>.<TAB><lineage as in data/genome_sources.tsv>`. A stray
+`.pep` with no row in either table blocks prepare (`no taxonomy row for project: <file>`) even when
+it is not ticked. A species ticked from `project` whose code the default source later gains is
+blocked (`<code>: ticked from project, but the default source has it`); untick it in Species and
+tick the default one. The name `project` is reserved, so Setup refuses it for a new source
 even when `proteomes/` is absent; an explicit source of that name in `druid.yaml` replaces the
 implicit one. druid only reads `proteomes/`, never writes into it.
 

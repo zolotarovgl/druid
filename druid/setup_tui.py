@@ -501,9 +501,12 @@ class SetupScreen(Screen):
                 raw = {}
         self._raw = raw
         self._srcs = self._try("sources", lambda: setup_state.sources(raw, root), [])
-        self._cands, self._rowless = self._try(
-            "proteome sources", lambda: setup_state.candidates(self._srcs), ([], []))
         self._sel = self._try("species", lambda: setup_state.selected(raw), [])
+        self._cands, self._rowless = self._try(
+            "proteome sources", lambda: setup_state.candidates(self._srcs, self._sel), ([], []))
+        dflt = {c.sp for c in self._cands if c.source == setup_state.DEFAULT}
+        self._notes = self._try("project proteomes",
+                                lambda: setup_state.project_notes(self._srcs, dflt, self._sel), [])
         self._ro_all = raw.get("prepare") == "locked"
         if self._ro_all:
             self._sp_reason = LOCKED_ALL
@@ -698,9 +701,11 @@ class SetupScreen(Screen):
         for s in self._srcs:
             where = "" if s.proteomes_dir.is_dir() else "  (directory not found)"
             lines.append(f"{s.name}: {s.proteomes_dir} · {s.glob}{where}")
-            fb = f" (missing rows: {s.fallback_taxonomy})" if s.fallback_taxonomy else ""
-            lines.append(f"    taxonomy {s.taxonomy}{fb} · {n.get(s.name, 0)} proteomes with a row")
-        lines += [f"    {note}" for note in setup_state.project_notes(self._srcs)]
+            nf = "" if s.taxonomy.exists() or not s.fallback_taxonomy else " (not found)"
+            fb = f" (fallback: {s.fallback_taxonomy})" if s.fallback_taxonomy else ""
+            lines.append(f"    taxonomy {s.taxonomy}{nf}{fb} · {n.get(s.name, 0)} proteomes with a row")
+            if s.name == setup_state.PROJECT and s.fallback_taxonomy is not None:
+                lines += [f"    {note}" for note in self._notes]
         self.query_one("#src-list", Static).update("\n".join(lines))
         for k in SRC_FIELDS:
             self.query_one(f"#src-{k}", Input).disabled = self._ro_all

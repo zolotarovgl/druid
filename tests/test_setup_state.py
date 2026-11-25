@@ -54,6 +54,10 @@ def _projdir(root, files, tax=None):
     return d
 
 
+def _dflt(cands):
+    return {c.sp for c in cands if c.source == "default"}
+
+
 def test_no_proteomes_dir_no_project_source(proj):
     root, _ = proj
     raw, _ = _raw()
@@ -98,7 +102,7 @@ def test_default_source_wins_by_code(proj):
     srcs = ss.sources(raw, root)
     cands, _ = ss.candidates(srcs)
     assert [(c.sp, c.source) for c in cands] == [("Aaa", "default"), ("Bbb", "default"), ("Ccc", "project")]
-    assert ss.project_notes(srcs) == [
+    assert ss.project_notes(srcs, _dflt(cands)) == [
         "Aaa: default source used (proteomes/Aaa.pep not offered)",
         "proteomes/Bbb.fasta: ignored (not <code>.pep)",
         "proteomes/notes.txt: ignored (not <code>.pep)"]                # taxonomy.tsv not listed
@@ -113,7 +117,7 @@ def test_project_source_symlinks(proj, tmp_path):
     raw, _ = _raw()
     srcs = ss.sources(raw, root)
     assert [c.sp for c in ss.candidates(srcs)[0] if c.source == "project"] == ["Ccc"]
-    assert ss.project_notes(srcs) == ["proteomes/Ddd.pep: ignored (not a file)"]
+    assert ss.project_notes(srcs, _dflt(ss.candidates(srcs)[0])) == ["proteomes/Ddd.pep: ignored (not a file)"]
 
 
 def test_project_source_skipped_when_explicit_same_dir(proj):
@@ -134,7 +138,7 @@ def test_explicit_source_named_project_wins(proj, tmp_path):
     srcs = ss.sources(raw, root)
     assert [s.name for s in srcs] == ["default", "project"]
     assert srcs[1].proteomes_dir == d and srcs[1].fallback_taxonomy is None
-    assert ss.project_notes(srcs) == []                                 # notes only for the implicit one
+    assert ss.project_notes(srcs, set()) == []                          # notes only for the implicit one
 
 
 def test_sources_default_and_custom(proj, tmp_path):
@@ -417,3 +421,61 @@ def test_species_set_broken_tree_is_an_error_not_a_crash(tmp_path):
     (root / ss.CHROMO_TREE).write_text("((a,b);garbage(")
     codes, err = ss.species_set("@chromo", root)
     assert codes == [] and "not a newick tree" in err
+
+
+@pytest.fixture
+def locked_dir(tmp_path):
+    """A mode-000 directory; stat() of anything inside raises PermissionError (restored on teardown)."""
+    import os
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory modes")
+    d = tmp_path / "locked"
+    d.mkdir()
+    (d / "x.pep").write_text(">x\nM\n")
+    d.chmod(0)
+    yield d
+    d.chmod(0o700)
+
+
+def test_project_unreadable_entry_skipped_and_noted(proj, locked_dir):
+    root, _ = proj
+    d = _projdir(root, ["Qqq.pep"], tax="Qqq\tQqq local\t1\t1\t1\tMetazoa, Q\n")
+    (d / "Ccc.pep").symlink_to(locked_dir / "x.pep")
+    raw, _ = _raw()
+    srcs = ss.sources(raw, root)
+    cands, rowless = ss.candidates(srcs)
+    assert [c.sp for c in cands if c.source == "project"] == ["Qqq"]
+    assert [c.sp for c in cands if c.source == "default"] == ["Aaa", "Bbb"]
+    assert ss.project_notes(srcs, _dflt(cands)) == ["proteomes/Ccc.pep: unreadable (PermissionError)"]
+
+
+def test_ticked_shadowed_project_candidate_kept_and_noted(proj):
+    root, _ = proj
+    _projdir(root, ["Aaa.pep", "Ccc.pep"])
+    raw, _ = _raw()
+    srcs = ss.sources(raw, root)
+    assert ("Aaa", "project") not in [(c.sp, c.source) for c in ss.candidates(srcs)[0]]
+    ticked = [("Aaa", "project")]
+    cands, _ = ss.candidates(srcs, ticked=ticked)
+    assert [(c.sp, c.source) for c in cands] == [
+        ("Aaa", "default"), ("Bbb", "default"), ("Aaa", "project"), ("Ccc", "project")]
+    assert ss.project_notes(srcs, _dflt(cands), ticked) == [
+        "Aaa: ticked from project, but the default source has it (untick it, tick the default one)"]
+
+
+def test_blocker_ticked_from_project_but_default_has_it(proj):
+    root, _ = proj
+    _projdir(root, ["Aaa.pep"])
+    yamledit.update_config({("species",): [{"sp": "Aaa", "source": "project"}]})
+    raw, cfg = _raw()
+    out = ss.blockers(raw, cfg, root)
+    assert "Aaa: ticked from project, but the default source has it" in out
+
+
+def test_blocker_project_ticked_but_proteomes_dir_gone(proj):
+    root, _ = proj
+    yamledit.update_config({("species",): [{"sp": "Ccc", "source": "project"}]})
+    raw, cfg = _raw()
+    out = ss.blockers(raw, cfg, root)
+    assert "Ccc: source project: proteomes/ not found" in out
+    assert not any("unknown source" in b for b in out)

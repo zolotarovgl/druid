@@ -43,7 +43,12 @@ def _resolve(p, root: Path) -> Path:
 
 
 def sources(raw: dict, root: Path) -> list:
-    """The default source (proteomes_dir / proteome_glob / taxonomy) first, then raw["sources"]."""
+    """The default source (proteomes_dir / proteome_glob / taxonomy) first, then raw["sources"].
+
+    Implicit source `project`: when <root>/proteomes/ is a directory it is inserted right after the
+    default source (before the explicit ones), reading {sp}.pep with its own taxonomy.tsv and the
+    default taxonomy as fallback. Skipped when raw["sources"] already has an entry named `project`
+    (that one wins) or one whose proteomes_dir is the same directory. Nothing is written."""
     tax = raw.get("taxonomy")
     out = [Source(DEFAULT, _resolve(raw.get("proteomes_dir") or ".", root),
                   raw.get("proteome_glob") or DEFAULT_GLOB,
@@ -91,36 +96,51 @@ def _prefix_regex(glob: str):
     return re.compile("([^/]+?)".join(esc(p) for p in parts))
 
 
-def candidates(srcs) -> tuple:
+def candidates(srcs, ticked=()) -> tuple:
     """(candidates, rowless): every file matching a source's glob whose {sp} prefix has a taxonomy
     row; rowless = "<source>: <file>" for custom-source files without one (the default source's are
-    dropped silently: its directory holds far more genomes than the table covers)."""
+    dropped silently: its directory holds far more genomes than the table covers). A project file
+    whose code the default source has is not offered, unless (sp, "project") is in `ticked`
+    (then it stays, so it can be unticked). An unreadable entry of the implicit project source
+    is skipped (project_notes lists it); other sources keep raising."""
     cands, rowless = [], []
     for s in srcs:
         if "{sp}" not in s.glob or not s.proteomes_dir.is_dir():
             continue
         rx = _prefix_regex(s.glob)
         tax = source_taxonomy(s)
+        implicit = s.name == PROJECT and s.fallback_taxonomy is not None
         for f in sorted(s.proteomes_dir.iterdir()):
             m = rx.fullmatch(f.name)
-            if not m or not f.is_file():
+            if not m:
                 continue
+            try:
+                if not f.is_file():
+                    continue
+            except OSError:
+                if implicit:
+                    continue
+                raise
             sp = m.group(1)
             if sp in tax:
                 cands.append(Candidate(sp, tax[sp][0], tax[sp][1], s.name, f))
             elif s.name != DEFAULT:
                 rowless.append(f"{s.name}: {f.name}")
     dflt = {c.sp for c in cands if c.source == DEFAULT}
-    return [c for c in cands if not (c.source == PROJECT and c.sp in dflt)], rowless
+    keep = {(sp, src) for sp, src in ticked}
+    return [c for c in cands
+            if not (c.source == PROJECT and c.sp in dflt and (c.sp, PROJECT) not in keep)], rowless
 
 
-def project_notes(srcs) -> list:
-    """Lines explaining what the implicit project source leaves out: codes shadowed by the default
-    source, then entries of proteomes/ that are not <code>.pep files (sorted by name)."""
+def project_notes(srcs, default_codes, ticked=()) -> list:
+    """Lines explaining what the implicit project source leaves out, in name order of proteomes/:
+    codes shadowed by the default source (`default_codes`, from candidates(): the default dir is
+    not rescanned), entries that are not <code>.pep files, entries that cannot be read."""
     src = next((s for s in srcs if s.name == PROJECT and s.fallback_taxonomy is not None), None)
     if src is None or not src.proteomes_dir.is_dir():
         return []
-    dflt = {c.sp for c in candidates([s for s in srcs if s.name == DEFAULT])[0]}
+    dflt = set(default_codes)
+    keep = {(sp, s) for sp, s in ticked}
     rx = _prefix_regex(src.glob)
     shadow, ignored = [], []
     for f in sorted(src.proteomes_dir.iterdir(), key=lambda p: p.name):
@@ -129,10 +149,20 @@ def project_notes(srcs) -> list:
         m = rx.fullmatch(f.name)
         if not m:
             ignored.append(f"{PROJECT_DIR}/{f.name}: ignored (not <code>.pep)")
-        elif not f.is_file():
+            continue
+        try:
+            is_file = f.is_file()
+        except OSError as e:
+            ignored.append(f"{PROJECT_DIR}/{f.name}: unreadable ({type(e).__name__})")
+            continue
+        if not is_file:
             ignored.append(f"{PROJECT_DIR}/{f.name}: ignored (not a file)")
         elif m.group(1) in dflt:
-            shadow.append(f"{m.group(1)}: default source used ({PROJECT_DIR}/{f.name} not offered)")
+            if (m.group(1), PROJECT) in keep:
+                shadow.append(f"{m.group(1)}: ticked from project, but the default source has it "
+                              "(untick it, tick the default one)")
+            else:
+                shadow.append(f"{m.group(1)}: default source used ({PROJECT_DIR}/{f.name} not offered)")
     return shadow + ignored
 
 
@@ -323,11 +353,16 @@ def blockers(raw: dict, cfg: core.Config, root: Path) -> list:
             out.append(why)
     for sp, src in sel:
         s = srcs.get(src)
-        if s is None:
+        if s is None and src == PROJECT:
+            out.append(f"{sp}: source project: {PROJECT_DIR}/ not found")
+        elif s is None:
             out.append(f"{sp}: unknown source {src!r}")
         elif src not in bad_glob and proteome_file(s, sp) is None:
             out.append(f"{sp}: no proteome file in {s.proteomes_dir} ({s.glob})")
-    _cands, rowless = candidates(list(srcs.values()))
+    cands, rowless = candidates(list(srcs.values()), ticked=sel)
+    dflt = {c.sp for c in cands if c.source == DEFAULT}
+    for sp in dict.fromkeys(sp for sp, src in sel if src == PROJECT and sp in dflt):
+        out.append(f"{sp}: ticked from project, but the default source has it")
     for r in rowless:
         out.append(f"no taxonomy row for {r}")
     # species tree / placement check; both switches off: no tree is read (Ruling K)

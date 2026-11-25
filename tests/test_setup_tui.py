@@ -2010,12 +2010,69 @@ def test_project_source_listed_with_notes(proj):
             scr = await _setup(app, pilot)
             await _section(pilot, scr, "Source")
             txt = _text(scr, "#src-list")
-            assert "project:" in txt
-            assert "Aaa: default source used (proteomes/Aaa.pep not offered)" in txt
-            assert "proteomes/x.txt: ignored (not <code>.pep)" in txt
-            assert "missing rows" in txt and "taxonomy.tsv" in txt and "tax.tsv" in txt
+            lines = txt.splitlines()
+            i = next(k for k, ln in enumerate(lines) if ln.startswith("project:"))
+            tax = root / "data" / "tax.tsv"
+            assert lines[i + 1] == (f"    taxonomy {d / 'taxonomy.tsv'} (not found) (fallback: {tax})"
+                                    " · 1 proteomes with a row")
+            assert lines[i + 2] == "    Aaa: default source used (proteomes/Aaa.pep not offered)"
+            assert lines[i + 3] == "    proteomes/x.txt: ignored (not <code>.pep)"
             await _section(pilot, scr, "Species")
             assert scr.query_one("#sp-table").row_count == 3          # Aaa, Bbb default; Ccc project
+    _run(go())
+
+
+def test_setup_mounts_with_unreadable_project_entry(proj, tmp_path):
+    import os
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory modes")
+    root, _prot, _mine = proj
+    d = root / "proteomes"
+    d.mkdir()
+    (d / "Ccc.pep").write_text(">x\nM\n")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "x.pep").write_text(">x\nM\n")
+    (d / "Bad.pep").symlink_to(locked / "x.pep")
+    locked.chmod(0)
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Source")
+            assert "proteomes/Bad.pep: unreadable (PermissionError)" in _text(scr, "#src-list")
+            await _section(pilot, scr, "Species")
+            assert scr.query_one("#sp-table").row_count == 3          # Aaa, Bbb, Ccc still offered
+    try:
+        _run(go())
+    finally:
+        locked.chmod(0o700)
+
+
+def test_ticked_shadowed_project_row_present_and_untickable(proj):
+    root, _prot, _mine = proj
+    d = root / "proteomes"
+    d.mkdir()
+    (d / "Aaa.pep").write_text(">x\nM\n")
+    yamledit.update_config({("species",): [{"sp": "Aaa", "source": "project"}]})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Source")
+            assert "Aaa: ticked from project, but the default source has it (untick it" in _text(scr, "#src-list")
+            await _section(pilot, scr, "Species")
+            t = scr.query_one("#sp-table")
+            assert t.row_count == 3                                   # Aaa default, Aaa project, Bbb
+            rows = [[str(c) for c in t.get_row_at(i)] for i in range(t.row_count)]
+            k = next(i for i, r in enumerate(rows) if r[1] == "Aaa" and r[4] == "project")
+            t.focus()
+            t.move_cursor(row=k)
+            await pilot.press("space")
+            await pilot.pause()
+            assert _raw()["species"] in ([], None)
     _run(go())
 
 
@@ -2034,5 +2091,5 @@ def test_project_name_reserved_without_dir(proj):
             await pilot.press("enter")
             await pilot.pause()
             assert paths.config_file().read_bytes() == before
-            assert "ERROR:" in _text(scr, "#blockers")
+            assert "ERROR: a source named 'project' already exists" in _text(scr, "#blockers")
     _run(go())
