@@ -289,7 +289,7 @@ class SetupScreen(Screen):
         Binding("shift+tab", "focus_move(-1)", "previous pane", show=False),
         Binding("escape", "back", "back"),
         Binding("space", "toggle", "tick"),
-        Binding("a", "tick_all", "tick shown"),
+        Binding("a", "tick_all", "tick / untick shown"),
         Binding("A", "untick_all", "untick shown"),
         Binding("e", "edit_family", "edit row"),     # Families; enter ticks (Grygoriy, 23/10/2026)
         Binding("t", "tree_pick", "species tree"),   # Species / Tree (Grygoriy, 11/11/2026)
@@ -1112,12 +1112,17 @@ class SetupScreen(Screen):
         self._write({("species",): setup_state.species_value(sel)})
 
     def action_tick_all(self) -> None:
+        """a: tick every row shown by the filter; when all shown are already ticked, untick
+        them (a toggles; Grygoriy, 25/11/2026)."""
         if self.current == "Families":
             self._tick_shown_families()
             return
         if not self._shown or not self._species_editable():
             return
         sel = list(self._sel)
+        if all((c.sp, c.source) in sel for c in self._shown):
+            self._untick_shown_species()
+            return
         sel += [(c.sp, c.source) for c in self._shown if (c.sp, c.source) not in sel]
         self._write({("species",): setup_state.species_value(sel)})
 
@@ -1128,6 +1133,9 @@ class SetupScreen(Screen):
             return
         if not self._shown or not self._species_editable():
             return
+        self._untick_shown_species()
+
+    def _untick_shown_species(self) -> None:
         shown = {(c.sp, c.source) for c in self._shown}
         sel = [s for s in self._sel if s not in shown]
         n = len(self._sel) - len(sel)
@@ -1499,14 +1507,14 @@ class SetupScreen(Screen):
 
     # ---- Families ---------------------------------------------------------------------------
     def _tick_shown_families(self) -> None:
-        """a: tick every family shown by the filter (adds only), one write, in table order."""
+        """a: tick every family shown by the filter, one write, in table order; when all shown
+        are already ticked, untick them (a toggles; Grygoriy, 25/11/2026)."""
         if not self._fam_shown or not self._fam_editable():
             return
         shown = set(self._fam_shown)
         new = sum(1 for i in shown if i < len(self._fam) and not self._fam[i][1])
         if not new:
-            self._msg = f"+0 ticked: all {len(shown)} shown already ticked"
-            self._fill_blockers()
+            self._untick_shown_families()
             return
         self._write({}, done=f"+{new} families ticked",
                     fam_rows=[r for i, (r, x) in enumerate(self._fam) if x or i in shown])

@@ -289,6 +289,47 @@ def test_shift_a_unticks_shown_species_and_families(proj):
     _run(go())
 
 
+def test_a_twice_unticks_shown_species_and_families(proj):
+    """a toggles: ticks every row shown; when all shown are already ticked, unticks them
+    (Grygoriy, 25/11/2026). Rows not shown keep their tick."""
+    root, _prot, _mine_ = proj
+    yamledit.update_config({("species",): ["Bbb"]})
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Species")
+            scr.query_one("#sp-filter").value = "Aaa"
+            await pilot.pause()
+            t = scr.query_one("#sp-table")
+            t.focus()
+            await pilot.press("a")                                    # tick Aaa
+            await pilot.pause()
+            assert _raw()["species"] == ["Bbb", "Aaa"]
+            await pilot.press("a")                                    # all shown ticked: untick
+            await pilot.pause()
+            assert _raw()["species"] == ["Bbb"]
+            assert "-1 unticked" in _text(scr, "#blockers")
+
+            await _section(pilot, scr, "Families")
+            scr.query_one("#fam-filter").value = "slc"
+            await pilot.pause()
+            ft = scr.query_one("#fam-table")
+            n = ft.row_count
+            ft.focus()
+            await pilot.press("a")                                    # tick all shown
+            await pilot.pause()
+            ticked = len(_fams(root))
+            assert all(str(ft.get_row_at(i)[0]) == "[x]" for i in range(n))
+            await pilot.press("a")                                    # untick all shown
+            await pilot.pause()
+            assert len(_fams(root)) == ticked - n
+            assert all(str(ft.get_row_at(i)[0]) == "[ ]" for i in range(n))
+            assert f"-{n} families unticked" in _text(scr, "#blockers")
+    _run(go())
+
+
 def test_filter_enter_ticks_all_shown_and_clears(proj, monkeypatch):
     _root, _prot, mine = proj
     yamledit.update_config({("sources",): [{"name": "mine", "proteomes_dir": str(mine),

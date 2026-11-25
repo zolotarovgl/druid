@@ -20,7 +20,8 @@ In **Setup** (`tab` moves between panes, `enter` selects, `esc` / `q` back, `:q!
 
 1. **Project**: type a `job_prefix` (e.g. `chromo`), `enter`. Jobs are named `chromo-search`, ….
 2. **Species**: type prefixes (`Mlei, Hsap Nvec`) or any filter, `enter` ticks all shown.
-   In the list: `space` one, `a` ticks all shown, `A` unticks all shown (same in Families).
+   In the list: `space` one, `a` ticks all shown (again, when all shown are ticked: unticks
+   them), `A` unticks all shown (same in Families).
    Sets: `@all` (every tip of the project's base tree; 205 for a project made from 24/11/2026),
    `@chromo` (94) or `@<file>` (codes, one per line or comma-separated, `#`
    comments; absolute or project-relative) in the filter show those species; `enter` ticks them.
@@ -34,7 +35,8 @@ In **Setup** (`tab` moves between panes, `enter` selects, `esc` / `q` back, `:q!
    project made before 24/11/2026 keeps its 59-tip tree. To adopt the 205-tip tree there, copy
    `druid/data/species_tree.newick` / `species_tree.binary.newick` over its
    `data/base_tree.newick` / `data/base_tree.binary.newick`, before its first prepare.
-5. **Families**: filter, `a` ticks all shown (`space` / `enter` one at a time).
+5. **Families**: filter, `a` ticks all shown, `a` again unticks them (`space` / `enter` one at a
+   time).
 6. **Parameters** (optional; the defaults run): the stage settings, grouped by stage. Clustering
    (MCL inflation default, recluster size, domain expand, cpus), Alignment (MAFFT: linsi · einsi ·
    ginsi · auto), Phylogeny (fasttree / iqtree2 / iqtree3, IQ-TREE model, min seqs / min distinct),
