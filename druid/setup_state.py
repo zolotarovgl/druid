@@ -12,6 +12,10 @@ from druid import core, paths, yamledit
 
 DEFAULT = "default"
 DEFAULT_GLOB = "{sp}_long.pep.fasta"
+PROJECT = "project"                    # implicit source: <project root>/proteomes/<code>.pep
+PROJECT_DIR = "proteomes"
+PROJECT_GLOB = "{sp}.pep"
+PROJECT_TAXONOMY = "taxonomy.tsv"
 SHIPPED_TAXONOMY = paths.DRUID_HOME / "druid" / "data" / "genome_sources.tsv"
 
 
@@ -21,6 +25,7 @@ class Source:
     proteomes_dir: Path
     glob: str
     taxonomy: Path
+    fallback_taxonomy: "Path | None" = None
 
 
 @dataclass(frozen=True)
@@ -49,7 +54,18 @@ def sources(raw: dict, root: Path) -> list:
         out.append(Source(str(e.get("name") or ""), _resolve(e.get("proteomes_dir") or ".", root),
                           e.get("proteome_glob") or DEFAULT_GLOB,
                           _resolve(e["taxonomy"], root) if e.get("taxonomy") else SHIPPED_TAXONOMY))
+    pdir = Path(root) / PROJECT_DIR
+    if (pdir.is_dir() and not any(s.name == PROJECT for s in out)
+            and not any(s.proteomes_dir.resolve() == pdir.resolve() for s in out)):
+        out.insert(1, Source(PROJECT, pdir, PROJECT_GLOB, pdir / PROJECT_TAXONOMY, out[0].taxonomy))
     return out
+
+
+def source_taxonomy(src: Source) -> dict:
+    """The source's taxonomy rows; a fallback table (implicit project source) supplies codes it lacks."""
+    tax = read_taxonomy(src.fallback_taxonomy) if src.fallback_taxonomy else {}
+    tax.update(read_taxonomy(src.taxonomy))
+    return tax
 
 
 def read_taxonomy(path) -> dict:
@@ -84,7 +100,7 @@ def candidates(srcs) -> tuple:
         if "{sp}" not in s.glob or not s.proteomes_dir.is_dir():
             continue
         rx = _prefix_regex(s.glob)
-        tax = read_taxonomy(s.taxonomy)
+        tax = source_taxonomy(s)
         for f in sorted(s.proteomes_dir.iterdir()):
             m = rx.fullmatch(f.name)
             if not m or not f.is_file():
@@ -94,7 +110,30 @@ def candidates(srcs) -> tuple:
                 cands.append(Candidate(sp, tax[sp][0], tax[sp][1], s.name, f))
             elif s.name != DEFAULT:
                 rowless.append(f"{s.name}: {f.name}")
-    return cands, rowless
+    dflt = {c.sp for c in cands if c.source == DEFAULT}
+    return [c for c in cands if not (c.source == PROJECT and c.sp in dflt)], rowless
+
+
+def project_notes(srcs) -> list:
+    """Lines explaining what the implicit project source leaves out: codes shadowed by the default
+    source, then entries of proteomes/ that are not <code>.pep files (sorted by name)."""
+    src = next((s for s in srcs if s.name == PROJECT and s.fallback_taxonomy is not None), None)
+    if src is None or not src.proteomes_dir.is_dir():
+        return []
+    dflt = {c.sp for c in candidates([s for s in srcs if s.name == DEFAULT])[0]}
+    rx = _prefix_regex(src.glob)
+    shadow, ignored = [], []
+    for f in sorted(src.proteomes_dir.iterdir(), key=lambda p: p.name):
+        if f.name == PROJECT_TAXONOMY:
+            continue
+        m = rx.fullmatch(f.name)
+        if not m:
+            ignored.append(f"{PROJECT_DIR}/{f.name}: ignored (not <code>.pep)")
+        elif not f.is_file():
+            ignored.append(f"{PROJECT_DIR}/{f.name}: ignored (not a file)")
+        elif m.group(1) in dflt:
+            shadow.append(f"{m.group(1)}: default source used ({PROJECT_DIR}/{f.name} not offered)")
+    return shadow + ignored
 
 
 def selected(raw: dict) -> list:

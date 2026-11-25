@@ -44,6 +44,99 @@ def _custom(tmp_path, files=("Ccc_long.pep.fasta", "Qqq_long.pep.fasta")):
     return d
 
 
+def _projdir(root, files, tax=None):
+    d = root / "proteomes"
+    d.mkdir()
+    for f in files:
+        (d / f).write_text(">x\nM\n")
+    if tax is not None:
+        (d / "taxonomy.tsv").write_text(tax)
+    return d
+
+
+def test_no_proteomes_dir_no_project_source(proj):
+    root, _ = proj
+    raw, _ = _raw()
+    assert [s.name for s in ss.sources(raw, root)] == ["default"]
+
+
+def test_project_source_added_after_default(proj):
+    root, _ = proj
+    _projdir(root, ["Ccc.pep"])
+    raw, _ = _raw()
+    a, b = ss.sources(raw, root)[:2]
+    assert (b.name, b.proteomes_dir, b.glob, b.taxonomy, b.fallback_taxonomy) == (
+        "project", root / "proteomes", "{sp}.pep", root / "proteomes" / "taxonomy.tsv", a.taxonomy)
+    assert not (root / "proteomes" / "taxonomy.tsv").exists()          # nothing written
+    assert "sources" not in raw or not raw["sources"]
+
+
+def test_project_taxonomy_fallback(proj):
+    root, _ = proj
+    _projdir(root, ["Ccc.pep", "Qqq.pep", "Rrr.pep"],
+             tax="Qqq\tQqq local\t1\t1\t1\tMetazoa, Q\n")
+    raw, _ = _raw()
+    cands, rowless = ss.candidates(ss.sources(raw, root))
+    proj_c = {c.sp: c for c in cands if c.source == "project"}
+    assert set(proj_c) == {"Ccc", "Qqq"}                               # Ccc via fallback, Qqq local
+    assert proj_c["Ccc"].name == "Ccc sp" and proj_c["Qqq"].name == "Qqq local"
+    assert rowless == ["project: Rrr.pep"]
+
+
+def test_project_local_row_wins_over_fallback(proj):
+    root, _ = proj
+    _projdir(root, ["Ccc.pep"], tax="Ccc\tCcc local\t1\t1\t1\tMetazoa, L\n")
+    raw, _ = _raw()
+    c = [c for c in ss.candidates(ss.sources(raw, root))[0] if c.source == "project"][0]
+    assert (c.name, c.taxonomy) == ("Ccc local", "Metazoa, L")
+
+
+def test_default_source_wins_by_code(proj):
+    root, _ = proj
+    _projdir(root, ["Aaa.pep", "Ccc.pep", "notes.txt", "Bbb.fasta"], tax="")
+    raw, _ = _raw()
+    srcs = ss.sources(raw, root)
+    cands, _ = ss.candidates(srcs)
+    assert [(c.sp, c.source) for c in cands] == [("Aaa", "default"), ("Bbb", "default"), ("Ccc", "project")]
+    assert ss.project_notes(srcs) == [
+        "Aaa: default source used (proteomes/Aaa.pep not offered)",
+        "proteomes/Bbb.fasta: ignored (not <code>.pep)",
+        "proteomes/notes.txt: ignored (not <code>.pep)"]                # taxonomy.tsv not listed
+
+
+def test_project_source_symlinks(proj, tmp_path):
+    root, _ = proj
+    d = _projdir(root, [])
+    real = tmp_path / "elsewhere.pep"; real.write_text(">x\nM\n")
+    (d / "Ccc.pep").symlink_to(real)
+    (d / "Ddd.pep").symlink_to(tmp_path / "missing.pep")                # broken
+    raw, _ = _raw()
+    srcs = ss.sources(raw, root)
+    assert [c.sp for c in ss.candidates(srcs)[0] if c.source == "project"] == ["Ccc"]
+    assert ss.project_notes(srcs) == ["proteomes/Ddd.pep: ignored (not a file)"]
+
+
+def test_project_source_skipped_when_explicit_same_dir(proj):
+    root, _ = proj
+    _projdir(root, ["Ccc.pep"])
+    yamledit.update_config({("sources",): [{"name": "mine", "proteomes_dir": "proteomes",
+                                            "proteome_glob": "{sp}.pep", "taxonomy": "data/tax.tsv"}]})
+    raw, _ = _raw()
+    assert [s.name for s in ss.sources(raw, root)] == ["default", "mine"]
+
+
+def test_explicit_source_named_project_wins(proj, tmp_path):
+    root, _ = proj
+    _projdir(root, ["Ccc.pep"])
+    d = _custom(tmp_path)
+    yamledit.update_config({("sources",): [{"name": "project", "proteomes_dir": str(d)}]})
+    raw, _ = _raw()
+    srcs = ss.sources(raw, root)
+    assert [s.name for s in srcs] == ["default", "project"]
+    assert srcs[1].proteomes_dir == d and srcs[1].fallback_taxonomy is None
+    assert ss.project_notes(srcs) == []                                 # notes only for the implicit one
+
+
 def test_sources_default_and_custom(proj, tmp_path):
     root, prot = proj
     d = _custom(tmp_path)
