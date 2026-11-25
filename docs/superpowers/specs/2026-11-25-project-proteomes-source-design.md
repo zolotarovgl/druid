@@ -53,3 +53,24 @@ be used"; matching "by the code", not by Latin name).
 
 Function names and where the shadowed/ignored lists are computed; test layout; the docs wording in
 `docs/reference.md`.
+
+## Build rulings (Claude, 25/11/2026; review findings and calls made while building)
+
+- Built on main (no worktree), as the 24/11 plan was; Grygoriy pushes.
+- The implicit source is also dropped when the *default* source's `proteomes_dir` is `proteomes/`
+  (same files would be offered twice).
+- An unreadable entry in `proteomes/` (e.g. a symlink into a directory that lost its permissions)
+  is skipped and listed as `proteomes/<name>: unreadable (<Error>)`; Setup still opens. Explicit and
+  default sources keep raising as before (a silent skip there would hide a broken folder).
+- A species ticked from `project` that the default source later also offers stays listed in Species
+  (so it can be unticked), is noted `<sp>: ticked from project, but the default source has it
+  (untick it, tick the default one)`, and blocks prepare with `<sp>: ticked from project, but the
+  default source has it`.
+- Taxonomy line in Setup › Sources: `taxonomy <proteomes/taxonomy.tsv>[ (not found)] (fallback:
+  <default table>)` (the plan's "(missing rows: …)" read wrongly).
+- A `.pep` in `proteomes/` with no taxonomy row blocks prepare even when only default species are
+  ticked (rowless, as for explicit sources). Remove the file or give it a row.
+- A ticked `project` species whose `proteomes/` vanished: blocker `<sp>: source project: proteomes/
+  not found`.
+- Not changed: the prepare test's reliance on `_clade` → `Other`; the reference.md paragraph's
+  position in the druid.yaml section.
