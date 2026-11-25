@@ -698,7 +698,9 @@ class SetupScreen(Screen):
         for s in self._srcs:
             where = "" if s.proteomes_dir.is_dir() else "  (directory not found)"
             lines.append(f"{s.name}: {s.proteomes_dir} · {s.glob}{where}")
-            lines.append(f"    taxonomy {s.taxonomy} · {n.get(s.name, 0)} proteomes with a row")
+            fb = f" (missing rows: {s.fallback_taxonomy})" if s.fallback_taxonomy else ""
+            lines.append(f"    taxonomy {s.taxonomy}{fb} · {n.get(s.name, 0)} proteomes with a row")
+        lines += [f"    {note}" for note in setup_state.project_notes(self._srcs)]
         self.query_one("#src-list", Static).update("\n".join(lines))
         for k in SRC_FIELDS:
             self.query_one(f"#src-{k}", Input).disabled = self._ro_all
@@ -1028,7 +1030,7 @@ class SetupScreen(Screen):
                 self._add_source()
 
     def _source_error(self, v: dict, root: Path) -> str:
-        names = {s.name for s in self._srcs} | {setup_state.DEFAULT}
+        names = {s.name for s in self._srcs} | {setup_state.DEFAULT, setup_state.PROJECT}
         names |= {str(e.get("name")) for e in self._raw.get("sources") or [] if isinstance(e, dict)}
         if not v["name"]:
             return "a source needs a name"

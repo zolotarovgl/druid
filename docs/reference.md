@@ -309,6 +309,16 @@ mirror `nextflow.config` + the `precise` profile and the 24/09/2026 run
 inputs and may point anywhere; everything druid writes (`outdir`, `runs_dir`, `infasta`,
 `genefam_info`) must be inside the project. The template is `druid/templates/druid.yaml`.
 
+When `<project>/proteomes/` exists, Setup also offers it as an implicit source named `project`
+(nothing is written to `druid.yaml`, so an already initialised project gets it with no migration).
+It reads `proteomes/<code>.pep`; `proteomes/taxonomy.tsv` (same format as any taxonomy table) holds
+its rows, and a code with no row there falls back to the default source's table. When the default
+source has the same code, the default source's proteome is used and the `project` file is not
+offered; Setup › Source lists it as `<code>: default source used`. Any other entry in `proteomes/`
+is listed there as ignored. The name `project` is reserved, so Setup refuses it for a new source
+even when `proteomes/` is absent; an explicit source of that name in `druid.yaml` replaces the
+implicit one. druid only reads `proteomes/`, never writes into it.
+
 The `inflation` column of the families file overrides `params.s2_inflation` for that family's
 `cluster` run (blank = the default). Before 04/11/2026 the column was ignored, so families whose
 value differs from the default cluster differently on their next cluster run.

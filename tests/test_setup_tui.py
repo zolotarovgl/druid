@@ -1995,3 +1995,44 @@ def test_shift_u_unticks_species_not_on_the_tree(proj):
             assert _raw()["species"] == ["Aaa"]
             assert "no ticked species is off the tree" in _text(scr, "#blockers")
     _run(go())
+
+
+def test_project_source_listed_with_notes(proj):
+    root, _prot, _mine = proj
+    d = root / "proteomes"
+    d.mkdir()
+    for f in ("Aaa.pep", "Ccc.pep", "x.txt"):
+        (d / f).write_text(">x\nM\n")
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Source")
+            txt = _text(scr, "#src-list")
+            assert "project:" in txt
+            assert "Aaa: default source used (proteomes/Aaa.pep not offered)" in txt
+            assert "proteomes/x.txt: ignored (not <code>.pep)" in txt
+            assert "missing rows" in txt and "taxonomy.tsv" in txt and "tax.tsv" in txt
+            await _section(pilot, scr, "Species")
+            assert scr.query_one("#sp-table").row_count == 3          # Aaa, Bbb default; Ccc project
+    _run(go())
+
+
+def test_project_name_reserved_without_dir(proj):
+    root, _prot, mine = proj
+
+    async def go():
+        app = _app()
+        async with app.run_test() as pilot:
+            scr = await _setup(app, pilot)
+            await _section(pilot, scr, "Source")
+            before = paths.config_file().read_bytes()
+            await pilot.press(*"project", "enter")
+            scr.query_one("#src-dir").value = str(mine)
+            scr.query_one("#src-tax").focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert paths.config_file().read_bytes() == before
+            assert "ERROR:" in _text(scr, "#blockers")
+    _run(go())

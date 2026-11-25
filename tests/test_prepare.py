@@ -235,3 +235,18 @@ def test_cli_prepare_refuses_without_job_prefix(proj):
     yamledit.update_config({("job_prefix",): None})
     r = CliRunner().invoke(cli.app, ["--project", str(root), "prepare"])
     assert r.exit_code == 2 and "no job_prefix (Setup › Project)" in r.output
+
+
+def test_species_info_project_fallback(proj):
+    root, _prot = proj
+    (root / "proteomes").mkdir()
+    (root / "proteomes" / "Qqqq.pep").write_text(">q1\nM\n")          # not in the default proteomes dir
+    with open(root / "data" / "tax.tsv", "a") as fh:                    # row only in the default table
+        fh.write("Qqqq\tQqqq sp\t1\t1\t1\tMetazoa, Foo\tsrc\t1\tMT\tNA\n")
+    for f in ("base_tree.binary.newick", "base_tree.newick"):
+        (root / "data" / f).write_text("((Abcd:1,Wxyz:1)n1:1,(Hsap:1,Zzzz:1,Qqqq:1)n2:1)R;")
+    yamledit.update_config({("species",): ["Abcd", "Hsap", {"sp": "Qqqq", "source": "project"}]})
+    _out, cfg, _ = _go()
+    rows = [l.split("\t") for l in model.species_info_path(cfg).read_text().splitlines()]
+    assert ["Qqqq", "Qqqq sp", "Other"] in rows                         # not the bare code
+    assert not (root / "proteomes" / "taxonomy.tsv").exists()

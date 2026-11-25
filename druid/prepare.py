@@ -40,7 +40,7 @@ def _clade(sp: str, taxonomy: str, shipped: Dict[str, tuple]) -> str:
 
 def _species_info_text(sel, srcs) -> str:
     shipped = _shipped_clades()
-    tax = {s.name: ss.read_taxonomy(s.taxonomy) for s in srcs.values()}
+    tax = {s.name: ss.source_taxonomy(s) for s in srcs.values()}
     rows = []
     for sp, src in sel:
         latin, taxonomy = tax.get(src, {}).get(sp, ("", ""))
