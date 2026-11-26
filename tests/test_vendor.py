@@ -52,3 +52,44 @@ def test_update_script_copies_without_tests_and_refuses_dirty(tmp_path):
     assert r.returncode == 1 and "uncommitted" in r.stderr
     assert (dest / "treeview/model.py").read_text() == "X = 1\n"         # nothing copied
     assert (dest / "treeview/VENDORED").read_text() == vendored          # stamp untouched
+
+
+REPORT_SCRIPT = VENDOR / "update_report.sh"
+
+
+def test_vendored_report_matches_stamp():
+    f = VENDOR / "report_step2/report_step2.py"
+    assert f.is_file()
+    v = (VENDOR / "report_step2/VENDORED").read_text()
+    assert re.search(r"^source: \S+", v, re.M)
+    assert re.search(r"^commit: [0-9a-f]{40}$", v, re.M)
+    assert re.search(r"^date: \d\d/\d\d/\d{4}$", v, re.M)
+    r = subprocess.run(["python3", str(f), "--help"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "--possvm_prev_dir" in r.stdout
+
+
+def test_update_report_script_copies_and_refuses_dirty(tmp_path):
+    src = tmp_path / "src"
+    (src / "workflow").mkdir(parents=True)
+    (src / "workflow/report_step2.py").write_text("X = 1\n")
+    (src / "workflow/other.py").write_text("Y = 1\n")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+               GIT_COMMITTER_EMAIL="t@t")
+    for cmd in (["git", "init", "-q"], ["git", "add", "-A"], ["git", "commit", "-qm", "x"]):
+        subprocess.run(cmd, cwd=src, check=True, env=env)
+    dest = tmp_path / "vendor"
+    env = dict(os.environ, REPORT_REMOTE_REPO=str(src), VENDOR_DEST=str(dest))
+    r = subprocess.run(["bash", str(REPORT_SCRIPT)], env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert (dest / "report_step2/report_step2.py").read_text() == "X = 1\n"
+    assert not (dest / "report_step2/other.py").exists()
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=src, capture_output=True,
+                          text=True).stdout.strip()
+    vendored = (dest / "report_step2/VENDORED").read_text()
+    assert f"commit: {head}" in vendored
+    (src / "workflow/report_step2.py").write_text("X = 2\n")              # uncommitted change
+    r = subprocess.run(["bash", str(REPORT_SCRIPT)], env=env, capture_output=True, text=True)
+    assert r.returncode == 1 and "uncommitted" in r.stderr
+    assert (dest / "report_step2/report_step2.py").read_text() == "X = 1\n"   # nothing copied
+    assert (dest / "report_step2/VENDORED").read_text() == vendored
