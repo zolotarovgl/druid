@@ -162,6 +162,7 @@ druid submit STAGE [HGS]... [--missing] [--ids PATH] [--fam/-f PREFIX] [--all] [
                    [--mem 16G] [--time 24h] [--cpus 8] [--set KEY=VALUE]...
 druid run [--fam/-f PREFIX] [-n/--dry-run] [--max-running INTEGER] [--partition TEXT] [--qos TEXT]
           [--mem 16G] [--time 24h] [--cpus 8]
+druid report [--fam/-f PREFIX] [-n/--dry-run] [--mem 4G] [--time 30m]
 druid jobs [--stage TEXT] [--last N] [--failed]
 druid tui [--refresh 30]
 ```
@@ -179,6 +180,17 @@ not yet searched, a `cluster` array for each of those that waits on its search t
 already searched. Families already done, queued, without hits or failing a check are skipped
 with a note. `-n` writes the scripts and prints the arrays without submitting. Step 2 (align,
 tree, ...) stays manual: `druid submit` once the clusters exist.
+
+`druid report` (26/11/2026) writes the step-2 interactive HTML report as one SLURM job
+(`<job_prefix>-report`, 1 cpu, default 4096M and 30 min, project partition/qos; `--mem`/`--time`
+take the same values as `druid run`). It runs the vendored `druid/vendor/report_step2/report_step2.py`
+over the results dir and writes `<outdir>/report_step2.html` (`-f tfs`: `report_step2.tfs.html`, with
+a filtered copy of the genefam file in the run dir). The script is `runs/<ts>_report/report.sbatch`
+(`-n`: under `.druid/tmp/dryrun`, not submitted). It refuses (exit 2, nothing written) without
+`job_prefix`, when neither `<outdir>/possvm` nor `<outdir>/possvm_prev` holds a file (a GeneRax-off
+project with only `possvm_prev` is fine), or when `-f` matches no family. `params.REFNAMES` and
+`params.REFSPECIES` are passed when set; species images come from `params.report_images` (a
+directory; relative = under the project), and the flag is omitted when it is unset.
 
 Every SLURM job is named `<job_prefix>-<stage>`; `job_prefix` is required (see `druid.yaml`), and
 `submit` / `run` refuse without it.

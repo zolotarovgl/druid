@@ -17,7 +17,7 @@ from druid.common import (FAILED_STATES, RUNNING_STATES, expand_indices as _expa
                              fmt_mem as _fmt_mem, fmt_time as _fmt_time, ids_path as _ids_path,
                              runs_dir as _runs_dir)
 from druid.runner import run_one  # noqa: E402,F401  (module-level name: tests patch it)
-from druid import model, step1run  # noqa: E402
+from druid import model, report, step1run  # noqa: E402
 
 
 def _guard(fn):
@@ -616,6 +616,28 @@ def submit(stage: str = typer.Argument(...),
         for line in err.splitlines():
             typer.echo(line, err=True)
         raise typer.Exit(1)
+
+
+@app.command("report")
+def report_cmd(fam: str = typer.Option(None, "--fam", "-f", help=FAM_HELP),
+               dry_run: bool = typer.Option(False, "--dry-run", "-n",
+                                            help="write the script, do not submit"),
+               mem: str = typer.Option(None, "--mem", help="memory, default 4G (4096M), e.g. 16G"),
+               time: str = typer.Option(None, "--time", help="time limit, default 30 min, e.g. 2h, 90m")):
+    """Step-2 interactive HTML report (report_step2.html in the results dir) as one SLURM job."""
+    try:
+        raw = paths.read_raw()
+        cfg = core.config_from_raw(raw)
+        script = report.write(cfg, raw, fam=fam, dry_run=dry_run, mem=mem, time=time)
+        if dry_run:
+            typer.echo(f"dry run: {script}")
+            return
+        jid = report.submit(script)
+    except (paths.NoProject, paths.OutsideProject, core.ConfigError, report.ReportError) as e:
+        _fail(f"ERROR: {e}", 2)
+    typer.echo(f"run dir: {script.parent}")
+    typer.echo(f"submitted {jid}")
+    typer.echo(f"output: {report.output_path(cfg, fam)}")
 
 
 @app.command()
