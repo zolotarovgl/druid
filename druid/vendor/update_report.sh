@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Refresh the vendored phylohpc step-2 report script.  Never edit druid/vendor/report_step2 by
 # hand: change it in phylohpc, commit it there, run this.  The bytes are extracted from the commit
-# itself (git archive), so the `commit:` stamped in VENDORED describes exactly what was copied.
+# itself (git show <commit>:<file>), so the `commit:` stamped in VENDORED describes exactly what
+# was copied.  phylohpc is read-only to druid: `status` runs with --no-optional-locks, so it does
+# not rewrite phylohpc's .git/index (a plain `git status` refreshes its stat cache).
 #   REPORT_REMOTE_REPO  the phylohpc repo, as host:path (git over ssh) or a local path
 #   VENDOR_DEST         the directory that gets report_step2/ (default: next to this script)
 set -euo pipefail
@@ -20,7 +22,7 @@ _git() {
 }
 
 # Untracked files are not in the commit and cannot end up in the copy, so they do not block.
-dirty="$(_git status --porcelain --untracked-files=no)"
+dirty="$(_git --no-optional-locks status --porcelain --untracked-files=no)"
 if [[ -n "$dirty" ]]; then
     echo "phylohpc has uncommitted changes; commit them first:" >&2
     echo "$dirty" >&2

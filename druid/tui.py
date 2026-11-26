@@ -1733,25 +1733,29 @@ class PhyloApp(App):
                          lambda _jids: self.load_bg())
 
     def action_report(self) -> None:
-        """W (Results tab): `druid report` for the whole project; the sbatch runs only after y."""
+        """W (Results tab): `druid report` for the whole project. The refusals run first and write
+        nothing; the run dir is written and the sbatch runs only after y (n / esc leave no trace)."""
         if not self.check_action("report", ()):
             return
         try:
-            out = report.output_path(self.cfg)
-            script = report.write(self.cfg, self.raw)     # refusals raise before anything is written
+            report.check(self.cfg, self.raw)
         except (core.ConfigError, report.ReportError) as e:
             self.notify(f"ERROR: {e}", severity="error", markup=False)
             return
-        self.push_screen(ConfirmScreen(f"Submit druid report?\n\noutput: {out}\nscript: {script}"),
-                         lambda ok: self._submit_report(script, out) if ok else None)
+        out = report.output_path(self.cfg)
+        self.push_screen(ConfirmScreen(f"Submit druid report?\n\noutput: {out}"),
+                         lambda ok: self._submit_report(out) if ok else None)
 
-    def _submit_report(self, script: Path, out: Path) -> None:
+    @work(thread=True, exclusive=True, group="report")
+    def _submit_report(self, out: Path) -> None:
         try:
+            script = report.write(self.cfg, self.raw)
             jid = report.submit(script)
-        except report.ReportError as e:
-            self.notify(f"ERROR: {e}", severity="error", markup=False)
+        except Exception as e:             # never let a worker kill the app (OSError from write, ...)
+            self.call_from_thread(self.notify, f"ERROR: {e}", severity="error", markup=False)
             return
-        self.notify(f"report submitted: job {jid} → {out}", markup=False)
+        self.call_from_thread(self.notify, f"report submitted: job {jid} → {out}; logs: {script.parent / 'logs'}",
+                              markup=False)
 
     def action_run_step1(self) -> None:
         """S: step 1 (search → cluster) in the run box; the Jobs tab reloads when it closes."""

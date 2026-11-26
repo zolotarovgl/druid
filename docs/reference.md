@@ -185,10 +185,20 @@ tree, ...) stays manual: `druid submit` once the clusters exist.
 (`<job_prefix>-report`, 1 cpu, default 4096M and 30 min, project partition/qos; `--mem`/`--time`
 take the same values as `druid run`). It runs the vendored `druid/vendor/report_step2/report_step2.py`
 over the results dir and writes `<outdir>/report_step2.html` (`-f tfs`: `report_step2.tfs.html`, with
-a filtered copy of the genefam file in the run dir). The script is `runs/<ts>_report/report.sbatch`
-(`-n`: under `.druid/tmp/dryrun`, not submitted). It refuses (exit 2, nothing written) without
-`job_prefix`, when neither `<outdir>/possvm` nor `<outdir>/possvm_prev` holds a file (a GeneRax-off
-project with only `possvm_prev` is fine), or when `-f` matches no family. `params.REFNAMES` and
+a filtered copy of the genefam file in the run dir). The job writes `<output>.part` and renames it
+to `<output>` only when the script succeeds, so a killed or failed job never leaves a truncated
+report that looks fresh. `-f` takes a class (`-f tfs`: the script's own filter keeps every `tfs.*`
+file) or one family (`-f tfs.T-box`): the script cannot narrow below a class, so druid passes
+`possvm/`, `possvm_prev/`, `search/` and `clusters/` as symlink views in the run dir
+(`view/<dir>/`, only that family's files; `results/` is not touched). The script is
+`runs/<ts>_report/report.sbatch` (`-n`: under `.druid/tmp/dryrun`, not submitted). It refuses
+(exit 2, nothing written) without `job_prefix`, when neither `<outdir>/possvm` nor
+`<outdir>/possvm_prev` holds a file (a GeneRax-off project with only `possvm_prev` is fine), when
+`params.SPECIES_TREE`, `params.genefam_info` or `<project>/data/species_info.tsv` is unset or
+missing, when `-f` matches no family, or when `python3` cannot `import ete3` with
+`PYTHONNOUSERSITE=1` (the script needs ete3 for every tree and, without it, writes a report with no
+trees and exits 0; `conda activate phylo`). The job repeats the ete3 import before the script, so a
+compute node with a different environment fails loudly. `params.REFNAMES` and
 `params.REFSPECIES` are passed when set; species images come from `params.report_images` (a
 directory; relative = under the project), and the flag is omitted when it is unset.
 
@@ -402,7 +412,9 @@ case: check `possvm_prev`. Files are read in the background.
 
 `W` (Results tab, 26/11/2026) submits `druid report` for the whole project after a `y` / `n` box naming the output
 (`<outdir>/report_step2.html`; default memory and time; `ERROR: …` when the report refuses, nothing is
-submitted); the tab's bottom border shows `report: <path> (<age> ago)` or `report: none`.
+written or submitted). The refusals run before the box; the run dir is written and `sbatch` runs (in
+the background) only after `y`, so `n` / `esc` leave no `runs/*_report`. The toast names the job, the
+output and the run dir's `logs/`. The tab's bottom border shows `report: <path> (<age> ago)` or `report: none`.
 
 `t` (in a group's Results) opens the gene tree of the highlighted HG in the embedded
 treeview (vendored, below), from the HG's own source (`possvm` or `possvm_prev`; the border title says
@@ -480,6 +492,23 @@ repo) and records `source`, `commit` and `date` in `druid/vendor/treeview/VENDOR
 re-vendoring run `pytest tests/test_vendor.py`. Env: `TREEVIEW_REMOTE_REPO` (`host:path`,
 git runs over ssh, or a local path), `VENDOR_DEST` (directory that gets `treeview/`).
 
+### Vendored report_step2
+
+`druid/vendor/report_step2/report_step2.py` is a generated copy of phylohpc's
+`workflow/report_step2.py`, run by `druid report` (above). Never edit it in place: change it in
+phylohpc, commit it there, then run
+
+    bash druid/vendor/update_report.sh          # REPORT_REMOTE_REPO defaults to ~/Documents/projects/phylogenies/phylohpc
+
+It copies the file's bytes from the repo's HEAD commit (`git show <commit>:<file>`; refuses a
+dirty repo) and records `source`, `commit` and `date` in `druid/vendor/report_step2/VENDORED`.
+Both update scripts run `git --no-optional-locks status`, so the source repo's `.git/index` is not
+rewritten. After re-vendoring run `pytest tests/test_vendor.py tests/test_report.py`
+(`test_report.py` runs the generated job end to end on a fixture, with an ete3 stub). Env:
+`REPORT_REMOTE_REPO` (`host:path`, git runs over ssh, or a local path), `VENDOR_DEST` (directory
+that gets `report_step2/`). The script needs `ete3` (not standard-library only; `druid report`
+checks it).
+
 ## Nextflow caveat (phylohpc projects)
 
 Only relevant to an adopted phylohpc project that still has Nextflow runs. In phylohpc,
@@ -509,7 +538,8 @@ python -m pytest tests -q -p no:cacheprovider      # Python 3.9 compatible; sing
 
 Notable: `tests/test_write_boundary.py` (the write lint and the config refusals),
 `tests/test_paths.py` (project discovery, the gate), `tests/test_project.py` (`init` / `adopt`),
-`tests/test_doctor.py`, `tests/test_vendor.py` (the vendored treeview).
+`tests/test_doctor.py`, `tests/test_vendor.py` (the vendored treeview and report_step2),
+`tests/test_report.py` (`druid report`: the sbatch, the refusals, `-f` views, the job end to end).
 
 ## Layout
 
@@ -521,10 +551,12 @@ druid/                    python package
   paths.py                project discovery + the write gate
   project.py              init / adopt
   doctor.py               druid doctor
+  report.py               druid report (the step-2 HTML report as one SLURM job)
   stages/*.sh             the 8 stage scripts (search cluster align tree possvm_prev generax gxsup possvm)
   helpers/                vendored phylohpc helpers (og_origin, report_status, possvm_postprocess,
                           reroot_to_generax, remove_gaponly, drop_small_hgs); helpers/VENDORED has the source commit
   vendor/treeview/        the embedded tree viewer (update_treeview.sh)
+  vendor/report_step2/    phylohpc's step-2 HTML report script, run by druid report (update_report.sh)
   data/                   shipped: species trees, species_info.tsv, Mmus_gene_names.csv, families_library.csv
   templates/druid.yaml    what `druid init` writes
 submodules/phylogeny      git submodule (zolotarovgl/phylogeny, carries possvm-orthology): main.py hmmsearch / phylogeny / generax

@@ -19,6 +19,17 @@ Grygoriy wants the report back for druid projects.
   95 MB (`reports/trace.step2.txt`).
 - Its CLI: `--results_dir --possvm_dir --possvm_prev_dir --search_dir --cluster_dir --family_info
   --species_tree --species_images --species_info --refnames --refsps --align_dir --output`.
+- **Correction (26/11/2026):** the script is NOT standard-library only. It needs `ete3` for the
+  species tree and every gene tree (`report_step2.py:796`, `:925-928`, `:1014`); each import
+  catches the `ImportError`, prints an error and carries on, so without ete3 the job writes a
+  report with 0 trees and exits 0. druid refuses unless `python3 -c 'import ete3'` succeeds with
+  `PYTHONNOUSERSITE=1` (as the job runs it), and the job repeats that import before the script.
+- **Correction (26/11/2026):** `-f <class>.<family>` (e.g. `tfs.T-box`) is not narrowed by the
+  filtered family table alone: `load_family_info` maps the class to itself (`:77-84`) and a file is
+  kept when its class prefix is in that map (`:101-104`, `:11263-11264`), so every `tfs.*` tree
+  stayed. druid passes `--possvm_dir`, `--possvm_prev_dir`, `--search_dir` and `--cluster_dir` as
+  symlink views in the run dir (`view/<dir>/`) holding only that family's files; `align/` is read
+  per kept tree id and needs none. Whole-project and class-level (`-f tfs`) runs are unchanged.
 
 ## Design
 

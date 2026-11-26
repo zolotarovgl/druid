@@ -4650,8 +4650,21 @@ def test_results_header_shows_report_age(cli):
     _run(go())
 
 
+def _report_ready(monkeypatch):
+    """The report's inputs exist and its python3 imports ete3 (the host's need not)."""
+    p = paths.project_root() / "data/species_info.tsv"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("Hsap\tHomo sapiens\tChordata\n")
+    monkeypatch.setattr(tui.report, "_ete3_error", lambda: None)
+
+
+def _report_runs():
+    return sorted(paths.project_root().glob("runs/*_report"))
+
+
 def test_results_report_key_confirms(cli, monkeypatch):
     msgs = []
+    _report_ready(monkeypatch)
 
     async def go():
         app = _rtab_app()
@@ -4667,22 +4680,49 @@ def test_results_report_key_confirms(cli, monkeypatch):
             await pilot.press("n")
             await pilot.pause()
             assert app.screen is app.screen_stack[0] and not calls_txt().exists()
+            assert not _report_runs()                      # nothing written before y
             await pilot.press("W")
             await pilot.pause()
             await pilot.press("escape")
             await pilot.pause()
-            assert not calls_txt().exists()
+            assert not calls_txt().exists() and not _report_runs()
             await pilot.press("W")
             await pilot.pause()
             await pilot.press("y")
+            await app.workers.wait_for_complete()
             await pilot.pause()
             assert calls_txt().read_text().count("--parsable") == 1
-            assert any("12345" in m for m in msgs)
+            [run] = _report_runs()
+            assert any("12345" in m and str(run / "logs") in m for m in msgs)
+    _run(go())
+
+
+def test_results_report_write_error_shown_not_crashed(cli, monkeypatch):
+    msgs = []
+    _report_ready(monkeypatch)
+
+    def boom(*a, **k):
+        raise OSError("No space left on device")
+    monkeypatch.setattr(tui.report, "write", boom)
+
+    async def go():
+        app = _rtab_app()
+        monkeypatch.setattr(app, "notify", lambda m, **k: msgs.append(str(m)))
+        async with app.run_test() as pilot:
+            await _to_results_tab(app, pilot)
+            await pilot.press("W")
+            await pilot.pause()
+            await pilot.press("y")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "ERROR: No space left on device" in msgs
+            assert not calls_txt().exists() and app.is_running
     _run(go())
 
 
 def test_results_report_key_error_shown_nothing_submitted(cli, monkeypatch):
     msgs = []
+    _report_ready(monkeypatch)
     raw = paths.read_raw()
     raw["job_prefix"] = None
 

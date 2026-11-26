@@ -508,22 +508,31 @@ def _missing_files(stage: str, cfg: "core.Config | None") -> list[str]:
     return out
 
 
+ENV_HINT = ("       run 'conda activate phylo' and 'module load OpenMPI' before submitting;\n"
+            "       the tools and packages are listed in environment.yml; 'druid doctor' checks them.")
+
+
+def python_import_error(python: str, modules: str) -> str | None:
+    """Why `python` on PATH cannot import `modules` ("ete3, Bio, yaml") under the jobs' environment
+    (PYTHONNOUSERSITE=1: a user-site package does not count), or None when it can."""
+    py = shutil.which(python)
+    if py is None:
+        return f"{python}: not on PATH"
+    r = subprocess.run([py, "-c", f"import {modules}"], capture_output=True, text=True,
+                       env={**os.environ, "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+    if r.returncode == 0:
+        return None
+    return (f"{py} (PYTHONNOUSERSITE=1) cannot import {modules}:\n"
+            f"       {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else 'exit ' + str(r.returncode)}")
+
+
 def preflight(stage: str, cfg: "core.Config | None" = None) -> str | None:
     lost = [t for t in TOOLS[stage] if shutil.which(t) is None]
     files = _missing_files(stage, cfg)
-    hint = ("       run 'conda activate phylo' and 'module load OpenMPI' before submitting;\n"
-            "       the tools and packages are listed in environment.yml; 'druid doctor' checks them.")
+    hint = ENV_HINT
     py_err = None
     if stage != "gxsup":  # same `python` + PYTHONNOUSERSITE=1 as the stage scripts
-        py = shutil.which("python")
-        if py is None:
-            py_err = "python: not on PATH"
-        else:
-            r = subprocess.run([py, "-c", "import ete3, Bio, yaml"], capture_output=True, text=True,
-                               env={**os.environ, "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"})
-            if r.returncode != 0:
-                py_err = (f"{py} (PYTHONNOUSERSITE=1) cannot import ete3, Bio, yaml:\n"
-                          f"       {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else 'exit ' + str(r.returncode)}")
+        py_err = python_import_error("python", "ete3, Bio, yaml")
     if not (lost or py_err):
         return f"ERROR: not found: {' '.join(files)}" if files else None
     msg = "ERROR:"

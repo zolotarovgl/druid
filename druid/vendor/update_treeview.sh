@@ -21,7 +21,7 @@ _git() {
 }
 
 # Untracked files are not in the commit and cannot end up in the copy, so they do not block.
-dirty="$(_git status --porcelain --untracked-files=no)"
+dirty="$(_git --no-optional-locks status --porcelain --untracked-files=no)"   # no .git/index rewrite
 if [[ -n "$dirty" ]]; then
     echo "treeview has uncommitted changes; commit them first:" >&2
     echo "$dirty" >&2

@@ -93,3 +93,23 @@ def test_update_report_script_copies_and_refuses_dirty(tmp_path):
     assert r.returncode == 1 and "uncommitted" in r.stderr
     assert (dest / "report_step2/report_step2.py").read_text() == "X = 1\n"   # nothing copied
     assert (dest / "report_step2/VENDORED").read_text() == vendored
+
+
+def test_update_scripts_leave_the_source_index_alone(tmp_path):
+    """The source repos are read-only to druid: a plain `git status` refreshes a stale stat cache
+    and rewrites .git/index; both update scripts pass --no-optional-locks."""
+    src = _src_repo(tmp_path)
+    (src / "workflow").mkdir()
+    (src / "workflow/report_step2.py").write_text("X = 1\n")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+               GIT_COMMITTER_EMAIL="t@t")
+    for cmd in (["git", "add", "-A"], ["git", "commit", "-qm", "y"]):
+        subprocess.run(cmd, cwd=src, check=True, env=env)
+    for script, var in ((SCRIPT, "TREEVIEW_REMOTE_REPO"), (REPORT_SCRIPT, "REPORT_REMOTE_REPO")):
+        for f in ("treeview/model.py", "workflow/report_step2.py"):
+            os.utime(src / f, (1577836800, 1577836800))             # same bytes, stale stat info
+        index = (src / ".git/index").read_bytes()
+        env = dict(os.environ, **{var: str(src)}, VENDOR_DEST=str(tmp_path / "vendor"))
+        r = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        assert (src / ".git/index").read_bytes() == index, script.name
