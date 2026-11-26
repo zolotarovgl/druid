@@ -4,6 +4,7 @@ from __future__ import annotations
 import collections
 import math
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static, TextArea
 from textual.worker import get_current_worker
 
-from druid import core, history, model, paths, setup_state, step1run
+from druid import core, history, model, paths, report, setup_state, step1run
 from druid.common import fmt_mem, fmt_time
 from treeview import widget as tv_widget       # vendored: core puts druid/vendor on sys.path
 from treeview.keys import KeysScreen
@@ -523,6 +524,7 @@ KEYS = {
                           "family → its HGs")]),
         ("Group & sort", [("c", "group by category"), ("f", "group by family"),
                           ("s", "sort by the column"), ("h", "hide rows with 0 in the column")]),
+        ("Report", [("W", "submit druid report: report_step2.html of the whole project (y confirms)")]),
         ("Other", [("R", "re-read"), ("?", "this list"), (":q!", "quit druid")]),
         ("Notes", [("⚠", "sup 0 = OGs with support 0 (GeneRax bug case)")])]),
     "hgs": ("HG view", [
@@ -619,6 +621,7 @@ class PhyloApp(App):
         Binding("p", "toggle_source", "possvm/prev"),
         Binding("slash", "member_filter", "filter members"),
         Binding("H", "counts", "counts heatmap"),
+        Binding("W", "report", "report"),
         Binding("R", "refresh", "refresh"),
         Binding("question_mark", "keys", "keys"),
     ]   # q = esc and :q! quit: on_event, every screen; plain q is rewritten to escape there, so a
@@ -1259,7 +1262,21 @@ class PhyloApp(App):
         t.border_title = " · ".join(
             ["Results"] + ([cache["source"]] if cache else [])
             + ([f"only {self.rt_hide} > 0"] if self.rt_hide else []))
+        t.border_subtitle = self._report_header()
         self._rt_footer()
+
+    def _report_header(self) -> str:
+        """`report: <path relative to the project> (<age> ago)`, or `report: none`."""
+        out = report.output_path(self.cfg)
+        try:
+            age = max(0, int((time.time() - out.stat().st_mtime) // 60))
+        except OSError:
+            return "report: none"
+        try:
+            shown = out.relative_to(paths.project_root())
+        except ValueError:
+            shown = out
+        return f"report: {shown} ({fmt_time(age)} ago)"
 
     def _rt_footer(self) -> None:
         if self.view != "overview" or self.tab != "results":
@@ -1458,6 +1475,9 @@ class PhyloApp(App):
             return self.view in ("hgs", "results")
         if action in ("open_results", "cycle_filter"):
             return self.view in ("overview", "hgs")
+        if action == "report":                   # Results tab only, never from inside a dialog
+            return (self.view == "overview" and self.tab == "results"
+                    and self.screen is self.screen_stack[0])
         if action in ("toggle_source", "counts"):
             return self.view == "results" or (self.view == "overview" and self.tab == "results")
         if action == "member_filter":
@@ -1711,6 +1731,27 @@ class PhyloApp(App):
         groups = resource_groups(self.cfg, self.stage, rows, self.nseq)
         self.push_screen(ResubmitScreen(self.cfg, self.stage, groups, self.raw),
                          lambda _jids: self.load_bg())
+
+    def action_report(self) -> None:
+        """W (Results tab): `druid report` for the whole project; the sbatch runs only after y."""
+        if not self.check_action("report", ()):
+            return
+        try:
+            out = report.output_path(self.cfg)
+            script = report.write(self.cfg, self.raw)     # refusals raise before anything is written
+        except (core.ConfigError, report.ReportError) as e:
+            self.notify(f"ERROR: {e}", severity="error", markup=False)
+            return
+        self.push_screen(ConfirmScreen(f"Submit druid report?\n\noutput: {out}\nscript: {script}"),
+                         lambda ok: self._submit_report(script, out) if ok else None)
+
+    def _submit_report(self, script: Path, out: Path) -> None:
+        try:
+            jid = report.submit(script)
+        except report.ReportError as e:
+            self.notify(f"ERROR: {e}", severity="error", markup=False)
+            return
+        self.notify(f"report submitted: job {jid} → {out}", markup=False)
 
     def action_run_step1(self) -> None:
         """S: step 1 (search → cluster) in the run box; the Jobs tab reloads when it closes."""
@@ -2870,6 +2911,26 @@ class RunScreen(ModalScreen):
             self.notify("still working — wait", severity="warning")
             return
         self.dismiss(self.submitted)
+
+
+class ConfirmScreen(ModalScreen):
+    """A yes / no box: y dismisses True, n / esc False."""
+    BINDINGS = [Binding("y", "answer(True)", "yes"), Binding("n", "answer(False)", "no"),
+                Binding("escape", "answer(False)", "no")]
+    CSS = ("ConfirmScreen { align: center middle; } "
+           "#confirm { width: auto; max-width: 95%; height: auto; border: round $primary; "
+           "background: $surface; padding: 1 2; }")
+
+    def __init__(self, text: str):
+        super().__init__()
+        self.text = text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm"):
+            yield Static(self.text + "\n\ny submit · n / esc cancel", markup=False)
+
+    def action_answer(self, ok: bool) -> None:
+        self.dismiss(ok)
 
 
 class LogScreen(ModalScreen):

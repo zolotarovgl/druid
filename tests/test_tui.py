@@ -10,7 +10,8 @@ import pytest
 pytest.importorskip("textual")
 
 from druid import core, model, paths, tui  # noqa: E402
-from tests.test_cli import _state, cli  # noqa: E402,F401
+from druid.report import output_path as report_output_path  # noqa: E402
+from tests.test_cli import _state, calls_txt, cli  # noqa: E402,F401
 from tests.test_model import OG_HEAD, POSSVM_HG11, og_csv, write_results  # noqa: E402
 
 SACCT_OOM = ("12345_0|COMPLETED|10M|00:01:00|0:0\\n"
@@ -4616,4 +4617,83 @@ def test_counts_search_without_og_cache(cli):
             await pilot.pause()
             assert s.status == "OGs still loading" and app._og_cache is not None
             assert _counts_screen(app) is s
+    _run(go())
+
+
+def _rtab_app():
+    return tui.PhyloApp(_cfg(), refresh_s=3600, raw=paths.read_raw())
+
+
+async def _to_results_tab(app, pilot):
+    app.load_now()
+    await pilot.pause()
+    await pilot.press("tab")
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+
+
+def test_results_header_shows_report_age(cli):
+    cfg = _cfg()
+
+    async def go():
+        app = _rtab_app()
+        async with app.run_test() as pilot:
+            await _to_results_tab(app, pilot)
+            assert "report: none" in app.query_one("#rtab").border_subtitle
+            out = cfg.outdir / "report_step2.html"
+            out.write_text("<html></html>")
+            await pilot.press("R")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            rel = out.relative_to(paths.project_root())
+            assert f"report: {rel} (0m ago)" in app.query_one("#rtab").border_subtitle
+    _run(go())
+
+
+def test_results_report_key_confirms(cli, monkeypatch):
+    msgs = []
+
+    async def go():
+        app = _rtab_app()
+        monkeypatch.setattr(app, "notify", lambda m, **k: msgs.append(str(m)))
+        async with app.run_test() as pilot:
+            await _to_results_tab(app, pilot)
+            await pilot.press("W")
+            await pilot.press("W")                         # a second press: still one dialog
+            await pilot.pause()
+            assert isinstance(app.screen, tui.ConfirmScreen)
+            assert str(report_output_path(app.cfg)) in app.screen.text
+            assert len(app.screen_stack) == 2
+            await pilot.press("n")
+            await pilot.pause()
+            assert app.screen is app.screen_stack[0] and not calls_txt().exists()
+            await pilot.press("W")
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not calls_txt().exists()
+            await pilot.press("W")
+            await pilot.pause()
+            await pilot.press("y")
+            await pilot.pause()
+            assert calls_txt().read_text().count("--parsable") == 1
+            assert any("12345" in m for m in msgs)
+    _run(go())
+
+
+def test_results_report_key_error_shown_nothing_submitted(cli, monkeypatch):
+    msgs = []
+    raw = paths.read_raw()
+    raw["job_prefix"] = None
+
+    async def go():
+        app = tui.PhyloApp(core.config_from_raw(raw), refresh_s=3600, raw=raw)
+        monkeypatch.setattr(app, "notify", lambda m, **k: msgs.append(str(m)))
+        async with app.run_test() as pilot:
+            await _to_results_tab(app, pilot)
+            await pilot.press("W")
+            await pilot.pause()
+            assert not isinstance(app.screen, tui.ConfirmScreen)
+            assert any(m.startswith("ERROR: ") for m in msgs)
+            assert not calls_txt().exists()
     _run(go())

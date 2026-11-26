@@ -400,6 +400,10 @@ the species and their counts, absent phyla last; the universe is the tips of
 → `possvm_prev/` (raw IQ-TREE) → `auto`; a forced source lists only the HGs that have it. The Results tab's counts cover the expected HGs only; HGs below `min_seqs` / `min_distinct` are listed in the window as `small`. `esc` goes back. Support `0.0 ⚠` is the GeneRax bug
 case: check `possvm_prev`. Files are read in the background.
 
+`W` (Results tab, 26/11/2026) submits `druid report` for the whole project after a `y` / `n` box naming the output
+(`<outdir>/report_step2.html`; default memory and time; `ERROR: …` when the report refuses, nothing is
+submitted); the tab's bottom border shows `report: <path> (<age> ago)` or `report: none`.
+
 `t` (in a group's Results) opens the gene tree of the highlighted HG in the embedded
 treeview (vendored, below), from the HG's own source (`possvm` or `possvm_prev`; the border title says
 which; a cluster-only HG has no tree): on the HGs pane the whole tree; on the OGs pane the OG's MRCA with its members bold
